@@ -103,6 +103,14 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 - **flex/grid item 的 `min-width: auto`** 會撐破容器，`minmax(0,1fr)` 只約束軌道管不到 item。
 - **Tailwind 掃不到執行期拼出來的 class**（`sm:${變數}`），完整名稱要寫死在原始碼裡。
 - **改檔案前先讀** — prettier 會重排 template，憑印象做字串替換常常匹配不到。
+- **SSR 內部的 `$fetch` 一樣會經過 server middleware，但沒有來源 IP。**
+  限流因此把全站訪客的 SSR 請求算進同一個 `'unknown'` 桶子 —— 一次首頁渲染
+  4 支內部 API，額度 100／分鐘等於全站每分鐘 25 次瀏覽就爆掉，而且**爆掉的樣子是
+  頁面照常回 200、資料全部消失**。`30.rate-limit.ts` 認不出用戶端就直接放行，
+  `tests/e2e/rate-limit.test.ts` 守著這個行為。
+- **`setup({ nuxtConfig: { runtimeConfig } })` 會被環境變數蓋掉。**
+  本機 `.env` 有值、CI 沒有，就會出現「本機全過、CI 掛」而且完全重現不了的狀況。
+  要在測試裡強制某個設定，用 `process.env.NUXT_XXX` 而不是 `nuxtConfig`。
 - **Nuxt plugin 裡不能只掛 `window.addEventListener('load')`** — plugin 在 hydration
   階段執行，那時 `load` 常常已經發生過了，監聽器永遠不會被呼叫。要先檢查
   `document.readyState`。`app/plugins/pwa.client.ts` 就是因為這個而安靜地沒註冊 SW。

@@ -48,8 +48,17 @@ await setup({
     runtimeConfig: {
       sessionPassword: 'e2e-test-session-password-with-enough-length',
       // 刻意不給 firebase / gemini 設定：走記憶體資料與開發模式登入
-      // 放寬限制，避免測試之間互相觸發限流
-      rateLimitMax: 80,
+      /*
+       * 放寬限制，避免測試之間互相觸發限流。
+       *
+       * ⚠️ 環境變數的優先權比這裡高 —— 本機 `.env` 若有 `NUXT_RATE_LIMIT_MAX`
+       * 就會蓋掉這個值，所以本機與 CI 跑起來的額度可能不一樣。
+       * 「本機過、CI 掛」的時候記得先看這個。
+       *
+       * 整套測試目前用掉約 65 次用戶端請求。頁面渲染不算在內
+       * （SSR 的內部呼叫已被 `30.rate-limit.ts` 排除）。
+       */
+      rateLimitMax: 200,
       rateLimitWindowMs: 60_000,
       /*
        * 假的 VAPID 金鑰。
@@ -79,6 +88,16 @@ async function login() {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email: 'admin@example.com', password: DEV_PASSWORD }),
   })
+
+  /*
+   * 登入失敗就當場講清楚。
+   *
+   * 少了這兩行，登入一旦失敗（例如被限流回 429），helper 會安靜地回傳空字串
+   * 的 cookie，錯誤要到好幾行之後才以「/admin 回了 302」的樣子浮現 ——
+   * 看起來像後台權限壞掉，跟真正的原因完全對不上。這個坑踩過一次。
+   */
+  expect(response.status, '測試用的登入失敗了').toBe(200)
+  expect(response.headers.getSetCookie().length, '登入成功卻沒有拿到 cookie').toBeGreaterThan(0)
 
   const setCookies = response.headers.getSetCookie()
   const cookie = setCookies.map((value) => value.split(';')[0]).join('; ')
