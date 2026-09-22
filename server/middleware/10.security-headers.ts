@@ -41,6 +41,16 @@ function buildCsp(): string {
     'script-src': ["'self'", "'unsafe-inline'"],
     // 前端只允許連回自己（也就是只能打 BFF），不能直接連外部 API
     'connect-src': ["'self'"],
+    /*
+     * Service Worker 只能從本站載入。
+     *
+     * 不寫這一條也會退回 `default-src 'self'`，結果相同 —— 明確列出是因為
+     * SW 的權限極大（能攔截本站所有請求、能收推播），它從哪裡來這件事
+     * 應該攤在這份清單上，而不是靠讀者去推導 fallback 鏈。
+     */
+    'worker-src': ["'self'"],
+    // manifest 同理：它決定了安裝到桌面後的名稱與圖示
+    'manifest-src': ["'self'"],
   }
 
   if (!isProduction) {

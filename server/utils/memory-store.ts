@@ -2,6 +2,7 @@ import type { Player } from '../../shared/schemas/player'
 import type { Game } from '../../shared/schemas/game'
 import type { Announcement } from '../../shared/schemas/announcement'
 import type { SiteSettings } from '../../shared/schemas/settings'
+import type { PushSubscriptionRecord } from '../../shared/schemas/push'
 import { DEFAULT_SITE_SETTINGS } from '../../shared/schemas/settings'
 import { toDateKey } from '../../shared/schemas/game'
 
@@ -27,6 +28,8 @@ export interface MemoryStore {
   games: Map<string, Game>
   announcements: Map<string, Announcement>
   settings: SiteSettings
+  /** 推播訂閱。key 是 endpoint 的雜湊（見 `server/repositories/push-subscriptions.ts`）。 */
+  pushSubscriptions: Map<string, PushSubscriptionRecord>
 }
 
 let store: MemoryStore | null = null
@@ -403,5 +406,7 @@ function createSeedStore(): MemoryStore {
     games: new Map(games.map((g) => [g.id, g])),
     announcements: new Map(announcements.map((a) => [a.id, a])),
     settings,
+    // 推播訂閱沒有種子資料：它綁的是真實裝置，假資料送不出去也沒有意義
+    pushSubscriptions: new Map(),
   }
 }

@@ -308,10 +308,22 @@ useHead({
         </ul>
       </div>
 
-      <div
-        class="container-content mt-10 border-t border-white/15 pt-6 text-center text-fluid-sm text-white/60"
-      >
-        © {{ new Date().getFullYear() }} {{ teamName }}
+      <div class="container-content mt-10 border-t border-white/15 pt-6">
+        <!--
+          推播訂閱放在頁尾，而且只在瀏覽器支援時才會出現。
+          `<ClientOnly>` 是必要的：這一塊的內容取決於通知權限與既有訂閱，
+          那是每台裝置各自的狀態。公開頁面會被 CDN 快取送給所有人，
+          任何「因裝置而異」的東西都不能進 SSR 輸出。
+        -->
+        <ClientOnly>
+          <div class="mb-6 flex justify-center">
+            <CommonPushToggle />
+          </div>
+        </ClientOnly>
+
+        <p class="text-center text-fluid-sm text-white/60">
+          © {{ new Date().getFullYear() }} {{ teamName }}
+        </p>
       </div>
     </footer>
   </div>

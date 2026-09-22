@@ -186,6 +186,56 @@ NUXT_GEMINI_MODEL=gemini-2.5-flash    # 換模型不需要改程式碼
 
 ---
 
+## PWA 與推播通知
+
+網站可以「加入主畫面」當成 App 開啟，並在有重要消息時推播通知。
+
+### 離線可看
+
+Service Worker（`public/sw.js`）是手寫的，沒有用 Workbox —— 策略只有三條：
+
+```
+/_nuxt/**        cache-first    檔名含內容雜湊，改了就是新網址
+導覽（HTML）      network-first  先要新的，失敗才用快取
+/api/**、/admin  不處理         資料要即時，個人狀態不進快取
+```
+
+看過的頁面離線時還能開；沒看過的頁面會顯示一個由 SW 自己組出來的離線提示頁。
+
+### 推播用標準 Web Push，不是 FCM
+
+FCM 需要在**瀏覽器**載入 Firebase SDK 才拿得到 token，那會直接推翻這個專案
+最核心的一條設計（前端完全不載入 Firebase SDK）。標準 Web Push 用瀏覽器原生的
+`PushManager`，前端一行 SDK 都不需要，金鑰只存在 BFF，CSP 也完全不用放寬。
+
+啟用方式：
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+把公鑰填進 `NUXT_PUBLIC_VAPID_PUBLIC_KEY`、私鑰填進 `NUXT_VAPID_PRIVATE_KEY`、
+聯絡信箱填進 `NUXT_VAPID_SUBJECT`。三項缺任何一項，推播功能會整個關閉
+（前台的訂閱按鈕與後台的推播頁面都不會出現），網站其餘功能不受影響。
+
+部署到 App Hosting 的步驟寫在 `apphosting.yaml` 裡那段被註解掉的設定上方。
+
+> ⚠️ 換掉私鑰等於讓所有既有訂閱失效，每個人都要重新開啟一次通知。
+
+### 為什麼推播是手動按的
+
+後台存檔的次數遠多於「真的要通知大家」的次數 —— 改錯字、調順序、補圖都會
+觸發存檔。發布公告就自動推播的下場是大家被洗版、把通知關掉，之後真正重要的
+事情反而傳不出去。所以 `/admin/push` 可以從公告帶入內容，但還是要按發送。
+
+### iPhone 要先加入主畫面
+
+iOS 不允許一般的 Safari 分頁註冊推播，必須先用分享選單把網站「加入主畫面」，
+從主畫面的圖示打開之後才能開啟通知。這是系統限制，沒有程式可以繞過，也沒有
+API 可以自動引導 —— 前台頁尾會直接把這句話寫給 iPhone 使用者看。
+
+Android 與桌面 Chrome 沒有這個限制，在分頁裡就能訂閱。
+
 ## 版面與配色
 
 視覺上參考職業球團官網的作法：深色實心導覽列（左上角是隊徽座）、滿版主視覺，
@@ -251,6 +301,7 @@ NUXT_GEMINI_MODEL=gemini-2.5-flash    # 換模型不需要改程式碼
 | `/admin/games/[id]`    | 四個分頁：基本資料 / 出席統計 / 打線 / 計分板與結果 |
 | `/admin/players`       | 球員名單，列表與表單並排                            |
 | `/admin/announcements` | 公告，支援草稿與置頂                                |
+| `/admin/push`          | 推播通知：看訂閱數、從公告帶入內容、手動發送        |
 | `/admin/settings`      | 隊名、隊徽、主視覺、簡介、社群連結                  |
 
 ### 比賽編輯是自動儲存的

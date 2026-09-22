@@ -83,6 +83,40 @@ env:
     availability:
       - RUNTIME
 
+  # ── 推播（Web Push / VAPID）─────────────────────────────────────
+  #
+  # ⚠️ 這一段**刻意先註解掉**。`secret:` 指向一個還不存在的機密會讓整個部署
+  # 失敗，而推播沒設定時本來就會自動關閉、不影響網站其他功能 ——
+  # 所以預設是關的，等金鑰準備好再打開。
+  #
+  # 啟用步驟：
+  #   1. npx web-push generate-vapid-keys
+  #   2. echo -n "<私鑰>" | firebase apphosting:secrets:set vapid-private-key --data-file -
+  #      （CLI 問「要不要加進 apphosting.yaml」時選 No）
+  #   3. firebase apphosting:secrets:grantaccess vapid-private-key \
+  #        --project hg-baseball --backend baseball-official --location asia-east1
+  #   4. 把下面三項取消註解，公鑰填進 NUXT_PUBLIC_VAPID_PUBLIC_KEY，
+  #      NUXT_VAPID_SUBJECT 改成自己的聯絡信箱
+  #
+  # 公鑰要進前端 bundle，所以 BUILD 階段就得拿得到。
+  # 換掉私鑰等於讓所有既有訂閱失效，每個人都要重新開啟一次通知。
+  #
+  # - variable: NUXT_PUBLIC_VAPID_PUBLIC_KEY
+  #   value: '<公鑰>'
+  #   availability:
+  #     - BUILD
+  #     - RUNTIME
+  #
+  # - variable: NUXT_VAPID_SUBJECT
+  #   value: 'mailto:<你的信箱>'
+  #   availability:
+  #     - RUNTIME
+  #
+  # - variable: NUXT_VAPID_PRIVATE_KEY
+  #   secret: vapid-private-key
+  #   availability:
+  #     - RUNTIME
+
   # ── 執行環境 ────────────────────────────────────────────────────
   - variable: LOG_LEVEL
     value: info

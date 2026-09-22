@@ -26,6 +26,17 @@ const PUBLIC_CACHE = 'public, max-age=0, s-maxage=60, stale-while-revalidate=600
 /** 後台與認證相關端點：任何共用快取都不准碰。 */
 const PRIVATE_CACHE = 'private, no-store'
 
+/**
+ * Service Worker 本體。
+ *
+ * **絕對不能讓它被長時間快取。** SW 是所有更新的源頭，它自己被 CDN 或瀏覽器
+ * 抓住不放，使用者的裝置就會永遠停在舊版，而且沒有任何辦法從伺服器端補救。
+ */
+const NO_CACHE = 'public, max-age=0, must-revalidate'
+
+/** 圖示與 manifest：不含內容雜湊，所以留一段可接受的時間就好。 */
+const ICON_CACHE = 'public, max-age=3600, s-maxage=86400'
+
 export default defineNuxtConfig({
   // 鎖定 Nitro 的行為基準日，升級 Nuxt 時不會被預設值變動偷襲
   compatibilityDate: '2025-07-15',
@@ -103,6 +114,21 @@ export default defineNuxtConfig({
       timeoutMs: 60_000,
     },
 
+    // --- 推播（Web Push / VAPID）---
+    /**
+     * VAPID 是「我們是誰」的簽章，推送服務用它驗證發送方。
+     * 公鑰在 `public.vapidPublicKey`（瀏覽器訂閱時要用），私鑰只留在這裡。
+     *
+     * 產生方式：`npx web-push generate-vapid-keys`
+     * **換掉私鑰等於讓所有既有訂閱失效**，所有人都要重新訂閱。
+     */
+    vapid: {
+      /** base64url 私鑰。 */
+      privateKey: '',
+      /** 聯絡方式，推送服務出問題時會用它找我們。格式是 `mailto:` 或 https 網址。 */
+      subject: '',
+    },
+
     // --- 外部呼叫共用 ---
     /** 呼叫外部服務（Gemini、Identity Toolkit）的預設逾時毫秒數。 */
     upstreamTimeoutMs: 10_000,
@@ -137,6 +163,12 @@ export default defineNuxtConfig({
       loginPath: '/admin/login',
       /** 網站正式網址，供 SEO 與絕對連結使用。 */
       siteUrl: 'http://localhost:3000',
+      /**
+       * VAPID 公鑰。**這個值本來就該公開** —— 瀏覽器呼叫
+       * `pushManager.subscribe()` 時必須帶上它。留空代表推播功能關閉，
+       * 前端的訂閱按鈕會整個不顯示。
+       */
+      vapidPublicKey: '',
     },
   },
 
@@ -210,6 +242,14 @@ export default defineNuxtConfig({
       '/api/auth/**': { headers: { 'cache-control': PRIVATE_CACHE } },
       '/api/admin/**': { headers: { 'cache-control': PRIVATE_CACHE } },
 
+      // PWA：SW 永遠重新驗證，圖示與 manifest 可以放久一點
+      '/sw.js': { headers: { 'cache-control': NO_CACHE } },
+      '/manifest.webmanifest': { headers: { 'cache-control': ICON_CACHE } },
+      '/icon-192.png': { headers: { 'cache-control': ICON_CACHE } },
+      '/icon-512.png': { headers: { 'cache-control': ICON_CACHE } },
+      '/apple-touch-icon.png': { headers: { 'cache-control': ICON_CACHE } },
+      '/favicon.svg': { headers: { 'cache-control': ICON_CACHE } },
+
       // 公開頁面
       '/': { headers: { 'cache-control': PUBLIC_CACHE } },
       '/schedule': { headers: { 'cache-control': PUBLIC_CACHE } },
@@ -252,8 +292,22 @@ export default defineNuxtConfig({
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
+        /*
+         * 瀏覽器介面的顏色。固定用墨藍，不隨深淺色模式改變 ——
+         * 導覽列與主視覺本來就永遠是深色的，跟著切反而會接不起來。
+         */
+        { name: 'theme-color', content: '#071221' },
+        // iOS 加到主畫面後以獨立視窗開啟（不顯示 Safari 的網址列）
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+        { name: 'apple-mobile-web-app-title', content: 'MERCS' },
       ],
-      link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+      link: [
+        { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+        { rel: 'manifest', href: '/manifest.webmanifest' },
+        // iOS 不看 manifest 的 icons，安裝到主畫面時只認這個
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+      ],
     },
   },
 

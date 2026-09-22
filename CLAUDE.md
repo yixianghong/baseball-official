@@ -103,9 +103,39 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 - **flex/grid item 的 `min-width: auto`** 會撐破容器，`minmax(0,1fr)` 只約束軌道管不到 item。
 - **Tailwind 掃不到執行期拼出來的 class**（`sm:${變數}`），完整名稱要寫死在原始碼裡。
 - **改檔案前先讀** — prettier 會重排 template，憑印象做字串替換常常匹配不到。
+- **Nuxt plugin 裡不能只掛 `window.addEventListener('load')`** — plugin 在 hydration
+  階段執行，那時 `load` 常常已經發生過了，監聽器永遠不會被呼叫。要先檢查
+  `document.readyState`。`app/plugins/pwa.client.ts` 就是因為這個而安靜地沒註冊 SW。
 - **公開頁面的 SSR 輸出不能因人而異** — 它們會被 CDN 快取送給所有訪客。加 cookie、
   依 cookie 改渲染、把登入狀態畫進 HTML，都會默默破壞快取或把狀態送給別人，
   而且畫面上完全看不出來。詳見「部署」章節。
+
+### PWA 與推播
+
+`public/sw.js` 是**手寫的** service worker（沒有 Workbox），同時負責離線快取與推播。
+註冊在 `app/plugins/pwa.client.ts`，開發模式不註冊 —— 要驗證請用 `pnpm build && pnpm start`。
+
+推播走**標準 Web Push（VAPID）而不是 FCM**：FCM 要在瀏覽器載入 Firebase SDK，
+那會推翻「前端完全不載入 Firebase SDK」這條設計。發送用 `web-push` 套件
+（ECDH + HKDF + AES-GCM 不該自己實作），金鑰只在 `server/utils/push.ts`。
+
+三個容易踩的點：
+
+- **`/api/push/subscribe` 是全站唯一沒有 `requireUser()` 的寫入端點**（訂閱的是
+  一般訪客）。它的防線是 `isKnownPushService()` —— 少了這條，這支端點就變成
+  「任何人都能叫伺服器去打任意網址」（SSRF）。
+- **通知的 `url` 只能是站內路徑，而且要擋掉 `//`**。`//evil.test` 以 `/` 開頭，
+  但 `new URL()` 會把它解析成外部網站，結果是一則外觀來自球隊的釣魚通知。
+- **VAPID 三項要嘛全設、要嘛全不設**。只設一半的症狀是前台訂閱按鈕整個消失，
+  看起來像功能沒做。`00.env-validate.ts` 會對這個狀況發警告。
+- **換了 VAPID 公鑰之後，舊訂閱會擋住新的訂閱**。瀏覽器不允許同一個 registration
+  存在兩個不同 `applicationServerKey` 的訂閱，直接 `subscribe()` 會拋
+  `InvalidStateError`。症狀是「按了開啟通知沒反應」，而且**只發生在曾經訂閱過的
+  裝置上**，乾淨的瀏覽器測不出來。`usePushSubscription` 會先比對金鑰、退掉舊的
+  再訂新的（`isSameApplicationServerKey`）。本機與正式環境各用一組金鑰時，
+  同一台電腦切換兩邊就會遇到。
+
+iOS 必須先「加入主畫面」才能訂閱推播，這是系統限制，前台頁尾直接把這件事寫出來。
 
 ## 部署
 

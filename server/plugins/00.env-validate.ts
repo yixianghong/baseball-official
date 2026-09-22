@@ -89,6 +89,27 @@ export default defineNitroPlugin(() => {
       logger.warn('未設定 NUXT_GEMINI_API_KEY，後台的圖片辨識功能將無法使用')
     }
 
+    /*
+     * 推播同理：三項要嘛全有、要嘛全無。
+     *
+     * 「只設定了一半」特別值得警告 —— 那通常是漏貼一個環境變數，而症狀是
+     * 前台的訂閱按鈕整個不出現，看起來就像功能沒做，非常難聯想到設定。
+     */
+    const vapidParts = [
+      config.public?.vapidPublicKey,
+      config.vapid?.privateKey,
+      config.vapid?.subject,
+    ]
+    const vapidSet = vapidParts.filter(Boolean).length
+    if (vapidSet === 0) {
+      logger.info('未設定 VAPID 金鑰，推播通知功能關閉')
+    } else if (vapidSet < vapidParts.length) {
+      logger.warn(
+        'VAPID 金鑰只設定了一部分，推播功能會維持關閉。' +
+          '需要 NUXT_PUBLIC_VAPID_PUBLIC_KEY、NUXT_VAPID_PRIVATE_KEY、NUXT_VAPID_SUBJECT 三項齊全。',
+      )
+    }
+
     logger.info('configuration validated')
     return
   }

@@ -1,0 +1,24 @@
+{
+  "id": "/",
+  "name": "HG MERCENARIES",
+  "short_name": "MERCS",
+  "description": "後港傭兵球隊官方網站：近期賽程、比賽結果、球員名單與最新公告。",
+  "lang": "zh-TW",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#071221",
+  "theme_color": "#071221",
+  "categories": ["sports"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "近期賽程", "url": "/schedule" },
+    { "name": "比賽結果", "url": "/results" },
+    { "name": "公告", "url": "/news" }
+  ]
+}

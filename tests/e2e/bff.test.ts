@@ -51,6 +51,20 @@ await setup({
       // 放寬限制，避免測試之間互相觸發限流
       rateLimitMax: 80,
       rateLimitWindowMs: 60_000,
+      /*
+       * 假的 VAPID 金鑰。
+       *
+       * 推播沒設定時訂閱端點會直接回 503，那樣就測不到真正想測的東西 ——
+       * endpoint 的來源驗證（SSRF 防線）。這裡只需要「有設定」這個狀態，
+       * 測試不會真的送出任何推播，所以金鑰是不是有效無關緊要。
+       */
+      vapid: {
+        privateKey: 'e2e-fake-vapid-private-key',
+        subject: 'mailto:e2e@example.com',
+      },
+      public: {
+        vapidPublicKey: 'e2e-fake-vapid-public-key',
+      },
     },
   },
 })
@@ -554,6 +568,136 @@ describe('SSR', () => {
 function renderedMarkup(html: string): string {
   return html.replace(/<script type="application\/json"[\s\S]*?<\/script>/g, '')
 }
+
+describe('PWA', () => {
+  it('manifest 拿得到，而且是正確的 content-type', async () => {
+    const response = await fetch('/manifest.webmanifest')
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('application/manifest+json')
+
+    const manifest = JSON.parse(await response.text())
+    expect(manifest.start_url).toBe('/')
+    // 安裝需要至少一張 192 與一張 512
+    const sizes = manifest.icons.map((icon: { sizes: string }) => icon.sizes)
+    expect(sizes).toContain('192x192')
+    expect(sizes).toContain('512x512')
+    // 沒有 maskable，Android 會把整張圖塞進圓形框裡並自己加白底
+    expect(manifest.icons.some((icon: { purpose: string }) => icon.purpose === 'maskable')).toBe(
+      true,
+    )
+  })
+
+  it('manifest 宣告的圖示真的存在', async () => {
+    for (const path of ['/icon-192.png', '/icon-512.png', '/apple-touch-icon.png']) {
+      const response = await fetch(path)
+      expect(response.status, path).toBe(200)
+      expect(response.headers.get('content-type'), path).toContain('image/png')
+    }
+  })
+
+  /**
+   * SW 被長時間快取是這整套機制唯一無法從伺服器端補救的故障：
+   * 使用者的裝置會永遠停在舊版，而我們沒有任何辦法把它推下去。
+   */
+  it('Service Worker 每次都要重新驗證，絕不長期快取', async () => {
+    const response = await fetch('/sw.js')
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toContain('max-age=0')
+    expect(response.headers.get('cache-control')).toContain('must-revalidate')
+  })
+
+  it('Service Worker 含有推播與離線的處理', async () => {
+    const source = await $fetch<string>('/sw.js')
+
+    expect(source).toContain("addEventListener('push'")
+    expect(source).toContain("addEventListener('notificationclick'")
+    // 訂閱輪替沒處理的話，使用者會從某天開始靜靜地收不到推播
+    expect(source).toContain("addEventListener('pushsubscriptionchange'")
+    expect(source).toContain("addEventListener('fetch'")
+  })
+
+  it('首頁有連上 manifest 與 iOS 的圖示', async () => {
+    const html = await $fetch<string>('/')
+
+    expect(html).toContain('rel="manifest"')
+    expect(html).toContain('/manifest.webmanifest')
+    expect(html).toContain('apple-touch-icon')
+    expect(html).toContain('name="theme-color"')
+  })
+})
+
+describe('推播訂閱', () => {
+  const validEndpoint = 'https://fcm.googleapis.com/fcm/send/e2e-test-endpoint'
+  const validKeys = { p256dh: 'BPtest', auth: 'AUTHtest' }
+
+  it('可以匿名訂閱（訪客不需要登入就能收球隊通知）', async () => {
+    const response = await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ subscription: { endpoint: validEndpoint, keys: validKeys } }),
+    })
+
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.data.subscribed).toBe(true)
+    // 不要把 endpoint 或金鑰回傳出去
+    expect(JSON.stringify(body)).not.toContain('fcm.googleapis.com')
+  })
+
+  /**
+   * 這一條是這支端點最重要的防線。
+   *
+   * 它沒有 `requireUser()`（訂閱的是一般訪客），所以如果不驗證 endpoint 的來源，
+   * 任何人都能叫我們的伺服器去打任意網址 —— 包括雲端環境的中繼資料端點。
+   */
+  it('拒絕不是來自已知推送服務的 endpoint（SSRF 防線）', async () => {
+    const endpoints = [
+      'https://evil.example.com/collect',
+      'https://fcm.googleapis.com.evil.example.com/x',
+      'http://169.254.169.254/latest/meta-data/',
+      'https://evil.example.com/?x=fcm.googleapis.com',
+    ]
+
+    for (const endpoint of endpoints) {
+      const response = await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ subscription: { endpoint, keys: validKeys } }),
+      })
+
+      expect(response.status, endpoint).toBe(400)
+      expect((await response.json()).error.code, endpoint).toBe('VALIDATION_ERROR')
+    }
+  })
+
+  it('退訂是冪等的（沒訂過也回成功）', async () => {
+    const response = await fetch('/api/push/unsubscribe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ endpoint: 'https://fcm.googleapis.com/fcm/send/never-subscribed' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).data.subscribed).toBe(false)
+  })
+
+  it('發送推播需要登入', async () => {
+    const response = await fetch('/api/admin/push/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '未經授權的推播' }),
+    })
+
+    expect(response.status).toBe(401)
+  })
+
+  it('查詢推播狀態需要登入（訂閱數不該外流）', async () => {
+    const response = await fetch('/api/admin/push/status')
+    expect(response.status).toBe(401)
+  })
+})
 
 describe('後台頁面的存取控制', () => {
   it('未登入訪問後台會被導向登入頁', async () => {
