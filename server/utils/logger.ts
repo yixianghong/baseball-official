@@ -13,7 +13,7 @@ import pino, { type Logger } from 'pino'
  * {
  *   "level": "info",
  *   "time": "2026-08-26T10:30:00.000Z",
- *   "service": "frontend-template",
+ *   "service": "baseball-official",
  *   "env": "production",
  *   "requestId": "0f1c...",
  *   "method": "GET",
@@ -79,7 +79,7 @@ export const logger: Logger = pino({
 
   // 每筆 log 都帶上服務識別，多服務共用同一個 log 索引時才分得出來源。
   base: {
-    service: process.env.SERVICE_NAME ?? 'frontend-template',
+    service: process.env.SERVICE_NAME ?? 'baseball-official',
     env: process.env.NODE_ENV ?? 'development',
   },
 
