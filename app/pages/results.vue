@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { MAX_GAME_QUERY_LIMIT } from '#shared/schemas/game'
+import { formatMonth, toMonthKey } from '~/utils/calendar'
 /**
  * 比賽結果。
  *
@@ -30,6 +31,38 @@ watchEffect(() => {
 })
 
 const teamName = computed(() => settings.value?.teamName ?? '')
+
+/*
+ * ── 月曆 ────────────────────────────────────────────────────────
+ *
+ * 場次一多，「由新到舊的一長串卡片」就只剩捲動這個找法。球賽是綁在日期上的
+ * 事件，人回想的方式是「上個月那場」，月曆正好是這個心智模型。
+ *
+ * 月曆負責找，下方的卡片負責看細節 —— 只保留當月的場次，不再一次列出全部。
+ */
+const availableMonths = computed(() => [
+  ...new Set((games.value ?? []).map((game) => toMonthKey(game.date))),
+])
+
+const selectedMonth = ref('')
+
+/*
+ * 預設停在最近有比賽的那個月。
+ *
+ * 用 `watchEffect` 而不是初始化時指定：資料是非同步載入的，表單建立的當下
+ * 還沒有值。切換年度之後原本選的月份可能已經不在範圍內，也要跳回去。
+ */
+watchEffect(() => {
+  const months = availableMonths.value
+  if (months.length === 0) return
+  if (selectedMonth.value && months.includes(selectedMonth.value)) return
+  selectedMonth.value = [...months].sort().at(-1)!
+})
+
+/** 當月的場次，由新到舊。 */
+const monthGames = computed(() =>
+  (games.value ?? []).filter((game) => toMonthKey(game.date) === selectedMonth.value),
+)
 
 const record = computed(() => {
   // 延賽的場次也列在這一頁，但它沒有打成，不該算進戰績的場次數
@@ -90,15 +123,33 @@ useHead({ title: '比賽結果' })
 
       <UiBaseError v-else-if="error" :error="error" @retry="refresh" />
 
-      <div v-else-if="games?.length" class="grid gap-4 md:grid-cols-2">
-        <GameCard
-          v-for="game in games"
-          :key="game.id"
-          :game="game"
-          :our-name="teamName"
-          :today="today"
+      <template v-else-if="games?.length">
+        <GameCalendar
+          v-model:month="selectedMonth"
+          class="mb-6"
+          :games="games"
+          :available-months="availableMonths"
         />
-      </div>
+
+        <h2 class="mb-4 text-fluid-lg font-bold">
+          {{ formatMonth(selectedMonth) }}
+          <span class="ml-1 text-fluid-sm font-normal text-content-muted">
+            {{ monthGames.length }} 場
+          </span>
+        </h2>
+
+        <div v-if="monthGames.length" class="grid gap-4 md:grid-cols-2">
+          <GameCard
+            v-for="game in monthGames"
+            :key="game.id"
+            :game="game"
+            :our-name="teamName"
+            :today="today"
+          />
+        </div>
+
+        <p v-else class="text-fluid-sm text-content-muted">這個月沒有比賽。</p>
+      </template>
 
       <UiBaseEmpty
         v-else

@@ -6,6 +6,7 @@ import GameScoreboard from '../../app/components/game/GameScoreboard.vue'
 import { emptyScoreboard } from '../../shared/schemas/game'
 import GameCard from '../../app/components/game/GameCard.vue'
 import HomeScoreBanner from '../../app/components/home/ScoreBanner.vue'
+import GameCalendar from '../../app/components/game/GameCalendar.vue'
 import GameLineupCard from '../../app/components/game/GameLineupCard.vue'
 import GameAttendance from '../../app/components/game/GameAttendance.vue'
 
@@ -335,5 +336,95 @@ describe('ScoreBanner 的最新比數', () => {
     // 這場根本沒打，不該有比分 —— 計分板是空的，畫出來會是「0 0」
     expect(component.findAll('.text-3xl')).toHaveLength(0)
     expect(hasScoreSeparator(component)).toBe(false)
+  })
+})
+
+/**
+ * 比賽月曆。
+ *
+ * 場次一多，「由新到舊的一長串卡片」就只剩捲動這個找法。月曆的價值在於
+ * **有比賽的日子要一眼看得出來、而且點得進去** —— 這兩件事壞了，月曆就只是
+ * 一張佔版面的表格。
+ */
+describe('GameCalendar', () => {
+  const game = (id: string, date: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    date,
+    time: '09:00',
+    opponent: '藍鷹隊',
+    venue: '',
+    mapUrl: '',
+    city: '' as const,
+    league: '',
+    homeAway: 'home' as const,
+    status: 'finished' as const,
+    result: 'win' as const,
+    note: '',
+    coverImageUrl: '',
+    opponentLogoUrl: '',
+    attendance: [],
+    lineup: [],
+    pitchers: [],
+    scoreboard: {
+      innings: [],
+      totals: { our: { r: 6, h: 0, e: 0 }, opponent: { r: 3, h: 0, e: 0 } },
+    },
+    createdAt: '',
+    updatedAt: '',
+    ...extra,
+  })
+
+  const mount = (games: ReturnType<typeof game>[], month = '2026-09') =>
+    mountSuspended(GameCalendar, {
+      props: { games, month, availableMonths: ['2026-08', '2026-09'] },
+    })
+
+  it('有比賽的日子做成連到那場比賽的連結', async () => {
+    const component = await mount([game('g1', '2026-09-16')])
+    const links = component.findAll('a')
+
+    expect(links).toHaveLength(1)
+    expect(links[0]!.attributes('href')).toBe('/games/g1')
+    // 標題要講得出是哪一場，滑鼠停留與螢幕閱讀器都靠它
+    expect(links[0]!.attributes('title')).toContain('藍鷹隊')
+  })
+
+  it('小圓點的顏色對應結果', async () => {
+    const component = await mount([
+      game('g1', '2026-09-02', { result: 'loss' }),
+      game('g2', '2026-09-09', { status: 'postponed', result: null }),
+      game('g3', '2026-09-16', { result: 'win' }),
+    ])
+
+    const html = component.html()
+    expect(html).toContain('bg-danger')
+    expect(html).toContain('bg-warning')
+    expect(html).toContain('bg-accent-500')
+  })
+
+  it('同一天兩場（雙重賽）會畫兩個點', async () => {
+    const component = await mount([game('g1', '2026-09-16'), game('g2', '2026-09-16')])
+
+    const cell = component.find('a')
+    expect(cell.findAll('span[class*="rounded-full"]')).toHaveLength(2)
+  })
+
+  it('超出可選月份範圍時停用上／下一月', async () => {
+    const component = await mount([game('g1', '2026-09-16')], '2026-09')
+    const buttons = component.findAll('button')
+
+    const prev = buttons.find((b) => b.attributes('aria-label') === '上一個月')!
+    const next = buttons.find((b) => b.attributes('aria-label') === '下一個月')!
+
+    // 9 月是最後一個有比賽的月份，不該再往後
+    expect(prev.attributes('disabled')).toBeUndefined()
+    expect(next.attributes('disabled')).toBeDefined()
+  })
+
+  it('沒有比賽的日子不是連結', async () => {
+    const component = await mount([])
+    expect(component.findAll('a')).toHaveLength(0)
+    // 但月曆本身還在，9 月有 30 天
+    expect(component.findAll('.grid-cols-7 > *').length).toBeGreaterThan(30)
   })
 })
