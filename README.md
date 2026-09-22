@@ -390,7 +390,13 @@ firebase apphosting:secrets:set firebase-web-api-key    # Console → 專案設�
 firebase apphosting:secrets:set gemini-api-key          # Google AI Studio
 ```
 
-建立時 CLI 會問要不要授權 App Hosting 讀取，選 yes。之後也可以手動授權：
+**CLI 問「要不要把它加進 `apphosting.yaml`」時請選 No。** 它會從機密名稱推導出
+環境變數名（`gemini-api-key` → `GEMINI_API_KEY`），但 Nuxt 只認得 `NUXT_` 開頭的
+名稱，自動加的那個讀不到；`firebase-web-api-key` 推導出的 `FIREBASE_WEB_API_KEY`
+還會撞上 App Hosting 保留的前綴（`X_GOOGLE_` / `FIREBASE_` / `EXT_`）而報錯。
+`apphosting.yaml` 裡的對應都已經手動寫好了。
+
+問要不要授權 App Hosting 讀取時選 yes。之後也可以手動授權：
 
 ```bash
 firebase apphosting:secrets:grantaccess nuxt-session-password --backend <後端名稱>

@@ -12,6 +12,15 @@
 #   firebase apphosting:secrets:set firebase-web-api-key
 #   firebase apphosting:secrets:set gemini-api-key
 #
+# ⚠️ CLI 問「要不要把它加進 apphosting.yaml」時請選 **No**。
+#
+# 它會從機密的名稱推導出環境變數名（gemini-api-key → GEMINI_API_KEY），
+# 但 Nuxt 只認得 `NUXT_` 開頭的名稱（runtimeConfig 的對應規則），自動加的那個
+# 讀不到；而 firebase-web-api-key 推導出的 FIREBASE_WEB_API_KEY 還會撞上
+# App Hosting 保留的前綴（X_GOOGLE_ / FIREBASE_ / EXT_）而直接報錯。
+#
+# 這個檔案裡的對應都是手動寫好的，變數名一律 NUXT_ 開頭，不會有這些問題。
+#
 # 建立後要授權 App Hosting 的服務帳戶讀取（CLI 會問，選 yes 即可）：
 #
 #   firebase apphosting:secrets:grantaccess nuxt-session-password --backend <後端名稱>
@@ -52,6 +61,10 @@ env:
 
   # Web API 金鑰：後台登入時由伺服器端呼叫 Identity Toolkit 驗證帳密。
   # 它本身不算高度機密（前端 SDK 也會帶它），但沒有理由讓它出現在原始碼裡。
+  #
+  # 保留前綴限制的是**環境變數的名稱**，不是機密的名稱 —— 這裡的變數叫
+  # NUXT_FIREBASE_WEB_API_KEY（NUXT_ 開頭，安全），所以機密仍可沿用
+  # firebase-web-api-key 這個名字。
   - variable: NUXT_FIREBASE_WEB_API_KEY
     secret: firebase-web-api-key
     availability:
