@@ -1,0 +1,145 @@
+import {
+  deriveResult,
+  gameInputSchema,
+  gameSchema,
+  toDateKey,
+  type Game,
+  type GameInput,
+  type GamePatch,
+  type GameQueryOptions,
+} from '../../shared/schemas/game'
+import { getDb, isFirebaseConfigured } from '../utils/firebase'
+import { getMemoryStore, memoryId } from '../utils/memory-store'
+import { notFound, nowIso, parseEntity, parseEntityOrNull } from './_helpers'
+
+const COLLECTION = 'games'
+
+/**
+ * 賽程／比賽資料存取。
+ *
+ * ## 排序方向刻意不同
+ * - **未來場次**：日期由近到遠（下一場排最前面，這是使用者最想知道的）
+ * - **已結束場次**：日期由新到舊（最新戰績排最前面）
+ *
+ * 兩個列表頁的直覺不一樣，所以排序寫在這裡而不是讓每個頁面自己決定。
+ */
+
+export async function listGames(query: GameQueryOptions = {}): Promise<Game[]> {
+  const { scope = 'all', year, limit = 50 } = query
+  const today = toDateKey(new Date())
+  const all = await readAll()
+
+  const filtered = all
+    .filter((game) => (query.status ? game.status === query.status : true))
+    .filter((game) => (year ? game.date.startsWith(String(year)) : true))
+    .filter((game) => {
+      if (scope === 'upcoming') return game.status === 'scheduled' && game.date >= today
+      // 延賽的場次也列在「過去」：那一天確實有安排過，只是沒打成。
+      // 讓它從賽程頁消失又不出現在結果頁，等於整場比賽憑空不見了。
+      if (scope === 'past') return game.status === 'finished' || game.status === 'postponed'
+      return true
+    })
+
+  const ascending = scope === 'upcoming'
+  filtered.sort((a, b) => {
+    const diff = `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)
+    return ascending ? diff : -diff
+  })
+
+  return filtered.slice(0, limit)
+}
+
+export async function getGame(id: string): Promise<Game | null> {
+  if (!isFirebaseConfigured()) {
+    return getMemoryStore().games.get(id) ?? null
+  }
+
+  const db = await getDb()
+  const doc = await db.collection(COLLECTION).doc(id).get()
+  if (!doc.exists) return null
+  return parseEntity(gameSchema, { ...doc.data(), id: doc.id }, 'game')
+}
+
+export async function createGame(input: GameInput): Promise<Game> {
+  const data = withDerivedResult(gameInputSchema.parse(input))
+  const timestamps = { createdAt: nowIso(), updatedAt: nowIso() }
+
+  if (!isFirebaseConfigured()) {
+    const game: Game = { ...data, ...timestamps, id: memoryId('g') }
+    getMemoryStore().games.set(game.id, game)
+    return game
+  }
+
+  const db = await getDb()
+  const ref = await db.collection(COLLECTION).add({ ...data, ...timestamps })
+  return { ...data, ...timestamps, id: ref.id }
+}
+
+export async function updateGame(id: string, patch: GamePatch): Promise<Game> {
+  const existing = await getGame(id)
+  if (!existing) throw notFound('比賽')
+
+  const merged = withDerivedResult(gameSchema.parse({ ...existing, ...patch, updatedAt: nowIso() }))
+
+  if (!isFirebaseConfigured()) {
+    getMemoryStore().games.set(id, merged)
+    return merged
+  }
+
+  const db = await getDb()
+  const { id: _id, ...payload } = merged
+  await db.collection(COLLECTION).doc(id).set(payload, { merge: true })
+  return merged
+}
+
+export async function deleteGame(id: string): Promise<void> {
+  const existing = await getGame(id)
+  if (!existing) throw notFound('比賽')
+
+  if (!isFirebaseConfigured()) {
+    getMemoryStore().games.delete(id)
+    return
+  }
+
+  const db = await getDb()
+  await db.collection(COLLECTION).doc(id).delete()
+}
+
+/**
+ * 批次建立（AI 辨識賽程圖後一次匯入多場）。
+ *
+ * 一場失敗不該讓其他場也進不去，所以逐筆建立並回報成功的部分。
+ */
+export async function createGames(inputs: GameInput[]): Promise<Game[]> {
+  const created: Game[] = []
+  for (const input of inputs) {
+    created.push(await createGame(input))
+  }
+  return created
+}
+
+/**
+ * 已結束的比賽若沒有手動指定結果，就依計分板總分推導。
+ *
+ * 放在 repository 而不是端點：不論從哪個入口寫入（後台表單、AI 辨識、
+ * 批次匯入），存進去的資料都保證一致。
+ */
+function withDerivedResult<
+  T extends { status: Game['status']; result: Game['result']; scoreboard: Game['scoreboard'] },
+>(game: T): T {
+  if (game.status !== 'finished') return game
+  if (game.result) return game
+  return { ...game, result: deriveResult(game.scoreboard.totals) }
+}
+
+async function readAll(): Promise<Game[]> {
+  if (!isFirebaseConfigured()) {
+    return [...getMemoryStore().games.values()]
+  }
+
+  const db = await getDb()
+  const snapshot = await db.collection(COLLECTION).get()
+  return snapshot.docs
+    .map((doc) => parseEntityOrNull(gameSchema, { ...doc.data(), id: doc.id }, 'game'))
+    .filter((game): game is Game => game !== null)
+}

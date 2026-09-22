@@ -1,0 +1,82 @@
+# Firebase App Hosting 的執行設定。
+#
+# App Hosting 會自動偵測這是 Nuxt 專案：安裝相依套件、執行 `pnpm build`，
+# 然後用 `pnpm start` 啟動 `.output/server/index.mjs`。底層是 Cloud Run，
+# 所以 PORT 由平台注入，Nitro 會自己讀。
+#
+# ## 機密怎麼放
+# 標成 `secret:` 的項目存在 Cloud Secret Manager，不會出現在這個檔案、
+# 也不會進版本控制。建立方式：
+#
+#   firebase apphosting:secrets:set nuxt-session-password
+#   firebase apphosting:secrets:set firebase-web-api-key
+#   firebase apphosting:secrets:set gemini-api-key
+#
+# 建立後要授權 App Hosting 的服務帳戶讀取（CLI 會問，選 yes 即可）：
+#
+#   firebase apphosting:secrets:grantaccess nuxt-session-password --backend <後端名稱>
+#
+# ## 為什麼沒有 service account 的私鑰
+# 這裡跑在 Google Cloud 上，Admin SDK 直接用執行環境本身的身分（ADC）存取
+# Firestore 與 Storage —— 不需要把私鑰放進雲端的任何地方。
+# 少一份要保管的機密，就少一個外洩的途徑。見 `server/utils/firebase.ts`。
+
+runConfig:
+  # 球隊官網的流量很小，讓它在沒人看的時候縮到零，只有冷啟動的延遲成本
+  minInstances: 0
+  maxInstances: 2
+  # 單一實例可同時處理的請求數。SSR 是 I/O 為主，80 很寬裕
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  # ── 公開設定（會進前端 bundle，只能放非機密）──────────────────────
+  - variable: NUXT_PUBLIC_SITE_URL
+    value: https://hg-baseball.web.app
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # ── Firebase ────────────────────────────────────────────────────
+  # 只需要專案 ID：憑證用執行環境的身分（ADC）
+  - variable: NUXT_FIREBASE_PROJECT_ID
+    value: hg-baseball
+    availability:
+      - RUNTIME
+
+  - variable: NUXT_FIREBASE_STORAGE_BUCKET
+    value: hg-baseball.firebasestorage.app
+    availability:
+      - RUNTIME
+
+  # Web API 金鑰：後台登入時由伺服器端呼叫 Identity Toolkit 驗證帳密。
+  # 它本身不算高度機密（前端 SDK 也會帶它），但沒有理由讓它出現在原始碼裡。
+  - variable: NUXT_FIREBASE_WEB_API_KEY
+    secret: firebase-web-api-key
+    availability:
+      - RUNTIME
+
+  # ── Session ─────────────────────────────────────────────────────
+  # 加密 session cookie 的密鑰。換掉它等於讓所有人登出。
+  - variable: NUXT_SESSION_PASSWORD
+    secret: nuxt-session-password
+    availability:
+      - RUNTIME
+
+  # ── Gemini 圖片辨識 ─────────────────────────────────────────────
+  - variable: NUXT_GEMINI_API_KEY
+    secret: gemini-api-key
+    availability:
+      - RUNTIME
+
+  # ── 執行環境 ────────────────────────────────────────────────────
+  - variable: LOG_LEVEL
+    value: info
+    availability:
+      - RUNTIME
+
+  - variable: SERVICE_NAME
+    value: baseball-official
+    availability:
+      - RUNTIME

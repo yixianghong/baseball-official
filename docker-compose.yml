@@ -1,0 +1,53 @@
+# 本機驗證 production 映像用。
+# 正式部署請改用 Kubernetes / Cloud Run 等平台，這裡只是讓你能在本機
+# 用最接近正式環境的方式跑起來。
+services:
+  app:
+    build:
+      context: .
+      # 用 BuildKit 的快取掛載加速重複建置
+      dockerfile: Dockerfile
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      # ⚠️ 僅供本機驗證。正式環境請用平台的 secret 管理機制注入，
+      # 絕對不要把真實密鑰寫進 compose 檔並提交進版本控制。
+      NUXT_SESSION_PASSWORD: local-docker-only-session-password-32chars
+
+      # Firebase：填入服務帳戶金鑰 JSON 裡的三個值，以及 Console 的 Web API 金鑰。
+      # 私鑰的換行請保留 \n 字面寫法。
+      NUXT_FIREBASE_PROJECT_ID: ''
+      NUXT_FIREBASE_CLIENT_EMAIL: ''
+      NUXT_FIREBASE_PRIVATE_KEY: ''
+      NUXT_FIREBASE_STORAGE_BUCKET: ''
+      NUXT_FIREBASE_WEB_API_KEY: ''
+
+      # Gemini 圖片辨識（留空則後台的辨識功能會回報無法使用，其餘不受影響）
+      NUXT_GEMINI_API_KEY: ''
+
+      # 上面的 Firebase 設定沒填齊時，服務會拒絕啟動 —— 這是刻意的。
+      # 只想先看看畫面的話，把下面這行取消註解讓它跑在記憶體示範資料上。
+      # ⚠️ 真正要上線時絕對不要設定它。
+      # ALLOW_MEMORY_STORE: 'true'
+
+      LOG_LEVEL: info
+      SHUTDOWN_DRAIN_MS: 5000
+    # 讓 SIGTERM 有足夠時間完成 drain（必須大於 SHUTDOWN_DRAIN_MS）
+    stop_grace_period: 20s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # 多實例部署時，把 rate limit 與 cache 換成 Redis。
+  # 啟用後在 nuxt.config.ts 的 nitro.storage 改成 redis driver 即可。
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - '6379:6379'

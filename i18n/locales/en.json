@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "description": "Official team website: upcoming games, results, roster, and announcements."
+  },
+  "nav": {
+    "home": "Home",
+    "schedule": "Schedule",
+    "results": "Results",
+    "players": "Roster",
+    "news": "News",
+    "primary": "Primary navigation",
+    "mobile": "Mobile navigation",
+    "toggleMenu": "Toggle menu"
+  },
+  "theme": {
+    "toDark": "Switch to dark mode",
+    "toLight": "Switch to light mode"
+  },
+  "auth": {
+    "login": "Admin sign in",
+    "logout": "Sign out",
+    "email": "Email",
+    "password": "Password",
+    "passwordHint": "At least 8 characters"
+  },
+  "admin": {
+    "title": "Admin"
+  }
+}

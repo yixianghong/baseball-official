@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "description": "球隊官方網站：近期賽程、比賽結果、球員名單與最新公告。"
+  },
+  "nav": {
+    "home": "首頁",
+    "schedule": "近期賽程",
+    "results": "比賽結果",
+    "players": "球員名單",
+    "news": "公告",
+    "primary": "主要導覽",
+    "mobile": "行動版導覽",
+    "toggleMenu": "開啟或關閉選單"
+  },
+  "theme": {
+    "toDark": "切換至深色模式",
+    "toLight": "切換至亮色模式"
+  },
+  "auth": {
+    "login": "後台登入",
+    "logout": "登出",
+    "email": "電子郵件",
+    "password": "密碼",
+    "passwordHint": "至少 8 個字元"
+  },
+  "admin": {
+    "title": "後台管理"
+  }
+}
