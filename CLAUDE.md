@@ -152,6 +152,28 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 
 縣市是後台明確選的，不從場地名稱猜：猜錯會顯示成別的縣市的天氣，比不顯示更糟。
 
+### 公告的 Markdown（`app/utils/markdown.ts`）
+
+資料庫存的是 **Markdown 原始碼**，不是 HTML —— 存 HTML 等於把一堆可執行的標記
+放進資料庫，日後想換渲染方式或抽純文字做摘要都得回頭清一次資料。
+
+**安全性靠的是「解析器不會產生危險的 HTML」，不是事後清洗。** `html: false` 讓
+原始碼裡的 `<script>`、`onerror=` 一律被跳脫成純文字，`validateLink` 再收成白名單
+（http／https／mailto／tel／相對路徑）。所以 `v-html` 在這裡是安全的，也不需要在
+伺服器端模擬 DOM 去跑 DOMPurify。要動這幾個設定前先看 `tests/unit/markdown.test.ts`。
+
+**`breaks: true` 是相容性需求而不是偏好**：公告原本是純文字、以 `pre-wrap` 呈現，
+作者按的每個 Enter 都看得到。CommonMark 預設單一換行只是空白，關掉它既有的公告
+會整篇擠成一段。
+
+摘要（首頁卡片、後台列表、推播內容）一律走 `markdownToText()`。它走的是**同一個
+解析器的 token 樹**，不是正規表示式 —— 「這兩個星號是不是語法」沒辦法用 regex
+正確判斷，而摘要跟內文對不上會很奇怪。
+
+後台編輯器 `AdminMarkdownEditor` 的預覽用的是前台那個 `UiBaseMarkdown`，
+所以「預覽沒問題、發布後跑版」不可能發生。工具列的文字操作全在
+`app/utils/markdown-edit.ts`，是純函式，每一種邊界情況都測得到。
+
 ### 分享出賽名單（`app/composables/useShareRoster.ts`）
 
 把圖卡畫成 PNG 用 `modern-screenshot`，**點下去才動態 import**（它有二十幾 KB，

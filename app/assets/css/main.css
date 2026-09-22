@@ -359,6 +359,145 @@
   }
 
   /**
+   * Markdown 內文。公告用，後台預覽也用同一份樣式。
+   *
+   * ## 為什麼不用 Tailwind 的 typography 外掛
+   * 它的預設值是替部落格長文設計的（很大的標題、很寬的段距），套進公告卡片
+   * 需要一連串的覆寫才壓得回來，最後維護的還是這些覆寫。這裡要排版的東西
+   * 只有六七種標籤，直接寫比較短也比較好懂。
+   *
+   * ## 選擇器包在 `:where()` 裡
+   * `:where()` 的權重是 0，所以外面永遠可以用一個 Tailwind 的 class 蓋掉它。
+   * 不這樣做的話，`.markdown p` 的權重就贏過 `text-content-muted`，
+   * 而「為什麼這個 class 沒有作用」是很難查的一類問題。
+   */
+  .markdown {
+    line-height: 1.75;
+    overflow-wrap: break-word;
+  }
+
+  /* 段落之間留白，但第一段不要 —— 否則卡片上方會多出一段空隙 */
+  .markdown > :where(* + *) {
+    margin-top: 0.75em;
+  }
+
+  .markdown :where(h3, h4, h5, h6) {
+    margin-top: 1.4em;
+    color: var(--color-content);
+    font-weight: 700;
+    line-height: 1.4;
+  }
+
+  .markdown :where(h3) {
+    font-size: 1.15em;
+  }
+
+  .markdown :where(h4, h5, h6) {
+    font-size: 1.05em;
+  }
+
+  .markdown :where(ul, ol) {
+    padding-inline-start: 1.5em;
+  }
+
+  .markdown :where(ul) {
+    list-style: disc;
+  }
+
+  .markdown :where(ol) {
+    list-style: decimal;
+  }
+
+  .markdown :where(li + li) {
+    margin-top: 0.25em;
+  }
+
+  /* 巢狀清單的間距靠 li 控制就夠了，再套一次段落間距會太鬆 */
+  .markdown :where(li) > :where(* + *) {
+    margin-top: 0.25em;
+  }
+
+  .markdown :where(a) {
+    color: var(--color-brand-700);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  :root:where(.dark) .markdown :where(a) {
+    color: var(--color-brand-300);
+  }
+
+  .markdown :where(strong) {
+    color: var(--color-content);
+    font-weight: 700;
+  }
+
+  .markdown :where(blockquote) {
+    padding-inline-start: 1em;
+    border-inline-start: 3px solid var(--color-brand-500);
+  }
+
+  /*
+   * 程式碼的底色用半透明的黑／白疊上去，而不是 `--color-surface-muted`。
+   * 深色模式下 surface-muted（0.26）與卡片的 surface-raised（0.27）幾乎一樣亮，
+   * 直接用會變成「底色看起來沒有套用」。同 `.surface-card` 的處理方式。
+   */
+  .markdown :where(code) {
+    padding: 0.15em 0.35em;
+    border-radius: 0.25rem;
+    background-color: oklch(0 0 0 / 0.055);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+
+  :root:where(.dark) .markdown :where(code) {
+    background-color: oklch(1 0 0 / 0.1);
+  }
+
+  .markdown :where(pre) {
+    padding: 0.75em 1em;
+    border-radius: 0.5rem;
+    background-color: oklch(0 0 0 / 0.055);
+    overflow-x: auto;
+  }
+
+  :root:where(.dark) .markdown :where(pre) {
+    background-color: oklch(1 0 0 / 0.1);
+  }
+
+  /* pre 已經有底色了，裡面的 code 不必再疊一層 */
+  .markdown :where(pre) > :where(code) {
+    padding: 0;
+    background-color: transparent;
+  }
+
+  .markdown :where(hr) {
+    margin-block: 1.5em;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .markdown :where(img) {
+    border-radius: 0.5rem;
+  }
+
+  .markdown :where(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95em;
+  }
+
+  .markdown :where(th, td) {
+    padding: 0.4em 0.6em;
+    border: 1px solid var(--color-border);
+    text-align: start;
+  }
+
+  .markdown :where(th) {
+    background-color: var(--color-surface-muted);
+    font-weight: 700;
+  }
+
+  /**
    * 內容容器。行動裝置留 1rem 邊距，大螢幕置中並限制最大寬度。
    * 用 `@utility` 之外的方式定義是為了讓它能被 `@apply` 使用。
    */

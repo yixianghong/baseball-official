@@ -38,7 +38,15 @@ export type AnnouncementStatus = z.infer<typeof announcementStatusSchema>
 
 export const announcementInputSchema = z.object({
   title: z.string().trim().min(1, '請輸入標題').max(80, '標題最多 80 字'),
-  /** 純文字內容，換行以 \n 保存。前台以 `white-space: pre-wrap` 呈現。 */
+  /**
+   * Markdown 內容，換行以 \n 保存。
+   *
+   * 存的一律是原始碼，不是 HTML —— 渲染在前台做（`app/utils/markdown.ts`）。
+   * 存 HTML 的話，日後想換渲染方式、想抽純文字做摘要都得回頭清一次資料，
+   * 而且資料庫裡就躺著一堆可執行的標記。
+   *
+   * 上限用「字元數」而不是渲染後的長度：作者在編輯器裡看到的就是這個數字。
+   */
   content: z.string().trim().min(1, '請輸入公告內容').max(5000, '內容最多 5000 字'),
   category: announcementCategorySchema.default('general'),
   /** 置頂的公告永遠排在最前面。 */

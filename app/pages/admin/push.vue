@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PushSendResult } from '#shared/schemas/push'
+import { markdownToText } from '~/utils/markdown'
 
 /**
  * 推播通知。
@@ -39,7 +40,7 @@ watch(pickedAnnouncement, (id) => {
   if (!announcement) return
 
   form.title = announcement.title.slice(0, 60)
-  form.body = announcement.content.replace(/\s+/g, ' ').trim().slice(0, 100)
+  form.body = markdownToText(announcement.content).slice(0, 100)
   form.url = '/news'
   // 用公告 ID 當 tag：同一則公告重送不會在通知列上疊成兩條
   form.tag = `announcement-${announcement.id}`.slice(0, 40)

@@ -6,6 +6,7 @@ import type {
 } from '#shared/schemas/announcement'
 import { CATEGORY_LABELS } from '#shared/schemas/announcement'
 import { formatDateTime } from '~/utils/format'
+import { markdownToText } from '~/utils/markdown'
 
 /**
  * 公告管理。
@@ -128,8 +129,9 @@ useHead({ title: '公告管理' })
                 </div>
 
                 <p class="font-semibold">{{ announcement.title }}</p>
+                <!-- 列表只是用來找公告的，看 Markdown 原始碼反而更難掃 -->
                 <p class="mt-1 line-clamp-2 text-fluid-sm text-content-muted">
-                  {{ announcement.content }}
+                  {{ markdownToText(announcement.content) }}
                 </p>
               </div>
 
@@ -172,13 +174,13 @@ useHead({ title: '公告管理' })
           :error="error?.fieldErrors.title?.[0]"
         />
 
-        <UiBaseTextarea
+        <AdminMarkdownEditor
           v-model="form.content"
           label="內容"
-          :rows="10"
+          :rows="12"
           :maxlength="5000"
           required
-          hint="換行會原樣顯示在前台。"
+          hint="支援 Markdown：**粗體**、# 標題、- 清單、[文字](網址)。按 Enter 換行會照樣顯示。"
           :error="error?.fieldErrors.content?.[0]"
         />
 

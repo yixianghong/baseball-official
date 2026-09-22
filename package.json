@@ -33,6 +33,7 @@
     "@vueuse/nuxt": "^14.4.0",
     "firebase-admin": "^14.4.0",
     "h3": "^1.15.11",
+    "markdown-it": "^15.0.2",
     "modern-screenshot": "^4.7.0",
     "nuxt": "^4.5.2",
     "ofetch": "^1.5.1",
