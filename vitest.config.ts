@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import { defineVitestProject } from '@nuxt/test-utils/config'
 
@@ -30,6 +31,13 @@ export default defineConfig({
     projects: [
       {
         // 純邏輯測試：不需要瀏覽器、不需要 Nuxt，跑最快
+        //
+        // `#shared` 是 Nuxt 注入的別名，這個 project 沒有 Nuxt 就解析不到。
+        // 補上它，`app/` 底下的程式碼才能照平常的寫法匯入共用 schema，
+        // 不必為了「能被單元測試」而改成相對路徑。
+        resolve: {
+          alias: { '#shared': fileURLToPath(new URL('./shared', import.meta.url)) },
+        },
         test: {
           name: 'unit',
           include: ['tests/unit/**/*.test.ts'],

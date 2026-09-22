@@ -280,6 +280,17 @@ export const gameSchema = gameInputSchema.extend({
   id: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /**
+   * 已經送出過的自動提醒（見 `shared/schemas/reminder.ts`）。
+   *
+   * 刻意**不放進 `gameInputSchema`**：它不是人填的欄位，而是系統自己記的狀態。
+   * 放進 input schema 的話，後台表單每次存檔都會把它一起送上來 ——
+   * 漏帶一次就等於把記號清掉，然後所有人再收到一次同樣的提醒。
+   *
+   * 記在比賽文件上而不是另開 collection：排程器會重試，判斷「送過了沒」
+   * 必須和比賽本身是同一次讀取，後台也才看得到哪一場已經提醒過。
+   */
+  remindersSent: z.array(z.string()).default([]),
 })
 
 export type Game = z.infer<typeof gameSchema>
@@ -364,6 +375,35 @@ export function isNotPlayed(game: Pick<Game, 'status'>): boolean {
  */
 export function needsResultUpdate(game: Pick<Game, 'status' | 'date'>, today: string): boolean {
   return game.status === 'scheduled' && game.date < today
+}
+
+/**
+ * 取得**台北時間**的 `YYYY-MM-DD`。
+ *
+ * ## 為什麼不能用 `toDateKey(new Date())`
+ * 正式環境跑在 Cloud Run 上，時區是 **UTC**（`apphosting.yaml` 沒有設 `TZ`，
+ * 容器預設就是 UTC）。台北時間 00:00–07:59 這八個小時裡，伺服器還停在
+ * **前一天** —— 「明天的比賽」會整整差一天，而在本機開發時完全重現不了，
+ * 因為本機就是台北時間。
+ *
+ * 直接加八小時就夠，不必引入 `Intl` 的時區資料：台灣從 1979 年起就沒有
+ * 日光節約時間，UTC+8 是全年固定的。
+ */
+export function taipeiDateKey(now: Date = new Date()): string {
+  return new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+/**
+ * 兩個 `YYYY-MM-DD` 之間差幾天（`to` 減 `from`）。格式不對時回 `null`。
+ *
+ * 用 UTC 午夜相減而不是本地時間：跨日光節約時間的邊界時，本地午夜之間
+ * 可能只差 23 或 25 小時，除下來會多算或少算一天。
+ */
+export function daysBetweenDateKeys(from: string, to: string): number | null {
+  const start = Date.parse(`${from}T00:00:00Z`)
+  const end = Date.parse(`${to}T00:00:00Z`)
+  if (Number.isNaN(start) || Number.isNaN(end)) return null
+  return Math.round((end - start) / 86_400_000)
 }
 
 /** 取得 `YYYY-MM-DD` 格式的當地日期字串。 */

@@ -2,7 +2,7 @@ import {
   deriveResult,
   gameInputSchema,
   gameSchema,
-  toDateKey,
+  taipeiDateKey,
   type Game,
   type GameInput,
   type GamePatch,
@@ -26,7 +26,9 @@ const COLLECTION = 'games'
 
 export async function listGames(query: GameQueryOptions = {}): Promise<Game[]> {
   const { scope = 'all', year, limit = 50 } = query
-  const today = toDateKey(new Date())
+  // 用台北日期而不是伺服器本地日期：Cloud Run 跑在 UTC，台北時間半夜到
+  // 早上八點之間，伺服器還停在前一天 —— 昨天打完的比賽會繼續掛在賽程頁上
+  const today = taipeiDateKey()
   const all = await readAll()
 
   const filtered = all
@@ -65,14 +67,14 @@ export async function createGame(input: GameInput): Promise<Game> {
   const timestamps = { createdAt: nowIso(), updatedAt: nowIso() }
 
   if (!isFirebaseConfigured()) {
-    const game: Game = { ...data, ...timestamps, id: memoryId('g') }
+    const game: Game = { ...data, ...timestamps, remindersSent: [], id: memoryId('g') }
     getMemoryStore().games.set(game.id, game)
     return game
   }
 
   const db = await getDb()
   const ref = await db.collection(COLLECTION).add({ ...data, ...timestamps })
-  return { ...data, ...timestamps, id: ref.id }
+  return { ...data, ...timestamps, remindersSent: [], id: ref.id }
 }
 
 export async function updateGame(id: string, patch: GamePatch): Promise<Game> {
@@ -90,6 +92,29 @@ export async function updateGame(id: string, patch: GamePatch): Promise<Game> {
   const { id: _id, ...payload } = merged
   await db.collection(COLLECTION).doc(id).set(payload, { merge: true })
   return merged
+}
+
+/**
+ * 記下「這場的某種提醒已經送出去了」。
+ *
+ * 不走 `updateGame()`：那支會跑 `gameInputSchema` 的驗證與結果推導，
+ * 而這裡要改的欄位刻意不在 input schema 裡（理由見 `gameSchema`）。
+ * 只動這一個欄位，也不會把管理者同時在後台編輯的內容蓋掉。
+ */
+export async function markReminderSent(id: string, kind: string): Promise<void> {
+  const existing = await getGame(id)
+  if (!existing) throw notFound('比賽')
+  if (existing.remindersSent.includes(kind)) return
+
+  const remindersSent = [...existing.remindersSent, kind]
+
+  if (!isFirebaseConfigured()) {
+    getMemoryStore().games.set(id, { ...existing, remindersSent })
+    return
+  }
+
+  const db = await getDb()
+  await db.collection(COLLECTION).doc(id).set({ remindersSent }, { merge: true })
 }
 
 export async function deleteGame(id: string): Promise<void> {

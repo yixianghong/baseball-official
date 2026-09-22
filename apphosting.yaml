@@ -139,6 +139,23 @@ env:
     availability:
       - RUNTIME
 
+  # ── 排程（比賽提醒）─────────────────────────────────────────────
+  #
+  # Cloud Scheduler 每天叫一次 /api/cron/game-reminders，靠這把共用密鑰驗證
+  # （它沒有身分可以登入，只能帶固定標頭）。留空代表排程端點整個關閉。
+  #
+  #   openssl rand -base64 32 | tr -d '\n' | firebase apphosting:secrets:set cron-secret --project hg-baseball --data-file -
+  #   firebase apphosting:secrets:grantaccess cron-secret --project hg-baseball --backend baseball-official --location asia-east1
+  #
+  # ⚠️ CLI 問「要不要加進 apphosting.yaml」時選 No（理由見上面的說明）。
+  # 授權有沒有生效要另外驗，不能只看指令沒報錯：
+  #
+  #   gcloud secrets get-iam-policy cron-secret --project hg-baseball
+  - variable: NUXT_CRON_SECRET
+    secret: cron-secret
+    availability:
+      - RUNTIME
+
   # ── 執行環境 ────────────────────────────────────────────────────
   - variable: LOG_LEVEL
     value: info

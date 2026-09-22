@@ -11,12 +11,17 @@ import { markdownToText } from '~/utils/markdown'
  * 事情反而傳不出去。推播送出去收不回來，決定權留給人。
  *
  * 從公告帶入內容只是省打字，帶完還是要按發送。
+ *
+ * ## 比賽提醒是唯一的例外
+ * 賽前一週與賽前一天的提醒**是自動送的**：比賽日期是客觀的事實，不會因為
+ * 有人在後台改了錯字就變動，沒有「要不要通知」的判斷空間。它和公告不一樣。
  */
 definePageMeta({ layout: 'admin', middleware: 'auth' })
 
 const { data: status, refresh: refreshStatus, pending: statusPending } = await usePushStatus()
 const { data: announcements } = await useAdminAnnouncements()
-const { sendPush, loading: sending, error } = usePushActions()
+const { data: reminders, refresh: refreshReminders } = await useGameReminders()
+const { sendPush, runGameReminders, loading: sending, error } = usePushActions()
 
 const form = reactive({ title: '', body: '', url: '/news', tag: 'hgm-general' })
 const result = ref<PushSendResult | null>(null)
@@ -47,6 +52,34 @@ watch(pickedAnnouncement, (id) => {
   result.value = null
   failureMessage.value = ''
 })
+
+/*
+ * ── 比賽自動提醒 ────────────────────────────────────────────────
+ *
+ * 實際發送由 Cloud Scheduler 每天叫一次 `/api/cron/game-reminders`。
+ * 這裡做兩件事：把「今天會送什麼」列出來，以及提供手動執行。
+ *
+ * 手動執行打的是**同一支端點**，不是一個長得很像的替身 —— 否則驗證的
+ * 就不是排程器實際會做的事。重複執行不會重複發送（見 remindersSent）。
+ */
+const runningReminders = ref(false)
+const reminderMessage = ref('')
+
+async function runReminders() {
+  runningReminders.value = true
+  reminderMessage.value = ''
+  try {
+    const result = await runGameReminders()
+    reminderMessage.value = result.sent.length
+      ? `已送出 ${result.sent.length} 則提醒`
+      : '今天沒有需要送出的提醒'
+    await refreshReminders()
+  } catch {
+    reminderMessage.value = error.value?.message ?? '執行失敗'
+  } finally {
+    runningReminders.value = false
+  }
+}
 
 async function submit() {
   confirming.value = false
@@ -93,6 +126,53 @@ useHead({ title: '推播通知' })
           </p>
         </div>
       </div>
+
+      <!-- ══ 比賽自動提醒 ═════════════════════════════════════ -->
+      <section class="space-y-3 rounded-xl border border-border bg-surface p-5">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 class="text-fluid-lg font-bold">比賽自動提醒</h2>
+          <span class="text-xs text-content-muted tabular-nums">
+            今天（台北）{{ reminders?.today }}
+          </span>
+        </div>
+
+        <p class="text-fluid-sm text-content-muted">
+          每天上午 9:00 自動檢查一次：賽前 3～7 天送一則出席提醒，賽前一天再送一則。
+          同一場只會送一次。
+        </p>
+
+        <ul v-if="reminders?.pending.length" class="space-y-2">
+          <li
+            v-for="item in reminders.pending"
+            :key="`${item.gameId}-${item.kind}`"
+            class="rounded-lg border border-border bg-surface-muted px-3 py-2"
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <UiBaseBadge :tone="item.kind === 'd1' ? 'warning' : 'brand'" size="sm">
+                {{ item.kind === 'd1' ? '賽前一天' : `還有 ${item.days} 天` }}
+              </UiBaseBadge>
+              <span class="text-fluid-sm font-medium">{{ item.title }}</span>
+            </div>
+            <p v-if="item.body" class="mt-0.5 text-xs text-content-muted">{{ item.body }}</p>
+          </li>
+        </ul>
+
+        <p v-else class="text-fluid-sm text-content-muted">今天沒有需要送出的提醒。</p>
+
+        <div class="flex flex-wrap items-center gap-3 border-t border-border pt-3">
+          <UiBaseButton
+            variant="secondary"
+            size="sm"
+            :loading="runningReminders"
+            @click="runReminders"
+          >
+            立即執行一次
+          </UiBaseButton>
+          <p v-if="reminderMessage" class="text-fluid-sm text-content-muted">
+            {{ reminderMessage }}
+          </p>
+        </div>
+      </section>
 
       <section class="space-y-4 rounded-xl border border-border bg-surface p-5">
         <h2 class="text-fluid-lg font-bold">從公告帶入</h2>

@@ -219,6 +219,48 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 **它沒有登入保護，白名單是唯一的防線**（SSRF），判斷邏輯在 `isAllowed()`，
 單元與 e2e 各有一組測試守著。
 
+### 比賽自動提醒（排程）
+
+賽前 3～7 天送一則出席提醒、賽前一天再送一則。判斷邏輯全在
+`shared/schemas/reminder.ts` 的純函式裡，端點只負責「誰可以呼叫」與「送出去」。
+
+**`minInstances: 0` 代表程式裡的計時器一定行不通。** 沒人瀏覽時容器整個關掉，
+`setInterval` 只在「剛好有人正在看網站」時活著 —— 而要發提醒的清晨正是最沒有人
+在看的時候。必須由外部的 Cloud Scheduler 每天叫一次
+`POST /api/cron/game-reminders`。
+
+**時區是這個功能最容易錯的地方。** Cloud Run 跑在 **UTC**（`apphosting.yaml`
+沒設 `TZ`），台北時間 00:00–07:59 這八小時裡伺服器還停在前一天 —— 用
+`toDateKey(new Date())` 算「今天」會讓所有提醒差一整天，而**本機完全重現不了**，
+因為本機就是台北時間。一律用 `taipeiDateKey()`。`listGames()` 的 `scope: 'upcoming'`
+也是同一個理由改過來的。
+
+**記號在送出之後才寫。** 反過來做（先記號再發送）會在發送失敗時把提醒永久吞掉，
+而「大家都沒收到通知」不會有人來回報。現在最壞的情況是重複送一次，那至少看得出來。
+記號是比賽文件上的 `remindersSent`，刻意**不在 `gameInputSchema` 裡** —— 放進去的話
+後台表單每次存檔都會把它一起送上來，漏帶一次就等於清掉記號、所有人再收一次。
+
+**早鳥提醒是 3～7 天的區間而不是剛好第 7 天**：排程漏跑一次那一場就永遠收不到了。
+下限是 3 而不是 1，否則新增一場後天的比賽會連兩天各收到一則講同一件事的通知。
+文案講的是**實際還有幾天**，不是寫死「7 天後」—— 區間意味著它可能在第 5 天才送出。
+
+`/api/cron/*` 是全站第二支沒有 session 也能呼叫的寫入端點（第一支是推播訂閱），
+閘門是 Secret Manager 裡的 `NUXT_CRON_SECRET`，用 `timingSafeEqual` 比對。
+**留空代表整個排程端點關閉**，不是「不用驗證」。已登入的管理者也放行，
+後台推播頁的「立即執行一次」打的就是同一支端點 —— 驗證的必須是排程器實際會做的事。
+
+建立排程工作（一個工作，在 Cloud Scheduler 的免費額度內）：
+
+```bash
+gcloud scheduler jobs create http game-reminders \
+  --project hg-baseball --location asia-east1 \
+  --schedule "0 9 * * *" --time-zone "Asia/Taipei" \
+  --uri "https://baseball-official--hg-baseball.asia-east1.hosted.app/api/cron/game-reminders" \
+  --http-method POST \
+  --headers "x-cron-secret=<密鑰>,content-type=application/json" \
+  --message-body "{}"
+```
+
 ### PWA 與推播
 
 `public/sw.js` 是**手寫的** service worker（沒有 Workbox），同時負責離線快取與推播。

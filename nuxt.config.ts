@@ -141,6 +141,15 @@ export default defineNuxtConfig({
       subject: '',
     },
 
+    /**
+     * 排程端點（`/api/cron/*`）的共用密鑰。
+     *
+     * Cloud Scheduler 沒有身分可以登入，只能帶固定標頭，所以閘門是這把密鑰。
+     * **留空代表整個排程端點關閉**（不是「不用驗證」）—— 忘了設定的部署
+     * 不該變成任何人都能觸發推播。
+     */
+    cronSecret: '',
+
     // --- 外部呼叫共用 ---
     /** 呼叫外部服務（Gemini、Identity Toolkit）的預設逾時毫秒數。 */
     upstreamTimeoutMs: 10_000,

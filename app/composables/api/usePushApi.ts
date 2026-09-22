@@ -1,4 +1,5 @@
 import type { PushPayload, PushSendResult } from '#shared/schemas/push'
+import type { ReminderKind, ReminderRunResult } from '#shared/schemas/reminder'
 
 /**
  * 「推播」功能領域的所有 API 呼叫。
@@ -12,6 +13,8 @@ const ENDPOINTS = {
   unsubscribe: '/push/unsubscribe',
   send: '/admin/push/send',
   status: '/admin/push/status',
+  reminders: '/admin/push/reminders',
+  runReminders: '/cron/game-reminders',
 } as const
 
 export interface PushStatus {
@@ -24,6 +27,21 @@ export interface PushStatus {
 /** 【宣告式】後台的推播狀態（需登入）。 */
 export function usePushStatus() {
   return useApiFetch<PushStatus>(ENDPOINTS.status)
+}
+
+/** 今天會自動送出的比賽提醒。 */
+export interface PendingReminder {
+  gameId: string
+  kind: ReminderKind
+  date: string
+  days: number
+  title: string
+  body: string
+}
+
+/** 【宣告式】今天待送的比賽提醒（需登入）。 */
+export function useGameReminders() {
+  return useApiFetch<{ today: string; pending: PendingReminder[] }>(ENDPOINTS.reminders)
 }
 
 /** 【命令式】訂閱相關操作。給前台的訂閱按鈕用。 */
@@ -50,6 +68,14 @@ export function usePushActions() {
     error,
     attempt,
     sendPush: (payload: PushPayload) => post<PushSendResult>(ENDPOINTS.send, payload),
+
+    /**
+     * 立刻執行一次比賽提醒。
+     *
+     * 和 Cloud Scheduler 每天呼叫的是**同一支端點** —— 後台按下去驗證的
+     * 就是排程器實際會做的事，不是一個「長得很像」的替身。
+     */
+    runGameReminders: () => post<ReminderRunResult>(ENDPOINTS.runReminders, {}),
   }
 }
 

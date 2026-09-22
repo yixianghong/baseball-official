@@ -38,6 +38,9 @@ process.env.NUXT_GEMINI_API_KEY = ''
 // 氣象署也要清掉：`.env` 有授權碼的話，e2e 會真的去打中央氣象署的 API ——
 // 測試不該依賴外部服務的可用性，也不該替別人消耗人家的流量配額
 process.env.NUXT_CWA_API_KEY = ''
+// 排程密鑰同理：`.env` 有值的話，上面那組「沒設定密鑰就擋下」的測試會失去意義，
+// 而且測試環境不該有任何一條能觸發真實推播的路
+process.env.NUXT_CRON_SECRET = ''
 
 // e2e 跑的是 production 建置，而 production 預設會因為缺少 Firebase 設定而拒絕啟動
 // （見 server/plugins/00.env-validate.ts）。這個開關是專門為了這個場景而存在的例外。
@@ -241,6 +244,31 @@ describe('後台權限：所有寫入都需要登入', () => {
       method,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({}),
+    })
+
+    expect(response.status).toBe(401)
+  })
+
+  it('未登入時看不到今天會自動送出哪些比賽提醒', async () => {
+    // 上面那組是 it.each，每一筆都帶 body，GET 不能有 body，所以單獨寫一則
+    const response = await fetch('/api/admin/push/reminders')
+    expect(response.status).toBe(401)
+  })
+
+  /*
+   * 排程端點沒有 session 可以驗，閘門是一把共用密鑰。這一組守著兩件事：
+   * 沒帶密鑰不能執行，以及**沒設定密鑰時一律擋下** —— 空字串不能等於
+   * 「不用驗證」，否則忘了設定的部署就變成任何人都能觸發推播。
+   */
+  it.each([
+    ['沒有密鑰', {}],
+    ['密鑰錯誤', { 'x-cron-secret': 'wrong-secret' }],
+    ['空密鑰（e2e 環境本來就沒設定）', { 'x-cron-secret': '' }],
+  ])('%s 時 POST /api/cron/game-reminders 回傳 401', async (_label, headers) => {
+    const response = await fetch('/api/cron/game-reminders', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: '{}',
     })
 
     expect(response.status).toBe(401)
