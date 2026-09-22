@@ -74,6 +74,12 @@ await setup({
       public: {
         vapidPublicKey: 'e2e-fake-vapid-public-key',
       },
+      /*
+       * 只設 bucket 名稱，不給 projectId ——「分享名單」用的圖片轉送端點
+       * 靠這個值做白名單，設了才測得到它真的有在擋。
+       * 沒有 projectId，資料層仍然走記憶體模式。
+       */
+      firebase: { storageBucket: 'e2e-bucket.firebasestorage.app' },
     },
   },
 })
@@ -483,11 +489,11 @@ describe('SSR', () => {
     expect(html).toContain('陳冠宇')
   })
 
-  it('比賽詳情頁在 SSR 階段就渲染出打線', async () => {
+  it('比賽詳情頁在 SSR 階段就渲染出名單與計分板', async () => {
     // g3 是種子資料中已結束的比賽，有完整打線與計分板
     const html = await $fetch<string>('/games/g3')
     expect(html).toContain('計分板')
-    expect(html).toContain('當天打線')
+    expect(html).toContain('出賽名單')
   })
 
   /**
@@ -515,6 +521,78 @@ describe('SSR', () => {
 
     expect(html).toContain('春季聯賽開打')
     expect(html).toContain('<article')
+  })
+
+  /**
+   * 候補名單是推導出來的（出席 − 先發），前台要真的把它畫出來。
+   *
+   * 種子資料的 g1：確定出席 8 人（p1~p4、p6、p8~p10），先發 9 人含未出席的
+   * p5、p7 —— 所以候補正好只有 p10「鄭凱文」一個人。
+   *
+   * 這條也順便守住元件自動匯入的名稱（`components/game/GameBench.vue`
+   * → `GameBench`）。寫錯不會報錯，只會渲染成空註解，極難查。
+   */
+  it('未開打的場次會列出候補（出席但不在先發名單）', async () => {
+    const markup = renderedMarkup(await $fetch<string>('/games/g1'))
+    const benchSection = markup.slice(markup.indexOf('>候補<'))
+
+    // 出席但沒排進先發的那一位，帶背號
+    expect(benchSection).toContain('#24 鄭凱文')
+  })
+
+  /**
+   * 出賽名單圖卡。它是前台唯一的名單呈現方式，所以這裡要驗的是
+   * 「內容完整且點得動」，而不只是畫面有出現。
+   *
+   * 這條也順便守住元件自動匯入的名稱（`components/game/GameLineupCard.vue`
+   * → `GameLineupCard`）。寫錯不會報錯，只會渲染成空註解，極難查。
+   */
+  it('出賽名單圖卡含先發打序與候補，名字可以點進個人頁', async () => {
+    const markup = renderedMarkup(await $fetch<string>('/games/g1'))
+    const card = markup.slice(markup.indexOf('GAME ROSTER'))
+
+    expect(markup).toContain('出賽名單')
+    expect(card).toContain('先發打序')
+    expect(card).toContain('候補')
+
+    // 姓名帶背號
+    expect(card).toContain('#7 張志豪')
+    expect(card).toContain('#24 鄭凱文')
+
+    // 先發與候補都要連得到個人頁
+    expect(card).toContain('href="/players/p4"')
+    expect(card).toContain('href="/players/p10"')
+
+    // 守位視覺上是縮寫，但同時帶中文全名給輔助科技
+    expect(card).toContain('二壘手')
+  })
+
+  it('圖卡是唯一來源，所以不能對輔助科技隱藏', async () => {
+    const markup = renderedMarkup(await $fetch<string>('/games/g1'))
+    const cardStart = markup.indexOf('GAME ROSTER')
+
+    // 往前找圖卡容器的開頭。裝飾用的紋理層可以是 aria-hidden，整張卡不行。
+    const before = markup.slice(Math.max(0, cardStart - 400), cardStart)
+    expect(before).not.toMatch(/aria-hidden="true"[^>]*>\s*<div class="field-pattern[^>]*>\s*$/)
+  })
+
+  it('候補只收確定出席的人，沒回報的不算', async () => {
+    const html = await $fetch<string>('/games/g1')
+
+    /*
+     * 只看「候補」標題之後、畫面上的那一段。
+     *
+     * 兩件事都得處理：
+     * 1. 種子資料會替每個現役球員都建一筆出席紀錄（沒回報的是「未回覆」），
+     *    所以 p11「許書豪」本來就會出現在上方的出席統計裡 —— 要從標題之後切。
+     * 2. 文件最後的 SSR payload 帶著完整的 attendance 陣列，裡面一樣有他 ——
+     *    所以要先用 `renderedMarkup()` 把 payload 拿掉，只留畫面。
+     */
+    const markup = renderedMarkup(html)
+    const benchSection = markup.slice(markup.indexOf('候補'))
+
+    expect(benchSection).toContain('鄭凱文')
+    expect(benchSection).not.toContain('許書豪')
   })
 
   it('不存在的比賽回傳 404 狀態碼（SEO 需要正確的狀態碼）', async () => {
@@ -715,6 +793,31 @@ describe('推播訂閱', () => {
   it('查詢推播狀態需要登入（訂閱數不該外流）', async () => {
     const response = await fetch('/api/admin/push/status')
     expect(response.status).toBe(401)
+  })
+})
+
+/**
+ * 「分享名單」會在瀏覽器把圖卡畫成 PNG，而 canvas 畫進沒有 CORS 標頭的
+ * 跨網域圖片就會被污染。這支端點把隊徽改從自己的網域送出來。
+ *
+ * 它**沒有登入保護**，所以白名單是唯一的防線 ——「給我網址、我去抓回來」
+ * 就是 SSRF 的標準形狀。`tests/unit/media-remote.test.ts` 測的是判斷邏輯，
+ * 這裡測的是端點真的有用上它。
+ */
+describe('圖片轉送端點的白名單', () => {
+  it.each([
+    ['雲端中繼資料', 'http://169.254.169.254/latest/meta-data/'],
+    ['本機服務', 'http://localhost:3000/api/admin/players'],
+    ['任意外站', 'https://evil.example.com/x.png'],
+    ['別人的 bucket', 'https://storage.googleapis.com/someone-else/x.png'],
+    ['後綴偽裝', 'https://storage.googleapis.com.evil.example.com/e2e-bucket/x.png'],
+  ])('拒絕 %s', async (_label, src) => {
+    const response = await fetch(`/api/media/remote?src=${encodeURIComponent(src)}`)
+    expect(response.status).toBe(400)
+  })
+
+  it('沒有帶 src 也是 400，不會發出任何請求', async () => {
+    expect((await fetch('/api/media/remote')).status).toBe(400)
   })
 })
 

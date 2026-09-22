@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { GAME_RESULT_LABELS, GAME_STATUS_LABELS, isNotPlayed } from '#shared/schemas/game'
+import {
+  GAME_RESULT_LABELS,
+  GAME_STATUS_LABELS,
+  deriveBench,
+  isNotPlayed,
+} from '#shared/schemas/game'
 import { describeCountdown, daysUntil, formatGameDateLong } from '~/utils/format'
 
 /**
@@ -52,6 +57,12 @@ const score = computed(() => ({
   our: game.value?.scoreboard.totals.our.r ?? 0,
   opponent: game.value?.scoreboard.totals.opponent.r ?? 0,
 }))
+
+/**
+ * 候補：確定出席、但不在先發打線上的人。
+ * 推導而來，不是另外存的欄位 —— 理由見 `deriveBench()`。
+ */
+const bench = computed(() => (game.value ? deriveBench(game.value) : []))
 
 /** 未來場次若還沒登錄先發，顯示提示而不是一片空白。 */
 const hasLineup = computed(() => (game.value?.lineup.length ?? 0) > 0)
@@ -162,9 +173,25 @@ useHead({
 
         <div class="grid gap-8 lg:grid-cols-2">
           <section aria-labelledby="lineup-heading">
-            <h2 id="lineup-heading" class="mb-4 text-fluid-xl font-bold">當天打線</h2>
-            <GameLineup v-if="game.lineup.length" :entries="game.lineup" />
-            <UiBaseEmpty v-else title="尚未登錄打線" icon="📋" />
+            <h2 id="lineup-heading" class="mb-4 text-fluid-xl font-bold">出賽名單</h2>
+
+            <!--
+              圖卡是唯一的呈現方式（先發打序與候補都在裡面），所以它必須語意
+              完整 —— 名字是連結、守位帶中文全名。不要再補一份表格上來。
+            -->
+            <GameLineupCard
+              v-if="game.lineup.length"
+              :entries="game.lineup"
+              :team-name="teamName"
+              :team-logo-url="settings?.logoUrl"
+              :opponent="game.opponent"
+              :opponent-logo-url="game.opponentLogoUrl"
+              :bench="bench"
+              :date="game.date"
+              :time="game.time"
+              :pitchers="game.pitchers"
+            />
+            <UiBaseEmpty v-else title="尚未登錄出賽名單" icon="📋" />
           </section>
 
           <section v-if="game.pitchers.length" aria-labelledby="pitchers-heading">
@@ -219,14 +246,31 @@ useHead({
           </section>
 
           <section aria-labelledby="probable-heading">
-            <h2 id="probable-heading" class="mb-4 text-fluid-xl font-bold">先發陣容</h2>
-            <GameLineup v-if="hasLineup" :entries="game.lineup" tentative />
+            <h2 id="probable-heading" class="mb-4 text-fluid-xl font-bold">出賽名單</h2>
+
+            <GameLineupCard
+              v-if="hasLineup"
+              :entries="game.lineup"
+              :team-name="teamName"
+              :team-logo-url="settings?.logoUrl"
+              :opponent="game.opponent"
+              :opponent-logo-url="game.opponentLogoUrl"
+              :bench="bench"
+              :date="game.date"
+              :time="game.time"
+              :pitchers="game.pitchers"
+            />
             <UiBaseEmpty
               v-else
-              title="尚未安排先發陣容"
+              title="尚未安排出賽名單"
               description="教練團排定後會公布在這裡。"
               icon="📝"
             />
+
+            <!-- 「預計」這件事原本寫在表格底下，表格拿掉了就移到這裡 -->
+            <p v-if="hasLineup" class="mt-3 text-fluid-sm text-content-muted">
+              名單為預計出賽，實際以當天為準。
+            </p>
           </section>
         </div>
       </template>

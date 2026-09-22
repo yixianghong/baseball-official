@@ -37,7 +37,12 @@ const sizeClasses: Record<string, string> = {
       onDark ? 'bg-white/10 text-white' : 'bg-brand-600/10 text-brand-700',
     ]"
   >
-    <img v-if="logoUrl" :src="logoUrl" :alt="`${name} 隊徽`" class="size-full object-cover" />
+    <!--
+      `object-contain` 而不是 cover：隊徽是識別圖，裁掉一塊就不是那個標誌了。
+      橫式字標（寬高比 3:1）用 cover 會只剩中間一段，完全認不出來。
+      留一點內距，圖才不會頂到圓形容器的邊。
+    -->
+    <img v-if="logoUrl" :src="logoUrl" :alt="`${name} 隊徽`" class="size-full object-contain p-1" />
     <span v-else>{{ name.charAt(0) }}</span>
   </span>
 </template>

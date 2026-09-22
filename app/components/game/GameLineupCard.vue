@@ -1,0 +1,295 @@
+<script setup lang="ts">
+import type { AttendanceEntry, LineupEntry, PitcherEntry } from '#shared/schemas/game'
+import { POSITION_LABELS } from '#shared/schemas/player'
+import { formatGameDateLong } from '~/utils/format'
+
+/**
+ * 出賽名單圖卡。
+ *
+ * 轉播單位公布名單時用的那種直式圖卡 —— 一眼看完、適合截圖轉貼到群組。
+ * 配色全部取自球隊識別：墨藍底、金色棒次、teal 守位牌、米白姓名牌。
+ *
+ * 內容分兩段：先發打序與候補。候補沒有棒次也沒有守位，姓名牌因此往右延伸
+ * 佔滿整列 —— 不留一個永遠空白的守位欄，兩段的差別一眼就分得出來。
+ *
+ * ## 為什麼是真的 HTML 而不是產生一張圖
+ * 產圖要嘛在伺服器端跑無頭瀏覽器（為了一張圖養一個瀏覽器），要嘛在前端用
+ * canvas 重畫一次版面（等於維護兩套排版）。用 HTML 排出來的好處是：
+ * 名字長度、人數多寡、深淺色模式、手機寬度全部自動處理，改一次就好，
+ * 而且使用者照樣可以截圖。
+ *
+ * ## 這是唯一的呈現方式，所以語意必須完整
+ * 早期版本旁邊還有一份表格，圖卡只是它的視覺版本（標了 `aria-hidden`）。
+ * 表格拿掉之後，這張卡就得自己撐起全部的語意：
+ *
+ * - 名單是 `<ul>`／`<li>`，螢幕閱讀器會報出「共 N 項」
+ * - 有 `playerId` 的球員做成連結，點得進個人頁（臨時支援的球友沒有 ID，只顯示姓名）
+ * - 守位視覺上是縮寫（`2B`），但同時藏一份中文全名給輔助科技 ——
+ *   螢幕閱讀器把 `2B` 念成「二 B」對聽的人毫無意義
+ *
+ * 換句話說**不能再把 `aria-hidden` 加回來**。
+ */
+const props = withDefaults(
+  defineProps<{
+    entries: LineupEntry[]
+    /** 候補：確定出席但不在先發打序上的人。由 `deriveBench()` 推導。 */
+    bench?: AttendanceEntry[]
+    teamName: string
+    teamLogoUrl?: string
+    opponent: string
+    opponentLogoUrl?: string
+    /** `YYYY-MM-DD` */
+    date: string
+    time: string
+    pitchers?: PitcherEntry[]
+  }>(),
+  { bench: () => [], teamLogoUrl: '', opponentLogoUrl: '', pitchers: () => [] },
+)
+
+/**
+ * 先發投手。轉播圖卡會把他列在打序最後、不給棒次（指定打擊制下投手不打擊）。
+ * 已經排在打序裡的投手就不重複列。
+ */
+const startingPitcher = computed(() => {
+  const starter = props.pitchers.find((pitcher) => pitcher.role === 'starter')
+  if (!starter) return null
+
+  const inLineup = props.entries.some(
+    (entry) =>
+      (starter.playerId && entry.playerId === starter.playerId) ||
+      entry.name.trim() === starter.name.trim(),
+  )
+  return inLineup ? null : starter
+})
+
+/** `#7 張志豪`；沒有背號就只有名字，不留一個孤零零的井字號。 */
+function displayName(person: { number?: string; name: string }): string {
+  return person.number ? `#${person.number} ${person.name}` : person.name
+}
+
+/*
+ * 分享。
+ *
+ * 按鈕刻意放在 `cardRef` **外面** —— 它在圖片裡沒有意義，而且截到一顆
+ * 「分享」按鈕看起來就像截圖截壞了。用 `filter` 排除也可以，但把它放在
+ * 被截的節點之外更直接，不會有「以後改版忘了更新 filter」的風險。
+ */
+const cardRef = ref<HTMLElement | null>(null)
+const { busy, message: shareMessage, downloadImage, shareImage } = useShareRoster()
+
+const filename = computed(() => `${props.teamName}-vs-${props.opponent}-${props.date}.png`)
+
+/**
+ * 下載與分享分成兩顆按鈕。
+ *
+ * 讓一顆按鈕自己判斷「能分享就分享、不能就下載」看似聰明，實際上使用者
+ * 按下去之前不知道會發生什麼 —— 想存檔的人被叫出分享選單，想貼到群組的人
+ * 拿到一個檔案。兩個明確的動作比一個猜心思的按鈕好。
+ */
+function onDownload() {
+  return downloadImage({ node: cardRef.value, filename: filename.value })
+}
+
+function onShare() {
+  return shareImage({
+    node: cardRef.value,
+    filename: filename.value,
+    title: `${props.teamName} vs ${props.opponent} 出賽名單`,
+    text: `${formatGameDateLong(props.date)} ${props.time} — ${props.teamName} vs ${props.opponent}`,
+  })
+}
+</script>
+
+<template>
+  <div>
+    <div
+      ref="cardRef"
+      class="relative isolate overflow-hidden rounded-2xl bg-ink-deep text-white shadow-lg"
+    >
+      <!-- 球場紋理。純裝飾，要對輔助科技隱藏 -->
+      <div class="field-pattern absolute inset-0" aria-hidden="true" />
+
+      <div class="relative flex">
+        <!--
+        左側直書標題。`writing-mode` 讓中文自然由上往下排。
+      -->
+        <div
+          class="flex shrink-0 items-center justify-center bg-accent-500 px-1.5 py-6 text-ink-deep sm:px-2.5"
+        >
+          <p class="[writing-mode:vertical-rl] text-fluid-lg font-black tracking-[0.2em]">
+            出賽名單
+            <span class="ml-1 text-xs font-bold tracking-[0.3em] opacity-70">GAME ROSTER</span>
+          </p>
+        </div>
+
+        <div class="min-w-0 flex-1 p-3 sm:p-5">
+          <!-- ══ 隊名列 ══════════════════════════════════════════ -->
+          <!--
+          隊名列用 `CommonTeamLogo` 而不是 `CommonTeamCrest`：我隊的識別圖多半是
+          橫式字標，塞進圓形容器再 contain 會縮到只剩容器的三分之一高。
+          TeamLogo 是固定高度、寬度自適應，字標與方形徽章都撐得起來。
+        -->
+          <div class="mb-3 flex items-center gap-3 rounded-lg bg-white/95 px-3 py-2 text-ink-deep">
+            <CommonTeamLogo :name="teamName" :logo-url="teamLogoUrl" size="sm" />
+            <p class="min-w-0 truncate text-fluid-lg font-black tracking-wide">{{ teamName }}</p>
+          </div>
+
+          <!-- ══ 先發打序 ════════════════════════════════════════ -->
+          <p class="mb-1.5 text-xs font-black tracking-[0.25em] text-accent-400">先發打序</p>
+
+          <ul class="space-y-1">
+            <li
+              v-for="entry in entries"
+              :key="entry.order"
+              class="grid grid-cols-[2rem_minmax(0,1fr)_2.75rem] items-stretch gap-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_3.25rem]"
+            >
+              <span
+                class="flex items-center justify-center text-fluid-lg font-black tabular-nums text-accent-400"
+              >
+                {{ entry.order }}
+              </span>
+              <NuxtLink
+                v-if="entry.playerId"
+                :to="`/players/${entry.playerId}`"
+                class="flex min-w-0 items-center justify-center truncate rounded bg-white/95 px-2 py-1.5 text-center font-bold text-ink-deep transition hover:bg-white hover:underline hover:underline-offset-4"
+              >
+                {{ displayName(entry) }}
+              </NuxtLink>
+              <span
+                v-else
+                class="flex min-w-0 items-center justify-center truncate rounded bg-white/95 px-2 py-1.5 text-center font-bold text-ink-deep"
+              >
+                {{ displayName(entry) }}
+              </span>
+
+              <!--
+              視覺上是縮寫、念出來是中文全名。
+              螢幕閱讀器把 `2B` 念成「二 B」對聽的人完全沒有意義。
+            -->
+              <span
+                class="flex items-center justify-center rounded bg-brand-700 px-1 py-1.5 text-fluid-sm font-black"
+                :title="POSITION_LABELS[entry.position]"
+              >
+                <span aria-hidden="true">{{ entry.position }}</span>
+                <span class="sr-only">{{ POSITION_LABELS[entry.position] }}</span>
+              </span>
+            </li>
+
+            <!-- 先發投手：沒有棒次，位置標 SP，跟轉播圖卡一致 -->
+            <li
+              v-if="startingPitcher"
+              class="grid grid-cols-[2rem_minmax(0,1fr)_2.75rem] items-stretch gap-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_3.25rem]"
+            >
+              <span />
+              <NuxtLink
+                v-if="startingPitcher.playerId"
+                :to="`/players/${startingPitcher.playerId}`"
+                class="flex min-w-0 items-center justify-center truncate rounded bg-white/95 px-2 py-1.5 text-center font-bold text-ink-deep transition hover:bg-white hover:underline hover:underline-offset-4"
+              >
+                {{ displayName(startingPitcher) }}
+              </NuxtLink>
+              <span
+                v-else
+                class="flex min-w-0 items-center justify-center truncate rounded bg-white/95 px-2 py-1.5 text-center font-bold text-ink-deep"
+              >
+                {{ displayName(startingPitcher) }}
+              </span>
+              <span
+                class="flex items-center justify-center rounded bg-accent-500 px-1 py-1.5 text-fluid-sm font-black text-ink-deep"
+                title="先發投手"
+              >
+                <span aria-hidden="true">SP</span>
+                <span class="sr-only">先發投手</span>
+              </span>
+            </li>
+          </ul>
+
+          <!-- ══ 候補 ════════════════════════════════════════════ -->
+          <template v-if="bench.length">
+            <p class="mt-4 mb-1.5 text-xs font-black tracking-[0.25em] text-accent-400">候補</p>
+
+            <ul class="space-y-1">
+              <li
+                v-for="person in bench"
+                :key="person.playerId || person.name"
+                class="grid grid-cols-[2rem_minmax(0,1fr)] gap-1 sm:grid-cols-[2.5rem_minmax(0,1fr)]"
+              >
+                <span />
+                <!-- 沒有守位，姓名牌就佔到底。底色淡一階，與先發區分開 -->
+                <NuxtLink
+                  v-if="person.playerId"
+                  :to="`/players/${person.playerId}`"
+                  class="flex min-w-0 items-center justify-center truncate rounded bg-white/75 px-2 py-1.5 text-center font-bold text-ink-deep transition hover:bg-white hover:underline hover:underline-offset-4"
+                >
+                  {{ displayName(person) }}
+                </NuxtLink>
+                <span
+                  v-else
+                  class="flex min-w-0 items-center justify-center truncate rounded bg-white/75 px-2 py-1.5 text-center font-bold text-ink-deep"
+                >
+                  {{ displayName(person) }}
+                </span>
+              </li>
+            </ul>
+          </template>
+
+          <!-- ══ 日期與對手 ══════════════════════════════════════ -->
+          <div
+            class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3"
+          >
+            <p class="text-fluid-sm font-bold tabular-nums">
+              {{ formatGameDateLong(date) }}
+              <span class="ml-1 text-accent-400">{{ time }}</span>
+            </p>
+            <p class="flex items-center gap-2 text-fluid-sm font-bold">
+              <span class="text-white/60">VS</span>
+              <CommonTeamCrest
+                :name="opponent"
+                :logo-url="opponentLogoUrl"
+                size="sm"
+                on-dark
+                class="!size-8 !text-sm"
+              />
+              <span class="truncate">{{ opponent }}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-3 flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        class="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border px-4 text-fluid-sm font-semibold transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+        :disabled="busy !== null"
+        @click="onDownload"
+      >
+        <svg class="size-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path
+            d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 1 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4l3.3 3.3V4a1 1 0 0 1 1-1Zm-7 15a1 1 0 0 1 1 1h12a1 1 0 1 1 0 2H6a2 2 0 0 1-2-2 1 1 0 0 1 1-1Z"
+          />
+        </svg>
+        {{ busy === 'download' ? '產生圖片中…' : '下載圖片' }}
+      </button>
+
+      <button
+        type="button"
+        class="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border px-4 text-fluid-sm font-semibold transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+        :disabled="busy !== null"
+        @click="onShare"
+      >
+        <svg class="size-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path
+            d="M18 16a3 3 0 0 0-2.3 1.1l-6-3.1a3 3 0 0 0 0-1.9l6-3.1a3 3 0 1 0-.9-1.8l-6 3.1a3 3 0 1 0 0 5.4l6 3.1A3 3 0 1 0 18 16Z"
+          />
+        </svg>
+        {{ busy === 'share' ? '產生圖片中…' : '分享' }}
+      </button>
+
+      <!-- aria-live：結果是按下之後才出現的，螢幕閱讀器需要被告知 -->
+      <p v-if="shareMessage" class="text-fluid-sm text-content-muted" aria-live="polite">
+        {{ shareMessage }}
+      </p>
+    </div>
+  </div>
+</template>

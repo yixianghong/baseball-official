@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AttendanceEntry, LineupEntry } from '#shared/schemas/game'
+import { deriveBench } from '#shared/schemas/game'
 import { POSITIONS, POSITION_LABELS, type Player, type Position } from '#shared/schemas/player'
 
 /**
@@ -48,6 +49,16 @@ const attendingIds = computed(
 
 /** 是否有出席統計可用。沒有的話就只能列全隊。 */
 const hasAttendance = computed(() => attendingIds.value.size > 0)
+
+/**
+ * 還沒排進先發、但當天會到的人 —— 前台會以「候補」呈現。
+ *
+ * 用與前台完全相同的 `deriveBench()`，不在這裡另外寫一套比對：
+ * 兩邊各寫各的，遲早會出現「後台說還有 3 個人、前台列出 4 個」。
+ */
+const bench = computed(() =>
+  deriveBench({ attendance: props.attendance ?? [], lineup: model.value }),
+)
 
 /** 使用者手動切換成「顯示全部球員」—— 臨時來的人不一定有回報出席。 */
 const showAll = ref(false)
@@ -253,6 +264,20 @@ function fillFromRoster() {
           顯示全部球員
         </button>
       </template>
+    </p>
+
+    <!--
+      候補人數。排打線時最容易忽略的就是「還有誰沒排到」——
+      這一行讓它不必自己對照出席名單去數。前台會把這些人列成「候補」。
+    -->
+    <p v-if="hasAttendance && model.length" class="text-fluid-sm text-content-muted">
+      <template v-if="bench.length">
+        還有
+        <strong class="text-content tabular-nums">{{ bench.length }}</strong>
+        位出席隊員不在先發名單上，前台會顯示為候補：
+        <span class="text-content">{{ bench.map((entry) => entry.name).join('、') }}</span>
+      </template>
+      <template v-else>回報出席的隊員都已排進先發，沒有候補。</template>
     </p>
 
     <p v-else class="text-fluid-sm text-content-muted">

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  deriveBench,
   deriveResult,
   emptyScoreboard,
   gameInputSchema,
@@ -198,5 +199,94 @@ describe('沒有打成的場次', () => {
       status: 'postponed',
     })
     expect(parsed.status).toBe('postponed')
+  })
+})
+
+/**
+ * 候補名單是推導出來的（出席 − 先發），不是另外存的欄位。
+ * 比對錯了的症狀是「同一個人同時出現在先發與候補」，或是有到的人整個消失 ——
+ * 兩種在畫面上都很刺眼，但只要比對邏輯錯一個分支就會發生。
+ */
+describe('deriveBench', () => {
+  const attend = (playerId: string, name: string, status = 'yes' as const, number = '') => ({
+    playerId,
+    name,
+    number,
+    status,
+    note: '',
+  })
+  const bat = (order: number, playerId: string, name: string) => ({
+    order,
+    playerId,
+    name,
+    number: '',
+    position: 'P' as const,
+  })
+
+  it('確定出席但不在打線上的人才是候補', () => {
+    const bench = deriveBench({
+      attendance: [attend('p1', '王小明'), attend('p2', '陳大文'), attend('p3', '林志豪')],
+      lineup: [bat(1, 'p1', '王小明')],
+    })
+
+    expect(bench.map((entry) => entry.name)).toEqual(['陳大文', '林志豪'])
+  })
+
+  it('沒有確定出席的人不算候補（他們根本不會到）', () => {
+    const bench = deriveBench({
+      attendance: [
+        attend('p1', '不出席', 'no'),
+        attend('p2', '待確認', 'maybe'),
+        attend('p3', '未回覆', 'pending'),
+        attend('p4', '會到', 'yes'),
+      ],
+      lineup: [],
+    })
+
+    expect(bench.map((entry) => entry.name)).toEqual(['會到'])
+  })
+
+  /**
+   * 打線允許 `playerId` 為空（臨時來支援的球友不在名單裡），而且後台可以
+   * 直接手打名字而不從清單挑。少了姓名比對，已經上場的人會被誤判成還在板凳上。
+   */
+  it('打線上只有姓名、沒有 playerId 時也要認得出來', () => {
+    const bench = deriveBench({
+      attendance: [attend('p1', '王小明'), attend('p2', '陳大文')],
+      lineup: [bat(1, '', '王小明')],
+    })
+
+    expect(bench.map((entry) => entry.name)).toEqual(['陳大文'])
+  })
+
+  it('姓名前後有空白也要對得起來', () => {
+    const bench = deriveBench({
+      attendance: [attend('', ' 王小明 ')],
+      lineup: [bat(1, '', '王小明')],
+    })
+
+    expect(bench).toEqual([])
+  })
+
+  it('還沒排先發時，所有確定出席的人都是候補', () => {
+    const bench = deriveBench({
+      attendance: [attend('p1', '王小明'), attend('p2', '陳大文')],
+      lineup: [],
+    })
+
+    expect(bench).toHaveLength(2)
+  })
+
+  it('沒有出席資料就沒有候補', () => {
+    expect(deriveBench({ attendance: [], lineup: [bat(1, 'p1', '王小明')] })).toEqual([])
+  })
+
+  it('保留背號與備註，前台要顯示', () => {
+    const bench = deriveBench({
+      attendance: [attend('p9', '王小明', 'yes', '99')],
+      lineup: [],
+    })
+
+    expect(bench[0]).toMatchObject({ number: '99', name: '王小明' })
   })
 })
