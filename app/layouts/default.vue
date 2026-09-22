@@ -64,7 +64,17 @@ useHead({
       跳至主要內容
     </a>
 
-    <header class="sticky top-0 z-40 bg-ink text-white">
+    <!--
+      `pt-[env(safe-area-inset-top)]` 不能省。
+
+      head 裡設了 `apple-mobile-web-app-status-bar-style: black-translucent`，
+      加到主畫面之後網頁內容會**延伸到狀態列底下**（配合 viewport-fit=cover）。
+      那是刻意的 —— 墨藍色的導覽列一路鋪到螢幕最頂端才好看。但少了這個內距，
+      隊徽與選單鈕就會被時間和訊號圖示直接壓在上面。
+
+      瀏覽器分頁裡 `env(safe-area-inset-top)` 是 0，所以桌機與一般瀏覽不受影響。
+    -->
+    <header class="sticky top-0 z-40 bg-ink pt-[env(safe-area-inset-top)] text-white">
       <div class="flex min-h-16 items-stretch lg:min-h-20">
         <!-- 隊徽座：比導覽列更深的方塊，整個頁面的視覺錨點 -->
         <!--
@@ -118,6 +128,15 @@ useHead({
             <CommonSocialIcon :label="social.label" />
             <span class="sr-only">{{ social.label }}</span>
           </a>
+
+          <!--
+            推播開關。ClientOnly 是必要的：它的狀態取決於這台裝置的通知權限
+            與既有訂閱，而公開頁面會被 CDN 快取送給所有人 —— 任何「因裝置而異」
+            的東西都不能進 SSR 輸出。
+          -->
+          <ClientOnly>
+            <CommonPushSwitch compact class="mr-2 hidden lg:flex" />
+          </ClientOnly>
 
           <!--
             用 inline SVG 而不是 emoji：emoji 的長相由作業系統的字型決定，
@@ -209,6 +228,12 @@ useHead({
         :aria-label="t('nav.mobile')"
       >
         <div class="flex flex-col py-2">
+          <!-- 通知開關擺在選單最上面：它是設定，不是導覽的一個目的地 -->
+          <ClientOnly>
+            <CommonPushSwitch />
+            <hr class="my-2 border-white/10" />
+          </ClientOnly>
+
           <NuxtLink
             v-for="link in navLinks"
             :key="link.to"
@@ -257,7 +282,8 @@ useHead({
       <slot />
     </main>
 
-    <footer class="mt-16 bg-ink py-12 text-white">
+    <!-- 底部也要留安全區域，否則最後一行會被 iPhone 的 home indicator 壓住 -->
+    <footer class="mt-16 bg-ink py-12 pb-[calc(3rem+env(safe-area-inset-bottom))] text-white">
       <div
         class="container-content flex flex-col gap-8 md:flex-row md:items-start md:justify-between"
       >
@@ -309,18 +335,6 @@ useHead({
       </div>
 
       <div class="container-content mt-10 border-t border-white/15 pt-6">
-        <!--
-          推播訂閱放在頁尾，而且只在瀏覽器支援時才會出現。
-          `<ClientOnly>` 是必要的：這一塊的內容取決於通知權限與既有訂閱，
-          那是每台裝置各自的狀態。公開頁面會被 CDN 快取送給所有人，
-          任何「因裝置而異」的東西都不能進 SSR 輸出。
-        -->
-        <ClientOnly>
-          <div class="mb-6 flex justify-center">
-            <CommonPushToggle />
-          </div>
-        </ClientOnly>
-
         <p class="text-center text-fluid-sm text-white/60">
           © {{ new Date().getFullYear() }} {{ teamName }}
         </p>

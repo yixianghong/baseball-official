@@ -24,12 +24,17 @@ export function usePushSubscription() {
   const { public: publicConfig } = useRuntimeConfig()
   const { subscribe, unsubscribe } = usePushSubscriptionActions()
 
-  const state = ref<PushState>('unavailable')
-  const busy = ref(false)
-  const message = ref('')
+  /*
+   * 狀態用 `useState` 而不是 `ref`，因為同一個畫面上可能有兩個訂閱開關
+   * （桌機在導覽列、手機在選單裡）。各自持有 `ref` 的話，在其中一個切換
+   * 不會反映到另一個 —— 視窗一縮放就會看到兩個互相矛盾的開關。
+   */
+  const state = useState<PushState>('push:state', () => 'unavailable')
+  const busy = useState<boolean>('push:busy', () => false)
+  const message = useState<string>('push:message', () => '')
 
   /** 已訂閱時保留 endpoint，退訂時要送回後端。 */
-  const endpoint = ref('')
+  const endpoint = useState<string>('push:endpoint', () => '')
 
   const isBusy = computed(() => busy.value)
 

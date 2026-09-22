@@ -356,7 +356,7 @@ function fillFromRoster() {
       看起來才像一條真正的工具列，而不是一個浮在中間的方塊。
     -->
     <div
-      class="sticky bottom-0 z-20 -mx-4 flex flex-wrap items-center gap-2 border-t border-border bg-surface/95 px-4 py-3 backdrop-blur md:-mx-8 md:px-8"
+      class="sticky bottom-0 z-20 -mx-4 flex flex-wrap items-center gap-2 border-t border-border bg-surface/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur md:-mx-8 md:px-8"
     >
       <UiBaseButton variant="secondary" size="sm" @click="addEntry">＋ 新增棒次</UiBaseButton>
 
