@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { GameInput, HomeAway } from '#shared/schemas/game'
-import { emptyScoreboard } from '#shared/schemas/game'
+import { emptyScoreboard, isGoogleMapsUrl } from '#shared/schemas/game'
 import { LOW_CONFIDENCE_THRESHOLD, type ParsedMatch } from '#shared/schemas/ai'
 import { teamNameCandidates } from '#shared/schemas/settings'
+import { TAIWAN_CITIES, type TaiwanCity } from '#shared/schemas/weather'
 import { ApiError } from '~/utils/api-error'
 import { formatGameDate } from '~/utils/format'
 
@@ -114,11 +115,31 @@ async function importSelected() {
 }
 
 // ── 手動新增 ────────────────────────────────────────────────────
+/*
+ * 主場縣市帶進來當預設。`watchEffect` 而不是初始化時指定：網站設定是
+ * 非同步載入的，表單建立的當下還沒有值。只在使用者還沒自己選過時才帶，
+ * 否則設定一載完就會把他剛選的客場縣市蓋掉。
+ */
+const cityTouched = ref(false)
+watchEffect(() => {
+  if (cityTouched.value || form.city) return
+  form.city = settings.value?.homeCity ?? ''
+})
+
+/** 與編輯頁相同的即時驗證：真正的防線在 BFF，這裡是為了當下就講。 */
+const mapUrlError = computed(() =>
+  form.mapUrl && !isGoogleMapsUrl(form.mapUrl)
+    ? '請貼 Google 地圖的連結（maps.app.goo.gl 或 google.com/maps）'
+    : '',
+)
+
 const form = reactive({
   date: '',
   time: '09:00',
   opponent: '',
   venue: '',
+  mapUrl: '',
+  city: '' as TaiwanCity | '',
   league: '',
   homeAway: 'home' as HomeAway,
   note: '',
@@ -320,6 +341,25 @@ useHead({ title: '新增比賽' })
         <UiBaseInput v-model="form.venue" label="場地" placeholder="例如：市立棒球場" />
         <UiBaseInput v-model="form.league" label="賽事名稱" placeholder="例如：春季聯賽" />
       </div>
+
+      <!-- 批次建立那一側刻意不放這欄：賽程公告圖上本來就沒有地圖連結，
+           而五欄的表格再塞一個長網址輸入框會擠爆 -->
+      <UiBaseSelect
+        v-model="form.city"
+        label="場地所在縣市"
+        placeholder="— 不顯示天氣 —"
+        :options="TAIWAN_CITIES.map((city) => ({ value: city, label: city }))"
+        hint="用來查當天天氣。預設帶入網站設定的主場縣市，客場記得改。"
+        @update:model-value="cityTouched = true"
+      />
+
+      <UiBaseInput
+        v-model="form.mapUrl"
+        label="Google 地圖連結"
+        placeholder="https://maps.app.goo.gl/..."
+        hint="選填。留空的話前台會用場地名稱自動組搜尋連結。"
+        :error="mapUrlError"
+      />
 
       <UiBaseSelect v-model="form.homeAway" label="主客場" :options="homeAwayOptions" />
 

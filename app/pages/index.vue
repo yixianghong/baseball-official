@@ -24,10 +24,24 @@ const { data: upcoming } = await useGames({ scope: 'upcoming', limit: 4 })
 const { data: recent } = await useGames({ scope: 'past', limit: 3 })
 const { data: announcements } = await useAnnouncements({ limit: 3 })
 
+/**
+ * 近期比賽的天氣。一次查完所有要顯示的場次，不要一場一個請求。
+ * `server: false`，所以首屏不會等氣象署（見 `useGamesWeather`）。
+ */
+const weatherIds = computed(() => (upcoming.value ?? []).map((game) => game.id))
+const { data: weather } = useGamesWeather(weatherIds)
+
 const teamName = computed(() => settings.value?.teamName ?? '')
 const nextGame = computed(() => upcoming.value?.[0] ?? null)
 /** 最近一場已結束的比賽。列表已由 BFF 依日期新到舊排序，取第一筆即可。 */
 const lastGame = computed(() => recent.value?.[0] ?? null)
+
+/** 下一場比賽的天氣。不該顯示的狀態回 null，那一欄就整個不出現。 */
+const nextGameWeather = computed(() => {
+  const result = nextGame.value ? (weather.value?.[nextGame.value.id] ?? null) : null
+  if (!result || result.status === 'no-city' || result.status === 'not-configured') return null
+  return result
+})
 
 const nextGameCountdown = computed(() =>
   nextGame.value ? describeCountdown(daysUntil(nextGame.value.date, today.value)) : '',
@@ -111,6 +125,7 @@ useHead({ title: '首頁' })
     <HomeScoreBanner
       :last-game="lastGame"
       :upcoming="upcoming ?? []"
+      :weather="weather ?? undefined"
       :team-name="teamName"
       :team-logo-url="settings?.logoUrl ?? ''"
     />
@@ -127,7 +142,7 @@ useHead({ title: '首頁' })
 
         <NuxtLink
           :to="`/games/${nextGame.id}`"
-          class="block border border-border border-l-4 border-l-brand-600 bg-surface-raised p-6 shadow-sm transition hover:border-brand-300 hover:shadow-md md:p-8"
+          class="block rounded-xl border border-l-4 border-border border-l-brand-600 bg-surface-raised p-6 shadow-sm transition hover:shadow-md md:p-8"
         >
           <div class="flex flex-wrap items-center gap-3">
             <UiBaseBadge tone="brand">{{ nextGameCountdown }}</UiBaseBadge>
@@ -163,6 +178,12 @@ useHead({ title: '首頁' })
                 <span class="font-normal text-content-muted">
                   （{{ nextGame.homeAway === 'home' ? '主場' : '客場' }}）
                 </span>
+              </dd>
+            </div>
+            <div v-if="nextGameWeather">
+              <dt class="text-content-muted">當天天氣</dt>
+              <dd class="font-semibold">
+                <GameWeather :weather="nextGameWeather" />
               </dd>
             </div>
           </dl>

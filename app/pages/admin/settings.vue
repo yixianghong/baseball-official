@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { SiteSettingsForm } from '#shared/schemas/settings'
 import { teamNameCandidates } from '#shared/schemas/settings'
+import { TAIWAN_CITIES } from '#shared/schemas/weather'
 
 /**
  * 網站設定。
@@ -28,6 +29,7 @@ const form = reactive<SiteSettingsForm>({
   heroImageUrl: '',
   foundedYear: null,
   homeField: '',
+  homeCity: '',
   contactEmail: '',
   socialLinks: [],
 })
@@ -45,6 +47,7 @@ watchEffect(() => {
     heroImageUrl: settings.value.heroImageUrl,
     foundedYear: settings.value.foundedYear,
     homeField: settings.value.homeField,
+    homeCity: settings.value.homeCity,
     contactEmail: settings.value.contactEmail,
     socialLinks: settings.value.socialLinks.map((link) => ({ ...link })),
   })
@@ -162,6 +165,14 @@ useHead({ title: '網站設定' })
           />
           <UiBaseInput v-model="form.homeField" label="主場球場" />
         </div>
+
+        <UiBaseSelect
+          v-model="form.homeCity"
+          label="主場縣市"
+          placeholder="— 不設定 —"
+          :options="TAIWAN_CITIES.map((city) => ({ value: city, label: city }))"
+          hint="新增比賽時會帶入這個縣市，用來查當天的天氣預報。每場比賽都可以改。"
+        />
 
         <UiBaseInput v-model="form.contactEmail" label="聯絡信箱" type="email" />
 

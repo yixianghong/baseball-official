@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { MAX_WEATHER_QUERY_IDS } from '#shared/schemas/weather'
 import { MAX_GAME_QUERY_LIMIT } from '#shared/schemas/game'
 /**
  * 近期賽程。
@@ -16,6 +17,14 @@ const {
 } = await useGames({ scope: 'upcoming', limit: MAX_GAME_QUERY_LIMIT })
 
 const teamName = computed(() => settings.value?.teamName ?? '')
+
+/**
+ * 這一頁所有場次的天氣，一個請求查完。
+ * 超出一週預報範圍的場次伺服器端就直接回 out-of-range，不會去打氣象署。
+ */
+const { data: weather } = useGamesWeather(() =>
+  (games.value ?? []).slice(0, MAX_WEATHER_QUERY_IDS).map((game) => game.id),
+)
 
 useHead({ title: '近期賽程' })
 </script>
@@ -38,6 +47,7 @@ useHead({ title: '近期賽程' })
           v-for="game in games"
           :key="game.id"
           :game="game"
+          :weather="weather?.[game.id] ?? null"
           :our-name="teamName"
           :today="today"
         />

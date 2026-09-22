@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { citySchema } from './weather'
 
 /**
  * 網站設定 —— Firestore 中 `siteSettings/main` 這一份單一文件。
@@ -32,6 +33,8 @@ export const siteSettingsInputSchema = z.object({
   heroImageUrl: z.string().trim().default(''),
   foundedYear: z.number().int().min(1900).max(2100).nullable().default(null),
   homeField: z.string().trim().max(60).default(''),
+  /** 主場所在縣市。新增比賽時會帶進去當預設，省下每一場都要選一次。 */
+  homeCity: citySchema.default(''),
   contactEmail: z.string().trim().max(80).default(''),
   socialLinks: z.array(socialLinkSchema).max(6).default([]),
 })
@@ -66,6 +69,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   heroImageUrl: '',
   foundedYear: null,
   homeField: '',
+  homeCity: '',
   contactEmail: '',
   socialLinks: [],
   updatedAt: '',

@@ -114,6 +114,31 @@ env:
     availability:
       - RUNTIME
 
+  # ── 中央氣象署（比賽當天的天氣預報）─────────────────────────────
+  #
+  # 授權碼申請：https://opendata.cwa.gov.tw/user/authkey
+  # 機密建立與授權（兩行都寫成單行 —— 續行的反斜線後面只要多一個空白，
+  # zsh 會把它當成「轉義的空白」而不是換行，後面的旗標整串被當成一個參數，
+  # 而且**不會報錯**，看起來像成功了，實際上什麼都沒發生）：
+  #
+  #   echo -n "<授權碼>" | firebase apphosting:secrets:set cwa-api-key --project hg-baseball --data-file -
+  #   firebase apphosting:secrets:grantaccess cwa-api-key --project hg-baseball --backend baseball-official --location asia-east1
+  #
+  # ⚠️ CLI 問「要不要加進 apphosting.yaml」時一樣選 No（理由見上面的說明）。
+  #
+  # 授權到底有沒有生效要另外驗，不能只看指令沒報錯：
+  #
+  #   gcloud secrets get-iam-policy cwa-api-key --project hg-baseball
+  #
+  # 正常會看到 firebase-app-hosting-compute@ 的 secretAccessor。空的（只有
+  # etag）就是沒授權，而症狀要等到部署才會出現。
+  #
+  # 沒設定時天氣功能會自動關閉，不影響網站其他功能。
+  - variable: NUXT_CWA_API_KEY
+    secret: cwa-api-key
+    availability:
+      - RUNTIME
+
   # ── 執行環境 ────────────────────────────────────────────────────
   - variable: LOG_LEVEL
     value: info

@@ -114,6 +114,18 @@ export default defineNuxtConfig({
       timeoutMs: 60_000,
     },
 
+    // --- 中央氣象署（比賽當天的天氣預報）---
+    cwa: {
+      /**
+       * 氣象資料開放平臺的授權碼。
+       * 申請：https://opendata.cwa.gov.tw/user/authkey
+       *
+       * 留空時天氣功能整個關閉（後台的縣市欄位還在，只是前台不顯示天氣），
+       * 網站其餘功能不受影響。
+       */
+      apiKey: '',
+    },
+
     // --- 推播（Web Push / VAPID）---
     /**
      * VAPID 是「我們是誰」的簽章，推送服務用它驗證發送方。

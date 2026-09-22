@@ -101,8 +101,10 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 - **動畫不能讓內容預設隱藏** — `.reveal` 預設可見，JS 才把視窗外的元素藏起來。
   反過來做等於「內容的可見性依賴 JS 成功執行」。
 - **列表頁一定要有 error 分支** — 少了它，「載入失敗」會長得跟「沒有資料」一模一樣。
-- **e2e 必須隔離正式資料庫** — `tests/e2e/bff.test.ts` 開頭把 `NUXT_FIREBASE_*` 與
-  `NUXT_GEMINI_API_KEY` 清成空字串。`.env` 一旦有真憑證，測試會直接寫進正式 Firestore。
+- **e2e 必須隔離所有外部服務** — `tests/e2e/bff.test.ts` 開頭把 `NUXT_FIREBASE_*`、
+  `NUXT_GEMINI_API_KEY` 與 `NUXT_CWA_API_KEY` 清成空字串。`.env` 一旦有真憑證，
+  測試會直接寫進正式 Firestore、或真的去打氣象署的 API。**新增任何外部服務的金鑰時，
+  記得回來加一行。**
 - **flex/grid item 的 `min-width: auto`** 會撐破容器，`minmax(0,1fr)` 只約束軌道管不到 item。
 - **Tailwind 掃不到執行期拼出來的 class**（`sm:${變數}`），完整名稱要寫死在原始碼裡。
 - **改檔案前先讀** — prettier 會重排 template，憑印象做字串替換常常匹配不到。
@@ -120,6 +122,18 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 - **公開頁面的 SSR 輸出不能因人而異** — 它們會被 CDN 快取送給所有訪客。加 cookie、
   依 cookie 改渲染、把登入狀態畫進 HTML，都會默默破壞快取或把狀態送給別人，
   而且畫面上完全看不出來。詳見「部署」章節。
+
+### 天氣預報（`server/utils/cwa.ts`）
+
+中央氣象署 `F-D0047-091`（一週預報，實際回傳 22 個縣市）。**結構是打過真 API
+確認的，不要照文件猜**：外層 `records.Locations[].Location[]` 大寫開頭、
+`ElementName` 是中文（`天氣現象`／`最高溫度`／`12小時降雨機率`）、篩選參數是
+大寫的 `LocationName`（小寫會被無視並回傳 20 倍的資料）。`F-C0032-005` 不存在。
+
+`/api/games/[id]/weather` 是獨立端點，不併進比賽資料 —— 氣象署慢或掛掉時不該
+讓整個比賽頁跟著壞，比賽頁也才能繼續走 CDN 快取。前端 `server: false`。
+
+縣市是後台明確選的，不從場地名稱猜：猜錯會顯示成別的縣市的天氣，比不顯示更糟。
 
 ### 分享出賽名單（`app/composables/useShareRoster.ts`）
 

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import type { Scoreboard } from '../../shared/schemas/game'
 import GameScoreboard from '../../app/components/game/GameScoreboard.vue'
+import { emptyScoreboard } from '../../shared/schemas/game'
+import GameCard from '../../app/components/game/GameCard.vue'
 import GameLineupCard from '../../app/components/game/GameLineupCard.vue'
 import GameAttendance from '../../app/components/game/GameAttendance.vue'
 
@@ -87,6 +89,55 @@ describe('GameScoreboard', () => {
  * 它是前台唯一的名單呈現方式（原本旁邊那份表格已經移除），所以這裡測的
  * 不只是畫面 —— 連結與守位的無障礙標示都是它自己要撐起來的。
  */
+/**
+ * 卡片左側的狀態色條。
+ *
+ * 首頁的「下一場比賽」本來就用這個手法，賽程／結果的卡片卻只有一圈灰邊 ——
+ * 兩種卡片語言擺在同一頁看起來像兩個網站拼起來的。統一之後色條還帶了資訊：
+ * 掃過一排卡片就知道哪場贏、哪場輸、哪場還沒打。
+ */
+describe('GameCard 的狀態色條', () => {
+  const base = {
+    id: 'g1',
+    date: '2026-09-29',
+    time: '09:00',
+    opponent: '藍鷹隊',
+    venue: '',
+    mapUrl: '',
+    city: '' as const,
+    league: '',
+    homeAway: 'home' as const,
+    note: '',
+    coverImageUrl: '',
+    opponentLogoUrl: '',
+    attendance: [],
+    lineup: [],
+    pitchers: [],
+    scoreboard: emptyScoreboard(0),
+    createdAt: '',
+    updatedAt: '',
+  }
+
+  const mount = (overrides: Record<string, unknown>) =>
+    mountSuspended(GameCard, {
+      props: {
+        game: { ...base, status: 'scheduled', result: null, ...overrides },
+        ourName: '城市隊',
+        today: '2026-09-22',
+      },
+    })
+
+  it.each([
+    ['未開打', { status: 'scheduled', result: null }, 'border-l-brand-600'],
+    ['勝', { status: 'finished', result: 'win' }, 'border-l-accent-500'],
+    ['敗', { status: 'finished', result: 'loss' }, 'border-l-danger'],
+    ['因雨延賽', { status: 'postponed', result: null }, 'border-l-warning'],
+  ])('%s 用對應的顏色', async (_label, overrides, expected) => {
+    const component = await mount(overrides)
+    expect(component.find('a').classes()).toContain(expected)
+  })
+})
+
 describe('GameLineupCard', () => {
   const entries = [
     { order: 1, playerId: 'p1', name: '張志豪', number: '7', position: '2B' as const },

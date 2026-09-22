@@ -3,6 +3,7 @@ import {
   GAME_RESULT_LABELS,
   GAME_STATUS_LABELS,
   deriveBench,
+  gameMapUrl,
   isNotPlayed,
 } from '#shared/schemas/game'
 import { describeCountdown, daysUntil, formatGameDateLong } from '~/utils/format'
@@ -63,6 +64,33 @@ const score = computed(() => ({
  * 推導而來，不是另外存的欄位 —— 理由見 `deriveBench()`。
  */
 const bench = computed(() => (game.value ? deriveBench(game.value) : []))
+
+/** 地圖連結。後台沒填時用場地名稱組搜尋連結，見 `gameMapUrl()`。 */
+const mapUrl = computed(() => (game.value ? gameMapUrl(game.value) : ''))
+
+/**
+ * 當天天氣。只有還沒打的場次才查 —— 已經打完的比賽顯示「預報」沒有意義，
+ * 而且氣象署也查不到過去的日期。
+ */
+const { data: weather } = useGameWeather(gameId)
+
+/**
+ * 天氣那一欄要不要出現。
+ *
+ * 沒有指定縣市、或站台沒設定授權碼時 `GameWeather` 自己會不顯示，但主視覺的
+ * `<dt>當天天氣</dt>` 是外面這一層畫的 —— 不一起判斷就會留下一個空標籤。
+ *
+ * ⚠️ **這個判斷不能把 `pending` 算進去。** 天氣是 `server: false` 查的，
+ * SSR 階段的狀態是 idle（不是 pending），但瀏覽器一 hydrate 就立刻變成
+ * pending —— 兩邊畫出來的東西不一樣，就是 hydration mismatch。
+ * 代價是資料回來時版面會跳一下，這比渲染錯誤好。
+ */
+const showWeather = computed(
+  () =>
+    weather.value !== null &&
+    weather.value.status !== 'no-city' &&
+    weather.value.status !== 'not-configured',
+)
 
 /** 未來場次若還沒登錄先發，顯示提示而不是一片空白。 */
 const hasLineup = computed(() => (game.value?.lineup.length ?? 0) > 0)
@@ -135,12 +163,50 @@ useHead({
           <dl class="mt-6 grid gap-4 border-t border-white/20 pt-5 text-fluid-sm sm:grid-cols-3">
             <div>
               <dt class="text-white/60">場地</dt>
-              <dd class="font-medium">{{ game.venue || '未定' }}</dd>
+              <dd class="font-medium">
+                <!--
+                  有地圖連結就讓場地名稱本身可以點。另外開分頁，並且加上
+                  `rel="noopener"` —— 少了它，被開啟的頁面可以透過
+                  `window.opener` 把原分頁導去別的地方。
+                -->
+                <a
+                  v-if="mapUrl"
+                  :href="mapUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center gap-1.5 underline decoration-white/40 underline-offset-4 transition hover:decoration-white"
+                >
+                  {{ game.venue || '未定' }}
+                  <svg
+                    class="size-4 shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M12 2a7 7 0 0 0-7 7c0 5.2 6.3 12.3 6.6 12.6a.5.5 0 0 0 .8 0C12.7 21.3 19 14.2 19 9a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"
+                    />
+                  </svg>
+                  <span class="sr-only">（在 Google 地圖開啟）</span>
+                </a>
+                <template v-else>{{ game.venue || '未定' }}</template>
+              </dd>
             </div>
             <div>
               <dt class="text-white/60">主客場</dt>
               <dd class="font-medium">
                 {{ game.homeAway === 'home' ? '主場（後攻）' : '客場（先攻）' }}
+              </dd>
+            </div>
+            <!--
+              天氣放在主視覺裡：決定要不要去，天氣多半是先看的那一個。
+              沒有縣市、或站台沒設定授權碼時，`GameWeather` 整塊不顯示 ——
+              所以這裡的 `v-if` 跟著它的條件走，才不會留下一個空的「當天天氣」標籤。
+            -->
+            <div v-if="showWeather">
+              <dt class="text-white/60">當天天氣</dt>
+              <dd class="font-medium">
+                <GameWeather :weather="weather" />
               </dd>
             </div>
             <div v-if="game.note">

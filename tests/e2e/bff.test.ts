@@ -35,6 +35,9 @@ process.env.NUXT_FIREBASE_PRIVATE_KEY = ''
 process.env.NUXT_FIREBASE_STORAGE_BUCKET = ''
 process.env.NUXT_FIREBASE_WEB_API_KEY = ''
 process.env.NUXT_GEMINI_API_KEY = ''
+// 氣象署也要清掉：`.env` 有授權碼的話，e2e 會真的去打中央氣象署的 API ——
+// 測試不該依賴外部服務的可用性，也不該替別人消耗人家的流量配額
+process.env.NUXT_CWA_API_KEY = ''
 
 // e2e 跑的是 production 建置，而 production 預設會因為缺少 Firebase 設定而拒絕啟動
 // （見 server/plugins/00.env-validate.ts）。這個開關是專門為了這個場景而存在的例外。
@@ -804,6 +807,44 @@ describe('推播訂閱', () => {
  * 就是 SSRF 的標準形狀。`tests/unit/media-remote.test.ts` 測的是判斷邏輯，
  * 這裡測的是端點真的有用上它。
  */
+describe('比賽天氣', () => {
+  /**
+   * 沒有設定氣象署授權碼時（e2e 就是這個狀態），天氣功能要**安靜地關閉**，
+   * 而不是讓比賽頁跟著出錯。前台收到 `not-configured` 會整塊不顯示。
+   */
+  it('沒有設定授權碼時回 not-configured，不是錯誤', async () => {
+    const response = await fetch('/api/weather?ids=g1')
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).data.g1.status).toBe('not-configured')
+  })
+
+  /** 首頁與賽程頁會一次列好幾場，批次才不會變成三四趟往返。 */
+  it('一次查多場只發一個請求，回傳 id 對照表', async () => {
+    const body = await $fetch<{ data: Record<string, { status: string }> }>('/api/weather', {
+      query: { ids: 'g1,g2,g3' },
+    })
+
+    expect(Object.keys(body.data).sort()).toEqual(['g1', 'g2', 'g3'])
+  })
+
+  it('不存在的比賽不算錯誤，其他場次照常回傳', async () => {
+    const body = await $fetch<{ data: Record<string, { status: string }> }>('/api/weather', {
+      query: { ids: 'g1,nope' },
+    })
+
+    expect(Object.keys(body.data).sort()).toEqual(['g1', 'nope'])
+    expect(body.data.nope!.status).toBe('no-city')
+  })
+
+  it('沒帶 ids 或超過上限都會被擋下', async () => {
+    expect((await fetch('/api/weather')).status).toBe(400)
+
+    const tooMany = Array.from({ length: 21 }, (_, i) => `g${i}`).join(',')
+    expect((await fetch(`/api/weather?ids=${tooMany}`)).status).toBe(400)
+  })
+})
+
 describe('圖片轉送端點的白名單', () => {
   it.each([
     ['雲端中繼資料', 'http://169.254.169.254/latest/meta-data/'],

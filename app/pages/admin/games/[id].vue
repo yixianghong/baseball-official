@@ -12,8 +12,10 @@ import {
   emptyScoreboard,
   GAME_RESULT_LABELS,
   GAME_STATUS_LABELS,
+  isGoogleMapsUrl,
 } from '#shared/schemas/game'
 import { teamNameCandidates } from '#shared/schemas/settings'
+import { TAIWAN_CITIES, type TaiwanCity } from '#shared/schemas/weather'
 import { formatGameDateLong } from '~/utils/format'
 
 /**
@@ -79,6 +81,8 @@ const basic = reactive({
   time: '',
   opponent: '',
   venue: '',
+  mapUrl: '',
+  city: '' as TaiwanCity | '',
   league: '',
   homeAway: 'home' as 'home' | 'away',
   status: 'scheduled' as 'scheduled' | 'finished' | 'canceled',
@@ -86,6 +90,19 @@ const basic = reactive({
   coverImageUrl: '',
   opponentLogoUrl: '',
 })
+
+/**
+ * 地圖連結的即時驗證。
+ *
+ * 真正的防線在 BFF 的 schema，這裡是為了**當下就講**。這一頁是自動儲存的，
+ * 沒有送出按鈕 —— 等伺服器回 400 才顯示錯誤的話，使用者看到的會是狀態列
+ * 一句「儲存失敗」，而不知道是哪個欄位、為什麼。
+ */
+const mapUrlError = computed(() =>
+  basic.mapUrl && !isGoogleMapsUrl(basic.mapUrl)
+    ? '請貼 Google 地圖的連結（maps.app.goo.gl 或 google.com/maps）'
+    : '',
+)
 
 const attendance = ref<AttendanceEntry[]>([])
 const lineup = ref<LineupEntry[]>([])
@@ -104,6 +121,8 @@ function syncFromGame() {
     time: current.time,
     opponent: current.opponent,
     venue: current.venue,
+    mapUrl: current.mapUrl,
+    city: current.city,
     league: current.league,
     homeAway: current.homeAway,
     status: current.status,
@@ -250,6 +269,22 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           <UiBaseInput v-model="basic.venue" label="場地" />
           <UiBaseInput v-model="basic.league" label="賽事名稱" />
         </div>
+
+        <UiBaseSelect
+          v-model="basic.city"
+          label="場地所在縣市"
+          placeholder="— 不顯示天氣 —"
+          :options="TAIWAN_CITIES.map((city) => ({ value: city, label: city }))"
+          hint="用來查比賽當天的天氣預報（中央氣象署只提供一週內的預報）。留空就不顯示天氣。"
+        />
+
+        <UiBaseInput
+          v-model="basic.mapUrl"
+          label="Google 地圖連結"
+          placeholder="https://maps.app.goo.gl/..."
+          hint="留空的話，前台會用上面的場地名稱自動組一個 Google 地圖搜尋連結。手機版 Google 地圖按「分享」複製到的網址可以直接貼。"
+          :error="mapUrlError"
+        />
 
         <div class="grid gap-4 sm:grid-cols-2">
           <UiBaseSelect

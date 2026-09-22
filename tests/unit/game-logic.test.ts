@@ -3,6 +3,8 @@ import {
   deriveBench,
   deriveResult,
   emptyScoreboard,
+  gameMapUrl,
+  isGoogleMapsUrl,
   gameInputSchema,
   gameQuerySchema,
   isFinished,
@@ -16,6 +18,7 @@ import {
   announcementQuerySchema,
   MAX_ANNOUNCEMENT_QUERY_LIMIT,
 } from '../../shared/schemas/announcement'
+import { isWithinForecastRange } from '../../shared/schemas/weather'
 
 /**
  * 比賽資料的核心邏輯。
@@ -288,5 +291,91 @@ describe('deriveBench', () => {
     })
 
     expect(bench[0]).toMatchObject({ number: '99', name: '王小明' })
+  })
+})
+
+/**
+ * 地圖連結會變成前台的一個對外連結。後台是信任的來源，但「信任」不等於
+ * 「不會手滑」—— 貼錯的下場是球隊官網上掛著一個看起來像地圖的外部連結。
+ */
+describe('isGoogleMapsUrl', () => {
+  it('接受 Google 地圖的各種形式', () => {
+    expect(isGoogleMapsUrl('https://maps.app.goo.gl/abc123')).toBe(true)
+    expect(isGoogleMapsUrl('https://www.google.com/maps/place/xxx')).toBe(true)
+    expect(isGoogleMapsUrl('https://maps.google.com/?q=台北')).toBe(true)
+    expect(isGoogleMapsUrl('https://goo.gl/maps/abc')).toBe(true)
+  })
+
+  it('拒絕 google.com 上不是地圖的路徑', () => {
+    expect(isGoogleMapsUrl('https://www.google.com/search?q=xxx')).toBe(false)
+    expect(isGoogleMapsUrl('https://www.google.com/')).toBe(false)
+  })
+
+  it('拒絕把 google.com 藏在別的位置的偽造網址', () => {
+    // 用字串 includes 判斷就會中招
+    expect(isGoogleMapsUrl('https://evil.example.com/?x=google.com/maps')).toBe(false)
+    expect(isGoogleMapsUrl('https://google.com.evil.example.com/maps')).toBe(false)
+    expect(isGoogleMapsUrl('https://www.google.com@evil.example.com/maps')).toBe(false)
+  })
+
+  it('拒絕非 https 與不是網址的東西', () => {
+    expect(isGoogleMapsUrl('http://maps.google.com/x')).toBe(false)
+    expect(isGoogleMapsUrl('javascript:alert(1)')).toBe(false)
+    expect(isGoogleMapsUrl('隨便打的字')).toBe(false)
+    expect(isGoogleMapsUrl('')).toBe(false)
+  })
+})
+
+describe('gameMapUrl', () => {
+  it('有填連結就直接用', () => {
+    expect(gameMapUrl({ mapUrl: 'https://maps.app.goo.gl/abc', venue: '新莊新月橋' })).toBe(
+      'https://maps.app.goo.gl/abc',
+    )
+  })
+
+  it('沒填連結就用場地名稱組搜尋連結', () => {
+    const url = gameMapUrl({ mapUrl: '', venue: '新莊新月橋' })
+
+    expect(url).toContain('google.com/maps/search/')
+    // 中文與空白都要編碼，不能直接串進網址
+    expect(url).toContain(encodeURIComponent('新莊新月橋'))
+    expect(isGoogleMapsUrl(url)).toBe(true)
+  })
+
+  it('連場地都沒有就沒有連結（不要給一個搜尋空字串的連結）', () => {
+    expect(gameMapUrl({ mapUrl: '', venue: '' })).toBe('')
+  })
+})
+
+/**
+ * 預報範圍判斷。氣象署的一週預報是硬限制，超出範圍的日期連請求都不該發出。
+ */
+describe('isWithinForecastRange', () => {
+  const today = '2026-09-22'
+
+  it('今天與未來一週內都算範圍內', () => {
+    expect(isWithinForecastRange('2026-09-22', today)).toBe(true)
+    expect(isWithinForecastRange('2026-09-25', today)).toBe(true)
+    expect(isWithinForecastRange('2026-09-29', today)).toBe(true) // 第 7 天
+  })
+
+  it('超過一週就不在範圍內（賽程常常幾個月前就排好）', () => {
+    expect(isWithinForecastRange('2026-09-30', today)).toBe(false)
+    expect(isWithinForecastRange('2026-12-01', today)).toBe(false)
+  })
+
+  it('過去的日期沒有預報可言', () => {
+    expect(isWithinForecastRange('2026-09-21', today)).toBe(false)
+  })
+
+  it('跨月與跨年都要算對，不能只比字串或日數', () => {
+    expect(isWithinForecastRange('2026-10-01', '2026-09-28')).toBe(true)
+    expect(isWithinForecastRange('2027-01-02', '2026-12-31')).toBe(true)
+    expect(isWithinForecastRange('2027-01-08', '2026-12-31')).toBe(false)
+  })
+
+  it('日期格式壞掉時回 false，不要讓它變成一個必然失敗的請求', () => {
+    expect(isWithinForecastRange('不是日期', today)).toBe(false)
+    expect(isWithinForecastRange('2026-09-25', '壞掉的今天')).toBe(false)
   })
 })

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { citySchema } from './weather'
 import { positionSchema } from './player'
 
 /**
@@ -161,6 +162,52 @@ export function deriveResult(totals: Scoreboard['totals']): GameResult {
  * 日期用 `YYYY-MM-DD` 字串而非 Date：Firestore 的字串排序等同時間排序，
  * 查詢與顯示都不必處理時區，而球賽本來就是「當地時間的某一天」。
  */
+/**
+ * 是不是 Google 地圖的網址。
+ *
+ * 比對主機名稱而不是用 `includes`：`https://evil.example.com/?x=google.com/maps`
+ * 也含有那段字串。分享出來的短網址（`maps.app.goo.gl`）也要認得，
+ * 因為那才是手機版「分享」給出的格式。
+ */
+const GOOGLE_MAPS_HOSTS = [
+  'maps.app.goo.gl',
+  'goo.gl',
+  'maps.google.com',
+  'www.google.com',
+  'google.com',
+]
+
+export function isGoogleMapsUrl(value: string): boolean {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return false
+  }
+
+  if (url.protocol !== 'https:') return false
+  if (!GOOGLE_MAPS_HOSTS.includes(url.hostname)) return false
+
+  // google.com 底下只有 /maps 算數，否則整個 google.com 都會通過
+  if (url.hostname.endsWith('google.com') && url.hostname !== 'maps.google.com') {
+    return url.pathname.startsWith('/maps')
+  }
+  return true
+}
+
+/**
+ * 這場比賽的地圖連結。
+ *
+ * 後台沒填時用場地名稱組一個 Google 地圖搜尋連結 —— 業餘球隊的場地多半是
+ * 「新莊新月橋」這種搜尋得到的地標，與其讓連結消失，不如給一個八成會對的。
+ * 連場地都沒填才回傳空字串。
+ */
+export function gameMapUrl(game: Pick<Game, 'mapUrl' | 'venue'>): string {
+  if (game.mapUrl) return game.mapUrl
+  if (!game.venue) return ''
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(game.venue)}`
+}
+
 export const gameInputSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式須為 YYYY-MM-DD'),
   time: z
@@ -169,6 +216,26 @@ export const gameInputSchema = z.object({
     .default('09:00'),
   opponent: z.string().trim().min(1, '請輸入對戰球隊').max(40),
   venue: z.string().trim().max(60).default(''),
+  /**
+   * Google 地圖連結。留空時前台會用場地名稱自動組一個搜尋連結。
+   *
+   * 限定只能是 Google 地圖的網域：這個值會變成前台的一個連結，
+   * 貼錯（或被貼上別的東西）就是一個掛在球隊官網上、看起來像地圖的外部連結。
+   * 後台是信任的來源，但「信任」不等於「不會手滑」。
+   */
+  mapUrl: z
+    .string()
+    .trim()
+    .max(500)
+    .default('')
+    .refine((value) => value === '' || isGoogleMapsUrl(value), '請貼 Google 地圖的連結'),
+  /**
+   * 場地所在縣市。只為了查天氣預報而存在，前台不單獨顯示。
+   *
+   * 留空就不顯示天氣 —— 氣象署的預報要指定縣市，而場地欄位是自由輸入的
+   * 文字，硬猜會顯示成別的縣市的天氣，比不顯示更糟。
+   */
+  city: citySchema.default(''),
   league: z.string().trim().max(40).default(''),
   homeAway: homeAwaySchema.default('home'),
   status: gameStatusSchema.default('scheduled'),

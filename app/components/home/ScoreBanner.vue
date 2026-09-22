@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Game } from '#shared/schemas/game'
+import type { WeatherMap } from '#shared/schemas/weather'
 import { formatGameDate } from '~/utils/format'
 
 /**
@@ -20,6 +21,8 @@ const props = defineProps<{
   lastGame: Game | null
   /** 接下來的場次，最多顯示三場。 */
   upcoming: Game[]
+  /** 比賽 id → 天氣。查不到的場次不會有這一筆，小卡就不顯示溫度。 */
+  weather?: WeatherMap
   teamName: string
   teamLogoUrl: string
 }>()
@@ -220,6 +223,8 @@ const columnsClass = computed(() => {
               <p class="line-clamp-1 text-center text-xs text-content-muted">
                 {{ game.venue || game.opponent }}
               </p>
+              <!-- 小卡只有溫度：一格寬 128px，塞得下的就這麼多 -->
+              <GameWeather :weather="weather?.[game.id] ?? null" variant="mini" />
             </NuxtLink>
           </li>
         </ul>
