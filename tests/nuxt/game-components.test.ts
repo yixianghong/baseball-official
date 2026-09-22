@@ -427,4 +427,77 @@ describe('GameCalendar', () => {
     // 但月曆本身還在，9 月有 30 天
     expect(component.findAll('.grid-cols-7 > *').length).toBeGreaterThan(30)
   })
+
+  /*
+   * ── 年月選擇器 ─────────────────────────────────────────────
+   *
+   * 「一個月一個月按」在場次橫跨好幾年之後就不堪用。這裡要守住兩件事：
+   * 中間沒有比賽的月份**選得進去**（不然跟壞掉的上／下一月同一個坑），
+   * 而超出範圍的月份**點不下去**（點了會被 clampMonth 拉回來）。
+   */
+  const openPicker = async (component: Awaited<ReturnType<typeof mount>>) => {
+    const title = component
+      .findAll('button')
+      .find((b) => b.attributes('aria-haspopup') === 'dialog')!
+    await title.trigger('click')
+    return component.find('[role="dialog"]')
+  }
+
+  const wide = (month = '2026-09') =>
+    mountSuspended(GameCalendar, {
+      props: {
+        games: [game('g1', '2025-05-10'), game('g2', '2026-09-16')],
+        month,
+        availableMonths: ['2025-05', '2026-09'],
+      },
+    })
+
+  it('點年月標題會打開選擇器，選了就跳過去', async () => {
+    const component = await wide()
+    expect(component.find('[role="dialog"]').exists()).toBe(false)
+
+    const panel = await openPicker(component)
+    expect(panel.exists()).toBe(true)
+
+    // 2026 年的 3 月完全沒有比賽，但在範圍內，照樣要選得進去
+    const march = panel.findAll('button').find((b) => b.text().startsWith('3 月'))!
+    expect(march.attributes('disabled')).toBeUndefined()
+
+    await march.trigger('click')
+    expect(component.emitted('update:month')?.at(-1)).toEqual(['2026-03'])
+    // 選完就收起來
+    expect(component.find('[role="dialog"]').exists()).toBe(false)
+  })
+
+  it('超出最早～最晚範圍的月份停用', async () => {
+    const component = await wide()
+    const panel = await openPicker(component)
+
+    // 最晚是 2026-09，10 月之後沒有資料
+    const october = panel.findAll('button').find((b) => b.text().startsWith('10 月'))!
+    expect(october.attributes('disabled')).toBeDefined()
+  })
+
+  it('可以翻到前一年，年份到頭就停用', async () => {
+    const component = await wide()
+    const panel = await openPicker(component)
+
+    const prevYear = panel.findAll('button').find((b) => b.attributes('aria-label') === '上一年')!
+    const nextYear = panel.findAll('button').find((b) => b.attributes('aria-label') === '下一年')!
+
+    // 打開時停在目前的 2026，已經是最後一年
+    expect(nextYear.attributes('disabled')).toBeDefined()
+    expect(prevYear.attributes('disabled')).toBeUndefined()
+
+    await prevYear.trigger('click')
+    expect(panel.text()).toContain('2025 年')
+
+    // 2025 年只有 5 月之後在範圍內，1 月選不了
+    const january = panel.findAll('button').find((b) => b.text().startsWith('1 月'))!
+    expect(january.attributes('disabled')).toBeDefined()
+
+    const may = panel.findAll('button').find((b) => b.text().startsWith('5 月'))!
+    await may.trigger('click')
+    expect(component.emitted('update:month')?.at(-1)).toEqual(['2025-05'])
+  })
 })

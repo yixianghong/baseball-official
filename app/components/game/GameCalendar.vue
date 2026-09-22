@@ -52,16 +52,68 @@ const bounds = computed(() => {
 const canGoPrev = computed(() => props.month > bounds.value.first)
 const canGoNext = computed(() => props.month < bounds.value.last)
 
-/** 每個月有幾場，給快速跳轉的選單用。場次一多，一個月一個月按太慢。 */
-const monthOptions = computed(() =>
-  [...props.availableMonths]
-    .sort()
-    .reverse()
-    .map((key) => {
-      const count = props.games.filter((game) => toMonthKey(game.date) === key).length
-      return { value: key, label: `${formatMonth(key)}（${count} 場）` }
-    }),
+/*
+ * ── 年月選擇器 ──────────────────────────────────────────────────
+ *
+ * 點標題直接選年月。場次橫跨好幾年之後，一個月一個月按會按到天荒地老，
+ * 而下拉選單只列得出「有比賽的月份」—— 使用者想去的可能是中間的空月份。
+ *
+ * 超出範圍的年月一律停用而不是讓人點了再彈回來：點得下去卻沒反應，
+ * 跟按鈕壞掉沒有兩樣（這個坑剛踩過）。
+ */
+const pickerOpen = ref(false)
+const pickerYear = ref(0)
+const pickerRef = ref<HTMLElement | null>(null)
+
+onClickOutside(pickerRef, () => (pickerOpen.value = false))
+onKeyStroke('Escape', () => (pickerOpen.value = false))
+
+function togglePicker() {
+  pickerOpen.value = !pickerOpen.value
+  // 每次打開都從目前所在的年份開始，而不是停在上次翻到的地方
+  if (pickerOpen.value) pickerYear.value = Number(props.month.slice(0, 4))
+}
+
+/** 最早～最晚之間的所有年份（含中間完全沒比賽的年）。 */
+const years = computed(() => {
+  const sorted = [...props.availableMonths].sort()
+  const first = Number((sorted[0] ?? props.month).slice(0, 4))
+  const last = Number((sorted.at(-1) ?? props.month).slice(0, 4))
+  return Array.from({ length: Math.max(1, last - first + 1) }, (_, i) => first + i)
+})
+
+const canPrevYear = computed(() => pickerYear.value > (years.value[0] ?? 0))
+const canNextYear = computed(() => pickerYear.value < (years.value.at(-1) ?? 0))
+
+/** 每個月有幾場，選擇器上用小圓點標出來。 */
+const countByMonth = computed(() => {
+  const map = new Map<string, number>()
+  for (const game of props.games) {
+    const key = toMonthKey(game.date)
+    map.set(key, (map.get(key) ?? 0) + 1)
+  }
+  return map
+})
+
+/** 選擇器上的 12 個月。 */
+const pickerMonths = computed(() =>
+  Array.from({ length: 12 }, (_, i) => {
+    const key = `${pickerYear.value}-${String(i + 1).padStart(2, '0')}`
+    return {
+      key,
+      label: `${i + 1} 月`,
+      count: countByMonth.value.get(key) ?? 0,
+      // 超出「最早～最晚」的範圍就選不了，選了也只會被 clampMonth 拉回來
+      selectable: key >= bounds.value.first && key <= bounds.value.last,
+      current: key === props.month,
+    }
+  }),
 )
+
+function pick(key: string) {
+  emit('update:month', key)
+  pickerOpen.value = false
+}
 
 /** 格子上小圓點的顏色。與賽程卡左側的色條同一套語彙。 */
 function dotClass(game: Game): string {
@@ -85,7 +137,7 @@ function describe(games: Game[]): string {
   <div class="surface-card rounded-xl border border-border bg-surface-raised p-4 md:p-5">
     <!-- ══ 月份導覽 ═════════════════════════════════════════════ -->
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-1">
+      <div ref="pickerRef" class="relative flex items-center gap-1">
         <button
           type="button"
           class="flex size-9 items-center justify-center rounded-lg border border-border transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
@@ -100,9 +152,25 @@ function describe(games: Game[]): string {
           </svg>
         </button>
 
-        <p class="min-w-32 text-center text-fluid-lg font-bold tabular-nums">
+        <!-- 標題本身是按鈕：點了直接選年月 -->
+        <button
+          type="button"
+          class="flex min-h-9 min-w-32 items-center justify-center gap-1 rounded-lg px-2 text-fluid-lg font-bold tabular-nums transition hover:bg-surface-muted"
+          :aria-expanded="pickerOpen"
+          aria-haspopup="dialog"
+          @click="togglePicker"
+        >
           {{ formatMonth(month) }}
-        </p>
+          <svg
+            class="size-4 shrink-0 text-content-muted transition"
+            :class="pickerOpen ? 'rotate-180' : ''"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M12 15.4 5.3 8.7a1 1 0 0 1 1.4-1.4l5.3 5.3 5.3-5.3a1 1 0 1 1 1.4 1.4Z" />
+          </svg>
+        </button>
 
         <button
           type="button"
@@ -117,17 +185,77 @@ function describe(games: Game[]): string {
             />
           </svg>
         </button>
-      </div>
 
-      <!-- 比賽稀疏時一個月一個月按太慢，給一個直接跳的選單 -->
-      <UiBaseSelect
-        v-if="monthOptions.length > 1"
-        :model-value="month"
-        label=""
-        class="w-48"
-        :options="monthOptions"
-        @update:model-value="emit('update:month', String($event))"
-      />
+        <!-- ══ 年月選擇器 ═══════════════════════════════════════ -->
+        <div
+          v-if="pickerOpen"
+          class="surface-card absolute top-full left-0 z-30 mt-2 w-72 rounded-xl border border-border bg-surface-raised p-3"
+          role="dialog"
+          aria-label="選擇年月"
+        >
+          <div class="mb-2 flex items-center justify-between">
+            <button
+              type="button"
+              class="flex size-8 items-center justify-center rounded-lg border border-border transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+              :disabled="!canPrevYear"
+              aria-label="上一年"
+              @click="pickerYear -= 1"
+            >
+              <svg class="size-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path
+                  d="M15.4 4.6a1 1 0 0 1 0 1.4L9.4 12l6 6a1 1 0 1 1-1.4 1.4l-6.7-6.7a1 1 0 0 1 0-1.4L14 4.6a1 1 0 0 1 1.4 0Z"
+                />
+              </svg>
+            </button>
+
+            <p class="text-fluid-base font-bold tabular-nums">{{ pickerYear }} 年</p>
+
+            <button
+              type="button"
+              class="flex size-8 items-center justify-center rounded-lg border border-border transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+              :disabled="!canNextYear"
+              aria-label="下一年"
+              @click="pickerYear += 1"
+            >
+              <svg class="size-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path
+                  d="M8.6 4.6a1 1 0 0 0 0 1.4l6 6-6 6a1 1 0 1 0 1.4 1.4l6.7-6.7a1 1 0 0 0 0-1.4L10 4.6a1 1 0 0 0-1.4 0Z"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <!--
+            12 個月一次攤開。小圓點代表那個月有比賽 —— 沒有點的月份照樣選得進去
+            （球隊整個月沒出賽很正常），只有超出「最早～最晚」範圍的才停用。
+            點得下去卻沒反應跟按鈕壞掉沒有兩樣，這個坑剛踩過。
+          -->
+          <div class="grid grid-cols-4 gap-1">
+            <button
+              v-for="item in pickerMonths"
+              :key="item.key"
+              type="button"
+              class="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg border text-fluid-sm font-medium transition disabled:cursor-not-allowed disabled:border-transparent disabled:opacity-30"
+              :class="
+                item.current
+                  ? 'border-brand-600 bg-brand-600/10 font-bold text-brand-700 dark:text-brand-300'
+                  : 'border-transparent hover:bg-surface-muted'
+              "
+              :disabled="!item.selectable"
+              :aria-current="item.current ? 'true' : undefined"
+              @click="pick(item.key)"
+            >
+              {{ item.label }}
+              <span
+                class="size-1 rounded-full"
+                :class="item.count ? 'bg-accent-500' : 'bg-transparent'"
+                aria-hidden="true"
+              />
+              <span v-if="item.count" class="sr-only">{{ item.count }} 場</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ══ 月曆 ═════════════════════════════════════════════════ -->
