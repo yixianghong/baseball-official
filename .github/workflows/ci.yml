@@ -81,32 +81,53 @@ jobs:
 
       - name: 建置
         run: pnpm build
-        env:
-          NUXT_API_BASE_URL: https://api.example.com
 
-      - name: 驗證產物能實際啟動，且 demo 區不存在於 production
+      # 這一步驗證的是「建置產物真的跑得起來」—— 測試是在原始碼上跑的，
+      # 建置設定壞掉（例如相依沒被正確標為 external）測試一樣會全過。
+      - name: 缺少必要設定時必須拒絕啟動
         run: |
-          node .output/server/index.mjs &
+          # production 少了 Firebase 設定卻照常啟動，等於整個網站悄悄跑在
+          # 記憶體示範資料上。這裡確認它會明確地失敗，而不是默默降級。
+          if node .output/server/index.mjs > startup.log 2>&1; then
+            echo "::error::缺少 Firebase 設定時仍然啟動成功，設定驗證失效了"
+            cat startup.log
+            exit 1
+          fi
+          grep -q "設定驗證失敗" startup.log
+          echo "✓ 設定不完整時如預期拒絕啟動"
+
+      - name: 驗證產物能實際啟動並服務請求
+        run: |
+          # ALLOW_MEMORY_STORE 讓它跑在記憶體資料上，CI 不需要也不該連正式資料庫
+          ALLOW_MEMORY_STORE=true node .output/server/index.mjs &
           SERVER_PID=$!
           for i in $(seq 1 30); do
-            curl -sf http://localhost:3000/api/health && break
+            curl -sf http://localhost:3000/api/health > /dev/null && break
             sleep 1
           done
 
           # 健康檢查要通
           curl -sf http://localhost:3000/api/health | grep -q '"success":true'
 
-          # demo 頁面在 production 建置時已被 pages:extend 移除，必須回 404
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/demo)" = "404"
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/demo/api)" = "404"
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/demo/login)" = "404"
+          # 前台每一頁都要能渲染
+          for path in / /schedule /results /players /news; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3000$path")
+            test "$code" = "200" || { echo "::error::$path 回應 $code"; exit 1; }
+          done
 
-          # demo API 由 server middleware 擋下，同樣回 404
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/demo/list)" = "404"
+          # 後台未登入必須被導向登入頁，而不是直接進得去
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/admin)
+          test "$code" = "302" || { echo "::error::/admin 未登入時回應 $code，應為 302"; exit 1; }
+
+          # 寫入端點未登入必須回 401
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H 'content-type: application/json' -d '{}' \
+            http://localhost:3000/api/admin/players)
+          test "$code" = "401" || { echo "::error::未登入的寫入端點回應 $code，應為 401"; exit 1; }
 
           kill $SERVER_PID
         env:
-          NUXT_API_BASE_URL: https://api.example.com
+          ALLOW_MEMORY_STORE: 'true'
 
   docker:
     name: Docker 映像
