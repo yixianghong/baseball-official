@@ -2,7 +2,6 @@
 import type { Announcement } from '#shared/schemas/announcement'
 import { CATEGORY_LABELS } from '#shared/schemas/announcement'
 import { formatDateTime } from '~/utils/format'
-import { markdownToText } from '~/utils/markdown'
 
 /**
  * 公告卡片。
@@ -36,15 +35,6 @@ const tone = computed(() => {
       return 'neutral' as const
   }
 })
-
-/**
- * 摘要模式的內容。
- *
- * 刻意不是「渲染後的 Markdown 再 line-clamp」：`-webkit-line-clamp` 是以
- * 文字行為單位裁切的，遇到標題、清單、圖片這些區塊會裁在很奇怪的位置，
- * 而且剪一半的標題看起來像壞掉。摘要本來就只需要一段純文字。
- */
-const excerpt = computed(() => markdownToText(props.announcement.content))
 </script>
 
 <template>
@@ -86,14 +76,15 @@ const excerpt = computed(() => markdownToText(props.announcement.content))
       <!--
         公告內容是 Markdown。安全性的說明見 `app/utils/markdown.ts` ——
         簡而言之：解析器設定成不輸出任何原始 HTML，所以不需要事後清洗。
-      -->
-      <p v-if="compact" class="line-clamp-3 text-fluid-sm leading-relaxed text-content-muted">
-        {{ excerpt }}
-      </p>
 
+        摘要模式（首頁）渲染的是同一份 Markdown，只是用 `.markdown-clamp`
+        限制高度。不用 `-webkit-line-clamp`：它以文字行為單位裁切，遇到清單
+        或標題會裁在很奇怪的位置，而且得把容器改成 `-webkit-box`，
+        裡面的區塊元素會跟著變成 box item，清單的項目符號直接消失。
+      -->
       <UiBaseMarkdown
-        v-else
         class="text-fluid-sm text-content-muted"
+        :class="compact ? 'markdown-clamp' : ''"
         :source="announcement.content"
       />
     </div>

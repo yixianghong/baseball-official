@@ -9,6 +9,7 @@ import HomeScoreBanner from '../../app/components/home/ScoreBanner.vue'
 import GameCalendar from '../../app/components/game/GameCalendar.vue'
 import GameLineupCard from '../../app/components/game/GameLineupCard.vue'
 import GameAttendance from '../../app/components/game/GameAttendance.vue'
+import GameWeather from '../../app/components/game/GameWeather.vue'
 
 /**
  * 比賽相關元件。
@@ -499,5 +500,38 @@ describe('GameCalendar', () => {
     const may = panel.findAll('button').find((b) => b.text().startsWith('5 月'))!
     await may.trigger('click')
     expect(component.emitted('update:month')?.at(-1)).toEqual(['2025-05'])
+  })
+})
+
+/**
+ * 天氣預報的各種「沒有資料」。
+ *
+ * 這幾句文案就是這個功能的全部使用者介面 —— 查不到的時候畫面上只剩它們。
+ * 最常見的情況（賽程排在一週以後）完全正常，語氣不能像壞掉。
+ */
+describe('GameWeather', () => {
+  it('超出預報範圍時說明原因，而不是說查無資料', async () => {
+    const component = await mountSuspended(GameWeather, {
+      props: { weather: { status: 'out-of-range' as const } },
+    })
+
+    expect(component.text()).toContain('只預報一週內')
+    // 氣象署給的本來就是概略的一週預報，寫「7 天」讀起來像精確的承諾
+    expect(component.text()).not.toContain('天後')
+  })
+
+  it('獨立區塊版本多帶一句「比賽接近時再回來看」', async () => {
+    const component = await mountSuspended(GameWeather, {
+      props: { weather: { status: 'out-of-range' as const }, variant: 'block' as const },
+    })
+
+    expect(component.text()).toContain('氣象署只預報一週內的天氣')
+  })
+
+  it('沒選縣市或站台沒設定授權碼時整塊不顯示（那是設定問題，不該給訪客看）', async () => {
+    for (const status of ['no-city', 'not-configured'] as const) {
+      const component = await mountSuspended(GameWeather, { props: { weather: { status } } })
+      expect(component.text()).toBe('')
+    }
   })
 })

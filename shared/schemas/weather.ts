@@ -85,7 +85,13 @@ export const weatherResultSchema = z.discriminatedUnion('status', [
 
 export type WeatherResult = z.infer<typeof weatherResultSchema>
 
-/** 一週預報的天數上限。超過就不必打 API 了。 */
+/**
+ * 一週預報的天數上限。超過就不必打 API 了。
+ *
+ * ⚠️ 前台的文案直接寫「只預報一週內」（`GameWeather.vue`），沒有代入這個數字 ——
+ * 「7 天」在畫面上讀起來像精確的承諾，而氣象署給的本來就是概略的一週預報。
+ * 真要改這個數字，記得一起改那兩句文案，否則畫面會說謊。
+ */
 export const FORECAST_HORIZON_DAYS = 7
 
 /**

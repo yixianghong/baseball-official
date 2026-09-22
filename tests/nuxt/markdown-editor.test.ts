@@ -37,16 +37,22 @@ describe('NewsAnnouncementCard', () => {
     expect(wrapper.find('h1').exists()).toBe(false)
   })
 
-  it('摘要模式改用純文字，不把語法秀出來', async () => {
+  it('摘要模式（首頁）渲染同一份 Markdown，只是限制高度', async () => {
     const wrapper = await mountSuspended(AnnouncementCard, {
       props: { announcement, compact: true },
     })
 
-    expect(wrapper.find('.markdown').exists()).toBe(false)
-    const text = wrapper.find('.line-clamp-3').text()
-    expect(text).toContain('集合時間')
-    expect(text).not.toContain('**')
-    expect(text).not.toContain('##')
+    const markdown = wrapper.find('.markdown')
+    expect(markdown.exists()).toBe(true)
+    expect(markdown.classes()).toContain('markdown-clamp')
+    // 語法記號不該露出來 —— 露出來就代表根本沒渲染
+    expect(markdown.text()).not.toContain('**')
+    expect(markdown.find('strong').text()).toBe('週六 09:00')
+  })
+
+  it('完整模式不套高度限制', async () => {
+    const wrapper = await mountSuspended(AnnouncementCard, { props: { announcement } })
+    expect(wrapper.find('.markdown').classes()).not.toContain('markdown-clamp')
   })
 })
 

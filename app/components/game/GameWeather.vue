@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { WeatherResult } from '#shared/schemas/weather'
-import { FORECAST_HORIZON_DAYS } from '#shared/schemas/weather'
 
 /**
  * 比賽當天的天氣預報。
@@ -76,9 +75,7 @@ const temperature = computed(() =>
     </template>
 
     <!-- 排在一週以後是最常見的情況，而且完全正常，語氣不要像出錯 -->
-    <span v-else-if="weather?.status === 'out-of-range'" class="opacity-70">
-      預報只到 {{ FORECAST_HORIZON_DAYS }} 天後
-    </span>
+    <span v-else-if="weather?.status === 'out-of-range'" class="opacity-70"> 只預報一週內 </span>
     <span v-else class="opacity-70">暫時查不到</span>
   </template>
 
@@ -103,7 +100,7 @@ const temperature = computed(() =>
     </template>
 
     <p v-else-if="weather?.status === 'out-of-range'" class="text-fluid-sm text-content-muted">
-      氣象署的預報只到 {{ FORECAST_HORIZON_DAYS }} 天後，比賽接近時再回來看。
+      氣象署只預報一週內的天氣，比賽接近時再回來看。
     </p>
     <p v-else class="text-fluid-sm text-content-muted">暫時查不到天氣預報，請稍後再試。</p>
   </div>

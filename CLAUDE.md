@@ -166,9 +166,14 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 作者按的每個 Enter 都看得到。CommonMark 預設單一換行只是空白，關掉它既有的公告
 會整篇擠成一段。
 
-摘要（首頁卡片、後台列表、推播內容）一律走 `markdownToText()`。它走的是**同一個
+只能放純文字的地方（後台列表、推播內容）走 `markdownToText()`。它走的是**同一個
 解析器的 token 樹**，不是正規表示式 —— 「這兩個星號是不是語法」沒辦法用 regex
 正確判斷，而摘要跟內文對不上會很奇怪。
+
+首頁的公告卡片渲染的是完整的 Markdown，只是多套一個 `.markdown-clamp` 限制高度。
+不用 `-webkit-line-clamp`：它要求容器是 `-webkit-box`，裡面的區塊元素會變成
+box item，清單的項目符號直接消失。淡出漸層的停點用 **em（從頂端起算）而不是
+百分比** —— 百分比會讓只有兩行的公告下緣也糊掉，明明什麼都沒裁到。
 
 後台編輯器 `AdminMarkdownEditor` 的預覽用的是前台那個 `UiBaseMarkdown`，
 所以「預覽沒問題、發布後跑版」不可能發生。工具列的文字操作全在
