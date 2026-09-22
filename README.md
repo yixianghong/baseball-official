@@ -404,7 +404,13 @@ firebase apphosting:secrets:grantaccess nuxt-session-password --backend <後端�
 
 **3. 確認 `apphosting.yaml` 裡的非機密設定**
 
-`NUXT_PUBLIC_SITE_URL` 要改成實際的網址（自訂網域或 `*.web.app`）。
+`NUXT_PUBLIC_SITE_URL` 要改成後端實際的網址。目前的值是：
+
+```
+https://baseball-official--hg-baseball.asia-east1.hosted.app
+```
+
+之後若綁了自訂網域，記得一併改掉 —— 它用在 SEO 的絕對連結上。
 
 ### 安全規則
 

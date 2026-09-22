@@ -42,7 +42,7 @@ runConfig:
 env:
   # ── 公開設定（會進前端 bundle，只能放非機密）──────────────────────
   - variable: NUXT_PUBLIC_SITE_URL
-    value: https://hg-baseball.web.app
+    value: https://baseball-official--hg-baseball.asia-east1.hosted.app
     availability:
       - BUILD
       - RUNTIME
