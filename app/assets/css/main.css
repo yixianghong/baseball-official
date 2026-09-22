@@ -244,6 +244,110 @@
   }
 
   /**
+   * 卡片的立體感。
+   *
+   * ## 深色模式不能靠陰影
+   * 陰影是「比背景更暗」，而深色底本來就很暗 —— 在 `oklch(0.21)` 的底色上
+   * 疊一層黑，肉眼幾乎分辨不出來。整個網站看起來因此很平。
+   *
+   * 所以兩種模式用不同的手法：
+   * - **亮色**：柔和的投影，這是一般的做法
+   * - **深色**：頂緣一道亮邊（模擬光從上方來）＋ 由上而下的微弱漸層
+   *
+   * 亮邊這招是深色介面做層次的標準手法 —— 它不是在「加陰影」，
+   * 而是在「標示這個面朝上」。
+   */
+  .surface-card {
+    box-shadow:
+      0 1px 2px oklch(0 0 0 / 0.04),
+      0 10px 24px -14px oklch(0 0 0 / 0.18);
+  }
+
+  :root:where(.dark) .surface-card {
+    background-image: linear-gradient(to bottom, oklch(1 0 0 / 0.045), transparent 45%);
+    box-shadow:
+      inset 0 1px 0 oklch(1 0 0 / 0.07),
+      0 12px 28px -18px oklch(0 0 0 / 0.6);
+  }
+
+  /**
+   * 可點擊卡片的浮起效果。
+   *
+   * 位移只有 2px —— 夠讓手感「有回應」，又不會讓一整排卡片在滑鼠掃過時
+   * 像波浪一樣此起彼落。搭配 `.surface-card` 時陰影也會跟著加深。
+   */
+  .lift {
+    transition:
+      transform 0.2s ease-out,
+      box-shadow 0.2s ease-out,
+      border-color 0.2s ease-out;
+  }
+
+  .lift:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 2px 4px oklch(0 0 0 / 0.05),
+      0 16px 32px -16px oklch(0 0 0 / 0.25);
+  }
+
+  :root:where(.dark) .lift:hover {
+    box-shadow:
+      inset 0 1px 0 oklch(1 0 0 / 0.12),
+      0 18px 36px -18px oklch(0 0 0 / 0.75);
+  }
+
+  /*
+   * `transform` 不是 transition，所以上面那條全域的 reduced-motion 規則
+   * （把 duration 壓成 0.01ms）擋不住它 —— 位移只會變成瞬間發生。
+   * 要求減少動態效果的人不該看到任何位移，所以這裡明確關掉。
+   */
+  @media (prefers-reduced-motion: reduce) {
+    .lift:hover {
+      transform: none;
+    }
+  }
+
+  /**
+   * 主視覺的環境光。
+   *
+   * 一大塊純深色再怎麼配字都是平的。這裡疊一層極淡的品牌色光暈，
+   * 並讓它非常緩慢地飄移（18 秒一個來回）—— 慢到不會讓人分心，
+   * 但畫面不再是死的。
+   *
+   * 用 `::after` 而不是多一層 div：它純粹是裝飾，不該出現在 DOM 裡
+   * 讓輔助科技去理解。
+   */
+  .hero-glow::after {
+    content: '';
+    position: absolute;
+    inset: -10%;
+    pointer-events: none;
+    background: radial-gradient(55% 45% at 50% 35%, var(--color-brand-500) 0%, transparent 70%);
+    opacity: 0.16;
+    animation: hero-drift 18s ease-in-out infinite alternate;
+  }
+
+  @keyframes hero-drift {
+    from {
+      transform: translate3d(-3%, -2%, 0) scale(1);
+    }
+    to {
+      transform: translate3d(3%, 2%, 0) scale(1.12);
+    }
+  }
+
+  /*
+   * 上面那條全域的 reduced-motion 規則會把 duration 壓成 0.01ms，動作確實
+   * 消失了 —— 但 `iteration-count` 還是 infinite，等於留著一個永遠在跑的
+   * 動畫讓合成器追蹤。明確關掉比較乾淨。
+   */
+  @media (prefers-reduced-motion: reduce) {
+    .hero-glow::after {
+      animation: none;
+    }
+  }
+
+  /**
    * 球場紋理背景。用在首頁主視覺與後台登入頁，讓大面積的深色不至於單調。
    * 純 CSS 漸層，不需要任何圖片檔。
    */

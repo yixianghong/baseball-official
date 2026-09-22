@@ -75,7 +75,13 @@ useHead({ title: '球員名單' })
 
       <!-- 大螢幕 5 張、中尺寸 4 張、手機 2 張一排 -->
       <div v-else-if="filtered.length" class="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-5">
-        <PlayerCard v-for="player in filtered" :key="player.id" :player="player" />
+        <PlayerCard
+          v-for="(player, index) in filtered"
+          :key="player.id"
+          v-reveal="(index % 5) * 60"
+          class="reveal"
+          :player="player"
+        />
       </div>
 
       <UiBaseEmpty

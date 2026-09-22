@@ -64,7 +64,7 @@ const score = computed(() => ({
 <template>
   <NuxtLink
     :to="`/games/${game.id}`"
-    class="group flex flex-col gap-3 rounded-xl border border-l-4 border-border bg-surface-raised p-5 transition hover:shadow-md"
+    class="surface-card lift group flex flex-col gap-3 rounded-xl border border-l-4 border-border bg-surface-raised p-5"
     :class="accentClass"
   >
     <div class="flex items-start justify-between gap-3">

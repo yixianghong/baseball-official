@@ -83,7 +83,10 @@ const temperature = computed(() =>
   </template>
 
   <!-- ══ 獨立區塊 ═════════════════════════════════════════════ -->
-  <div v-else-if="!hidden" class="rounded-xl border border-border bg-surface-raised p-4">
+  <div
+    v-else-if="!hidden"
+    class="surface-card rounded-xl border border-border bg-surface-raised p-4"
+  >
     <p class="mb-2 text-fluid-sm font-semibold">當天天氣</p>
 
     <UiBaseSpinner v-if="pending" label="查詢天氣中…" />

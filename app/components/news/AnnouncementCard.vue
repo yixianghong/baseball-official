@@ -40,7 +40,7 @@ const tone = computed(() => {
 <template>
   <article
     v-reveal="delay ?? 0"
-    class="reveal flex flex-col overflow-hidden rounded-xl border bg-surface-raised transition hover:shadow-sm"
+    class="reveal surface-card lift flex flex-col overflow-hidden rounded-xl border bg-surface-raised"
     :class="
       announcement.pinned
         ? 'border-accent-500/40 hover:border-accent-500'

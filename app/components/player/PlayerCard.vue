@@ -20,7 +20,7 @@ const handText = computed(() => describeHands(props.player.throws, props.player.
 <template>
   <NuxtLink
     :to="`/players/${player.id}`"
-    class="group flex flex-col overflow-hidden rounded-xl border border-border bg-surface-raised transition hover:border-brand-400 hover:shadow-sm"
+    class="surface-card lift group flex flex-col overflow-hidden rounded-xl border border-border bg-surface-raised hover:border-brand-400"
   >
     <div class="relative aspect-4/5 overflow-hidden bg-ink">
       <img

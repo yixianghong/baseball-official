@@ -44,8 +44,10 @@ useHead({ title: '近期賽程' })
 
       <div v-else-if="games?.length" class="grid gap-4 md:grid-cols-2">
         <GameCard
-          v-for="game in games"
+          v-for="(game, index) in games"
           :key="game.id"
+          v-reveal="(index % 2) * 90"
+          class="reveal"
           :game="game"
           :weather="weather?.[game.id] ?? null"
           :our-name="teamName"

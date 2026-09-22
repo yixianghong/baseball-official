@@ -140,8 +140,10 @@ useHead({ title: '比賽結果' })
 
         <div v-if="monthGames.length" class="grid gap-4 md:grid-cols-2">
           <GameCard
-            v-for="game in monthGames"
+            v-for="(game, index) in monthGames"
             :key="game.id"
+            v-reveal="(index % 2) * 90"
+            class="reveal"
             :game="game"
             :our-name="teamName"
             :today="today"

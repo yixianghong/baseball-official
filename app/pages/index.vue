@@ -64,7 +64,12 @@ useHead({ title: '首頁' })
 <template>
   <div>
     <!-- ══ 主視覺 ═══════════════════════════════════════════════ -->
-    <section class="relative overflow-hidden bg-ink text-white">
+    <!--
+      `hero-glow` 疊一層極淡的品牌色光暈並緩慢飄移（18 秒一個來回）——
+      一大塊純深色再怎麼配字都是平的。慢到不會讓人分心，但畫面不再是死的。
+      它是 `::after`，不進 DOM，也尊重「減少動態效果」。
+    -->
+    <section class="hero-glow relative overflow-hidden bg-ink text-white">
       <img
         v-if="settings?.heroImageUrl"
         :src="settings.heroImageUrl"
@@ -142,7 +147,7 @@ useHead({ title: '首頁' })
 
         <NuxtLink
           :to="`/games/${nextGame.id}`"
-          class="block rounded-xl border border-l-4 border-border border-l-brand-600 bg-surface-raised p-6 shadow-sm transition hover:shadow-md md:p-8"
+          class="surface-card lift block rounded-xl border border-l-4 border-border border-l-brand-600 bg-surface-raised p-6 md:p-8"
         >
           <div class="flex flex-wrap items-center gap-3">
             <UiBaseBadge tone="brand">{{ nextGameCountdown }}</UiBaseBadge>
@@ -217,9 +222,12 @@ useHead({ title: '首頁' })
         </p>
 
         <div class="grid gap-4 md:grid-cols-3">
+          <!-- 依序浮現。`v-reveal` 預設可見，JS 沒跑內容照樣在（見 plugins/reveal.ts） -->
           <GameCard
-            v-for="game in recent"
+            v-for="(game, index) in recent"
             :key="game.id"
+            v-reveal="(index % 3) * 80"
+            class="reveal"
             :game="game"
             :our-name="teamName"
             :today="today"

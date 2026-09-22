@@ -82,7 +82,7 @@ function describe(games: Game[]): string {
 </script>
 
 <template>
-  <div class="rounded-xl border border-border bg-surface-raised p-4 md:p-5">
+  <div class="surface-card rounded-xl border border-border bg-surface-raised p-4 md:p-5">
     <!-- ══ 月份導覽 ═════════════════════════════════════════════ -->
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-1">
