@@ -205,6 +205,84 @@ describe('GameLineupCard', () => {
     expect(component.text()).not.toContain('候補')
   })
 
+  /*
+   * ── 先發投手 ───────────────────────────────────────────────
+   *
+   * 早期版本只在「投手不在打序裡」時才列出來（照抄指定打擊制的轉播圖卡）。
+   * 業餘棒球多半沒有 DH，投手自己也要打擊 —— 於是最該被看到的那個資訊
+   * 剛好在最常見的情況下消失了。
+   */
+  const starter = {
+    playerId: 'p5',
+    name: '王建民',
+    number: '18',
+    role: 'starter' as const,
+    note: '',
+  }
+
+  it('列出先發投手，標示為 SP 並附中文全名', async () => {
+    const component = await mountSuspended(GameLineupCard, {
+      props: { ...baseProps, pitchers: [starter] },
+    })
+
+    expect(component.text()).toContain('先發投手')
+    expect(component.text()).toContain('#18 王建民')
+    expect(component.text()).toContain('SP')
+    expect(component.findAll('a').map((link) => link.attributes('href'))).toContain('/players/p5')
+  })
+
+  it('投手已經排在打序裡時照樣列出來', async () => {
+    // 沒有 DH 的比賽裡投手本來就要打擊，這是最常見的情況
+    const batting = {
+      order: 3,
+      playerId: 'p5',
+      name: '王建民',
+      number: '18',
+      position: 'P' as const,
+    }
+    const component = await mountSuspended(GameLineupCard, {
+      props: { ...baseProps, entries: [...entries, batting], pitchers: [starter] },
+    })
+
+    expect(component.text()).toContain('先發投手')
+    expect(component.text()).toContain('SP')
+  })
+
+  it('只有中繼投手時不顯示先發投手那一段', async () => {
+    const component = await mountSuspended(GameLineupCard, {
+      props: { ...baseProps, pitchers: [{ ...starter, role: 'relief' as const }] },
+    })
+
+    expect(component.text()).not.toContain('先發投手')
+  })
+
+  it('沒有投手資料時不顯示那一段', async () => {
+    const component = await mountSuspended(GameLineupCard, { props: baseProps })
+    expect(component.text()).not.toContain('先發投手')
+  })
+
+  /*
+   * ── 日期與地點 ─────────────────────────────────────────────
+   *
+   * 這張卡會被截圖丟到群組裡。脫離網站之後，「9/29（二）」少了年份就可能
+   * 對應到別年的同一天，而「在哪裡打」根本無從得知。
+   */
+  it('日期是完整的年月日與星期，並接上時間與地點', async () => {
+    const component = await mountSuspended(GameLineupCard, {
+      props: { ...baseProps, venue: '新莊新月橋' },
+    })
+
+    expect(component.text()).toContain('2026/09/29（星期二）09:00')
+    expect(component.text()).toContain('新莊新月橋')
+  })
+
+  it('沒有填地點時只顯示時間，不留一個分隔點', async () => {
+    const component = await mountSuspended(GameLineupCard, { props: baseProps })
+
+    expect(component.text()).toContain('2026/09/29（星期二）09:00')
+    expect(component.text()).not.toContain('・')
+  })
+
   it('整張卡不能標 aria-hidden（它是唯一的名單來源）', async () => {
     const component = await mountSuspended(GameLineupCard, { props: baseProps })
     expect(component.element.getAttribute('aria-hidden')).toBeNull()

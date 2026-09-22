@@ -16,7 +16,6 @@ const playerId = computed(() => String(route.params.id))
 
 const { data: player, error } = await usePlayer(playerId)
 const { data: games } = await useGames({ scope: 'past', limit: MAX_GAME_QUERY_LIMIT })
-const { data: settings } = await useSiteSettings()
 
 const appearances = computed(() =>
   (games.value ?? [])
@@ -183,12 +182,7 @@ useHead({ title: () => player.value?.name ?? '球員' })
             </table>
           </div>
 
-          <UiBaseEmpty
-            v-else
-            title="還沒有出賽紀錄"
-            :description="`${settings?.teamName ?? '球隊'}的比賽打線登錄後，會顯示在這裡。`"
-            icon="📋"
-          />
+          <UiBaseEmpty v-else title="還沒有出賽紀錄" icon="📋" />
         </section>
       </div>
     </div>

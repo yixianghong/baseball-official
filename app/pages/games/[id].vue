@@ -255,6 +255,7 @@ useHead({
               :bench="bench"
               :date="game.date"
               :time="game.time"
+              :venue="game.venue"
               :pitchers="game.pitchers"
             />
             <UiBaseEmpty v-else title="尚未登錄出賽名單" icon="📋" />
@@ -324,6 +325,7 @@ useHead({
               :bench="bench"
               :date="game.date"
               :time="game.time"
+              :venue="game.venue"
               :pitchers="game.pitchers"
             />
             <UiBaseEmpty

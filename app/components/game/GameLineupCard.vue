@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AttendanceEntry, LineupEntry, PitcherEntry } from '#shared/schemas/game'
 import { POSITION_LABELS } from '#shared/schemas/player'
-import { formatGameDateLong } from '~/utils/format'
+import { formatGameStamp } from '~/utils/format'
 
 /**
  * 出賽名單圖卡。
@@ -41,26 +41,24 @@ const props = withDefaults(
     /** `YYYY-MM-DD` */
     date: string
     time: string
+    /** 比賽地點。截圖流出去之後，「在哪裡打」和「幾點打」一樣重要。 */
+    venue?: string
     pitchers?: PitcherEntry[]
   }>(),
-  { bench: () => [], teamLogoUrl: '', opponentLogoUrl: '', pitchers: () => [] },
+  { bench: () => [], teamLogoUrl: '', opponentLogoUrl: '', venue: '', pitchers: () => [] },
 )
 
 /**
- * 先發投手。轉播圖卡會把他列在打序最後、不給棒次（指定打擊制下投手不打擊）。
- * 已經排在打序裡的投手就不重複列。
+ * 先發投手。獨立成一段，不管他有沒有排在打序上。
+ *
+ * 早期版本只在「投手不在打序裡」時才列出來（照抄指定打擊制的轉播圖卡）。
+ * 但業餘棒球多半沒有 DH，投手自己也要打擊 —— 於是最該被看到的那個資訊
+ * 剛好在最常見的情況下消失了。打序裡的守位雖然會標 `P`，那是「第幾棒守投手」，
+ * 和「今天誰先發」不是同一件事，而且要一列一列找。
  */
-const startingPitcher = computed(() => {
-  const starter = props.pitchers.find((pitcher) => pitcher.role === 'starter')
-  if (!starter) return null
-
-  const inLineup = props.entries.some(
-    (entry) =>
-      (starter.playerId && entry.playerId === starter.playerId) ||
-      entry.name.trim() === starter.name.trim(),
-  )
-  return inLineup ? null : starter
-})
+const startingPitcher = computed(
+  () => props.pitchers.find((pitcher) => pitcher.role === 'starter') ?? null,
+)
 
 /** `#7 張志豪`；沒有背號就只有名字，不留一個孤零零的井字號。 */
 function displayName(person: { number?: string; name: string }): string {
@@ -95,7 +93,7 @@ function onShare() {
     node: cardRef.value,
     filename: filename.value,
     title: `${props.teamName} vs ${props.opponent} 出賽名單`,
-    text: `${formatGameDateLong(props.date)} ${props.time} — ${props.teamName} vs ${props.opponent}`,
+    text: `${formatGameStamp(props.date, props.time)} — ${props.teamName} vs ${props.opponent}`,
   })
 }
 </script>
@@ -174,10 +172,17 @@ function onShare() {
                 <span class="sr-only">{{ POSITION_LABELS[entry.position] }}</span>
               </span>
             </li>
+          </ul>
 
-            <!-- 先發投手：沒有棒次，位置標 SP，跟轉播圖卡一致 -->
-            <li
-              v-if="startingPitcher"
+          <!-- ══ 先發投手 ════════════════════════════════════════ -->
+          <!--
+            自成一段而不是接在打序後面：他有沒有排打序是另一回事，
+            而「今天誰先發」是這張卡上最常被問的一件事，值得一個標題。
+          -->
+          <template v-if="startingPitcher">
+            <p class="mt-4 mb-1.5 text-xs font-black tracking-[0.25em] text-accent-400">先發投手</p>
+
+            <div
               class="grid grid-cols-[2rem_minmax(0,1fr)_2.75rem] items-stretch gap-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_3.25rem]"
             >
               <span />
@@ -201,8 +206,8 @@ function onShare() {
                 <span aria-hidden="true">SP</span>
                 <span class="sr-only">先發投手</span>
               </span>
-            </li>
-          </ul>
+            </div>
+          </template>
 
           <!-- ══ 候補 ════════════════════════════════════════════ -->
           <template v-if="bench.length">
@@ -237,9 +242,9 @@ function onShare() {
           <div
             class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3"
           >
-            <p class="text-fluid-sm font-bold tabular-nums">
-              {{ formatGameDateLong(date) }}
-              <span class="ml-1 text-accent-400">{{ time }}</span>
+            <p class="min-w-0 text-fluid-sm font-bold">
+              <span class="tabular-nums">{{ formatGameStamp(date, time) }}</span>
+              <span v-if="venue" class="text-accent-400">・{{ venue }}</span>
             </p>
             <p class="flex items-center gap-2 text-fluid-sm font-bold">
               <span class="text-white/60">VS</span>

@@ -23,6 +23,24 @@ export function formatGameDateLong(date: string): string {
   return `${parsed.getFullYear()} 年 ${parsed.getMonth() + 1} 月 ${parsed.getDate()} 日 星期${WEEKDAYS[parsed.getDay()]}`
 }
 
+/**
+ * `2026-09-27` + `09:00` → `2026/09/27（星期日）09:00`。
+ *
+ * 出賽名單圖卡用的完整時間戳。這張卡會被截圖丟到群組裡，脫離網站之後
+ * 「9/27（日）」少了年份就可能對應到別年的同一天 —— 補齊年份與完整的
+ * 「星期日」寫法，是為了讓那張圖單獨拿出來看也不會誤讀。
+ */
+export function formatGameStamp(date: string, time: string): string {
+  const parsed = parseDateKey(date)
+  if (!parsed) return [date, time].filter(Boolean).join(' ')
+
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+  // 全形括號本身就帶了視覺上的間距，再加一個半形空白會鬆得很明顯
+  const stamp = `${parsed.getFullYear()}/${month}/${day}（星期${WEEKDAYS[parsed.getDay()]}）`
+  return time ? `${stamp}${time}` : stamp
+}
+
 /** ISO 時間字串 → `2026/03/15`。公告的發布日期。 */
 export function formatDateTime(iso: string): string {
   if (!iso) return ''

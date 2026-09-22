@@ -195,6 +195,40 @@ function onPitcherPlayerChange(index: number, playerId: string) {
   )
 }
 
+/**
+ * 先發投手，做成「先發陣容」分頁上的一個欄位。
+ *
+ * 它實際上編輯的就是 `pitchers` 裡 `role: 'starter'` 的那一筆 —— 和「計分板與
+ * 結果」分頁的投手紀錄是同一份資料，不是另外存一個會不同步的欄位。
+ *
+ * 為什麼要在這裡也放一個：先發投手是**賽前**就決定的事，會印在出賽名單圖卡上，
+ * 而投手紀錄整段是為了賽後登錄而設計的。要為了填一個賽前欄位跑去「計分板與
+ * 結果」分頁，這件事本身就會讓人不填 —— 然後圖卡上永遠少一項。
+ */
+const startingPitcherId = computed<string>({
+  get: () => pitchers.value.find((pitcher) => pitcher.role === 'starter')?.playerId ?? '',
+  set: (playerId) => {
+    const others = pitchers.value.filter((pitcher) => pitcher.role !== 'starter')
+    if (!playerId) {
+      pitchers.value = others
+      return
+    }
+    const player = roster.value.find((item) => item.id === playerId)
+    if (!player) return
+    const existing = pitchers.value.find((pitcher) => pitcher.role === 'starter')
+    pitchers.value = [
+      {
+        ...(existing ?? { note: '' }),
+        playerId: player.id,
+        name: player.name,
+        number: player.number,
+        role: 'starter' as const,
+      },
+      ...others,
+    ]
+  },
+})
+
 const pitcherOptions = computed(() => [
   { value: '', label: '（自行輸入）' },
   ...roster.value.map((player) => ({
@@ -333,6 +367,16 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             比賽前排好的陣容就是賽後的出賽紀錄，只需要維護這一份。
             前台在比賽尚未開打時會標示「預計」，結束後顯示為當天打線。
           </p>
+        </div>
+
+        <div class="max-w-sm rounded-xl border border-border bg-surface p-4">
+          <UiBaseSelect
+            v-model="startingPitcherId"
+            label="先發投手"
+            placeholder="— 尚未決定 —"
+            :options="pitcherOptions.filter((option) => option.value)"
+            hint="會顯示在前台的出賽名單圖卡上。和「計分板與結果」分頁的投手紀錄是同一筆。"
+          />
         </div>
 
         <AdminLineupEditor v-model="lineup" :players="roster" :attendance="attendance">

@@ -5,6 +5,7 @@ import {
   formatDateTime,
   formatGameDate,
   formatGameDateLong,
+  formatGameStamp,
 } from '../../app/utils/format'
 
 /**
@@ -69,5 +70,30 @@ describe('daysUntil / describeCountdown', () => {
   it('日期無效時回空字串', () => {
     expect(daysUntil('待定', '2026-03-10')).toBeNull()
     expect(describeCountdown(null)).toBe('')
+  })
+})
+
+/**
+ * 出賽名單圖卡的時間戳。
+ *
+ * 這張卡會脫離網站被截圖轉貼，所以年份與完整的「星期日」寫法都要在 ——
+ * 「9/29（二）」單獨拿出來看，對應得到好幾個年份的同一天。
+ */
+describe('formatGameStamp', () => {
+  it('組成 YYYY/MM/DD（星期X）HH:mm', () => {
+    expect(formatGameStamp('2026-09-27', '09:00')).toBe('2026/09/27（星期日）09:00')
+    expect(formatGameStamp('2026-10-04', '14:30')).toBe('2026/10/04（星期日）14:30')
+  })
+
+  it('月日補零，寬度才固定（tabular-nums 排起來不會跳）', () => {
+    expect(formatGameStamp('2026-01-05', '09:00')).toBe('2026/01/05（星期一）09:00')
+  })
+
+  it('沒有時間時只回日期', () => {
+    expect(formatGameStamp('2026-09-27', '')).toBe('2026/09/27（星期日）')
+  })
+
+  it('日期格式不對時原樣回傳，不顯示 NaN', () => {
+    expect(formatGameStamp('九月二十七', '09:00')).toBe('九月二十七 09:00')
   })
 })
