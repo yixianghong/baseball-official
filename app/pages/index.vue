@@ -127,7 +127,7 @@ useHead({ title: '首頁' })
 
         <NuxtLink
           :to="`/games/${nextGame.id}`"
-          class="block border-l-4 border-brand-600 bg-surface-raised p-6 shadow-sm transition hover:shadow-md md:p-8"
+          class="block border border-border border-l-4 border-l-brand-600 bg-surface-raised p-6 shadow-sm transition hover:border-brand-300 hover:shadow-md md:p-8"
         >
           <div class="flex flex-wrap items-center gap-3">
             <UiBaseBadge tone="brand">{{ nextGameCountdown }}</UiBaseBadge>
@@ -210,7 +210,7 @@ useHead({ title: '首頁' })
       <section v-if="settings?.intro" aria-labelledby="about-heading">
         <CommonSectionHeading id="about-heading" en="ABOUT" :zh="`關於${teamName}`" />
 
-        <div class="bg-surface-raised p-6 md:p-8">
+        <div class="border border-border bg-surface-raised p-6 shadow-sm md:p-8">
           <p class="whitespace-pre-wrap leading-relaxed text-content-muted">{{ settings.intro }}</p>
 
           <dl

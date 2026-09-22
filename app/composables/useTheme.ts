@@ -26,7 +26,10 @@ export type ColorMode = 'light' | 'dark'
 
 export function useTheme() {
   const mode = useCookie<ColorMode>('color_mode', {
-    default: () => 'light',
+    // 預設深色：球隊識別本身就是深海軍藍配 teal 與金色，深色底才是這組配色的
+    // 原生樣貌（主視覺、資訊帶、導覽列本來就是深色）。使用者切成亮色後會記在
+    // cookie 裡，之後都照他選的走。
+    default: () => 'dark',
     // 一年後過期，讓使用者的偏好持續生效
     maxAge: 60 * 60 * 24 * 365,
     sameSite: 'lax',

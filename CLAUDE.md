@@ -31,6 +31,9 @@ pnpm vitest run --project nuxt -t "載入當下不會寫入資料庫"
 husky：commit 跑 lint-staged，push 跑 `typecheck && test:unit && test:nuxt`（不跑 e2e）。
 commitlint 用 conventional commits。
 
+**不要自動 `git commit` 或 `git push`。** 改完停下來說明改了什麼，提交與推送由使用者自己執行。
+需要的話把建議的 commit 訊息寫出來給他用，但不要代為執行。
+
 ## 架構
 
 樣板原本是「前端 → BFF → 外部 API」，這個專案把最下游換成 Firebase：

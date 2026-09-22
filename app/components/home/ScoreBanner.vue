@@ -196,7 +196,7 @@ const columnsClass = computed(() => {
         -->
         <ul
           v-if="nextGames.length"
-          class="flex min-w-0 flex-1 snap-x snap-mandatory overflow-x-auto bg-surface text-content sm:grid sm:overflow-visible"
+          class="flex min-w-0 flex-1 snap-x snap-mandatory overflow-x-auto bg-surface-raised text-content sm:grid sm:overflow-visible"
           :class="columnsClass"
         >
           <li
@@ -226,7 +226,7 @@ const columnsClass = computed(() => {
 
         <div
           v-else
-          class="flex flex-1 items-center justify-center bg-surface px-4 py-8 text-content-muted"
+          class="flex flex-1 items-center justify-center bg-surface-raised px-4 py-8 text-content-muted"
         >
           尚未公布下一場賽程
         </div>

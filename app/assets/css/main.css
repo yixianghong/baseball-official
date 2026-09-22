@@ -94,13 +94,25 @@
   --color-warning: oklch(0.75 0.16 78);
   --color-danger: oklch(0.6 0.21 25);
 
-  /* 介面基底色（深色模式會在下方 :root 覆寫） */
-  --color-surface: oklch(1 0 0);
-  --color-surface-muted: oklch(0.97 0.002 250);
+  /* ---------------------------------------------------------------------
+   * 介面基底色（深色模式會在下方 `:root:where(.dark)` 覆寫）
+   *
+   * 三階刻意都不一樣，而且順序是固定的：
+   *
+   *   surface-muted  最深  頁面底色（後台）、表頭、次要區塊
+   *   surface        中間  面板、表單欄位、資訊帶
+   *   surface-raised 最亮  浮在頁面上的卡片
+   *
+   * 亮色模式一度把 surface 與 surface-raised 都設成純白，結果是「白卡片放在
+   * 白頁面上」—— 首頁下半部的區塊完全看不出邊界。底色帶一點點墨藍（色相 250，
+   * 與 `--color-ink` 同一家族）才撐得起白色卡片，也不會髒成灰色。
+   * ------------------------------------------------------------------- */
+  --color-surface: oklch(0.975 0.005 250);
+  --color-surface-muted: oklch(0.94 0.009 250);
   --color-surface-raised: oklch(1 0 0);
-  --color-border: oklch(0.92 0.004 250);
+  --color-border: oklch(0.89 0.008 250);
   --color-content: oklch(0.24 0.012 255);
-  --color-content-muted: oklch(0.52 0.011 255);
+  --color-content-muted: oklch(0.5 0.013 255);
 
   /* ---------------------------------------------------------------------
    * 流體字級（fluid typography）

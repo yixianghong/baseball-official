@@ -493,6 +493,16 @@ describe('SSR', () => {
     const html = await $fetch<string>('/', { headers: { cookie: 'color_mode=dark' } })
     expect(html).toContain('class="dark"')
   })
+
+  it('沒有 cookie 時預設就是深色（第一次進站看到的是深色）', async () => {
+    const html = await $fetch<string>('/')
+    expect(html).toContain('class="dark"')
+  })
+
+  it('cookie 指定亮色時就不會帶上 dark class', async () => {
+    const html = await $fetch<string>('/', { headers: { cookie: 'color_mode=light' } })
+    expect(html).not.toContain('class="dark"')
+  })
 })
 
 describe('後台頁面的存取控制', () => {
