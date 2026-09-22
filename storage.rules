@@ -1,0 +1,18 @@
+rules_version = '2';
+
+// Firebase Storage 安全規則。
+//
+// 讀取開放：這裡放的是官網要顯示的圖片（隊徽、球員照片、公告封面），
+// 本來就要讓所有人看得到，前台的 <img> 才載入得了。
+//
+// 寫入一律拒絕：上傳只能透過後台的 `/api/admin/uploads`，那裡會先驗證登入、
+// 檢查檔案型別與大小，再用 service account 寫入。讓瀏覽器直接寫 Storage
+// 等於開一個沒有這些檢查的側門。
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

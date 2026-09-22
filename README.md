@@ -400,6 +400,23 @@ firebase apphosting:secrets:grantaccess nuxt-session-password --backend <後端�
 
 `NUXT_PUBLIC_SITE_URL` 要改成實際的網址（自訂網域或 `*.web.app`）。
 
+### 安全規則
+
+`firestore.rules` 與 `storage.rules` 在版控裡，用這個指令部署：
+
+```bash
+firebase deploy --only firestore:rules,storage:rules
+```
+
+兩份規則的立場很簡單：
+
+- **Firestore 全部拒絕。** 所有資料存取都經過 BFF，而 BFF 用 service account
+  連線，**不受這些規則限制**。規則管的是「瀏覽器直接連 Firestore」，
+  而這個專案刻意不讓前端載入 Firebase SDK。哪天有人想在前端直接讀資料會立刻
+  失敗 —— 那是好事，它會逼人回到 BFF 這條路，而不是悄悄開一個沒有權限檢查的側門。
+- **Storage 開放讀取、拒絕寫入。** 隊徽與球員照片本來就要讓所有人看得到；
+  上傳則只能走 `/api/admin/uploads`，那裡會先驗證登入、檢查檔案型別與大小。
+
 ### 為什麼雲端不需要 service account 金鑰
 
 App Hosting 跑在 Google Cloud 上，Admin SDK 直接用**執行環境本身的身分**

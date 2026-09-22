@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// Firestore 安全規則。
+//
+// ## 為什麼是「全部拒絕」
+// 這個專案的所有資料存取都經過 BFF（`server/repositories/`），BFF 用
+// service account 或執行環境的身分連線 —— 那條路徑**不受這些規則限制**。
+//
+// 規則管的是「瀏覽器直接連 Firestore」，而這個專案刻意不讓前端載入
+// Firebase SDK。所以正確的設定就是全部擋掉：沒有任何用戶端該直接碰資料庫。
+//
+// 這也表示：如果哪天有人在前端加了 Firebase SDK 想直接讀資料，會立刻失敗 ——
+// 那是好事，它會逼人回到 BFF 這條路，而不是悄悄開一個沒有權限檢查的側門。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
