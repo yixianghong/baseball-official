@@ -4,7 +4,16 @@ import { CATEGORY_LABELS } from '#shared/schemas/announcement'
 import { formatDateTime } from '~/utils/format'
 
 /**
- * 公告卡片。
+ * 公告卡片。首頁與公告牆**共用同一份呈現**，沒有摘要模式。
+ *
+ * ## 為什麼不做摘要模式
+ * 曾經有一個 `compact` 版本：內文裁到四行、附件只顯示「N 個附件」。
+ * 實際用起來才發現方向錯了 —— 這個球隊的公告多半是
+ * 「一句話 + 一個檔案」（戰績表的內文只有「更新日期 - 2026/05/18」），
+ * **附件本身就是公告的內容**。把它收起來，首頁那張卡就等於什麼都沒說。
+ *
+ * 代價是很長的公告會把首頁撐高。真的遇到時該做的是公告詳細頁，
+ * 而不是把內容藏起來假裝版面很整齊。
  *
  * ## 進場動畫
  * `v-reveal` 會把還在視窗外的卡片先藏起來，捲到時再淺入。
@@ -17,8 +26,6 @@ const props = defineProps<{
   announcement: Announcement
   /** 進場延遲毫秒數，由列表依索引遞增傳入。 */
   delay?: number
-  /** 摘要模式：首頁用，只顯示前幾行。 */
-  compact?: boolean
 }>()
 
 const tone = computed(() => {
@@ -47,12 +54,18 @@ const tone = computed(() => {
         : 'border-border hover:border-brand-400'
     "
   >
+    <!--
+      用 object-contain 而不是 cover：公告的封面多半是聯盟的隊徽或賽程圖，
+      裁掉邊緣就等於把「這是哪個聯盟」裁掉了。照片裁一點無所謂，
+      **有字的圖裁一點就是壞掉**。
+      留白處給一層底色，讓它看起來是刻意留的而不是圖沒載到。
+    -->
     <img
       v-if="announcement.coverImageUrl"
       :src="announcement.coverImageUrl"
       :alt="''"
       loading="lazy"
-      class="aspect-video w-full object-cover"
+      class="aspect-video w-full bg-surface-muted object-contain"
     />
 
     <div class="flex flex-1 flex-col gap-3 p-5">
@@ -76,16 +89,17 @@ const tone = computed(() => {
       <!--
         公告內容是 Markdown。安全性的說明見 `app/utils/markdown.ts` ——
         簡而言之：解析器設定成不輸出任何原始 HTML，所以不需要事後清洗。
-
-        摘要模式（首頁）渲染的是同一份 Markdown，只是用 `.markdown-clamp`
-        限制高度。不用 `-webkit-line-clamp`：它以文字行為單位裁切，遇到清單
-        或標題會裁在很奇怪的位置，而且得把容器改成 `-webkit-box`，
-        裡面的區塊元素會跟著變成 box item，清單的項目符號直接消失。
       -->
-      <UiBaseMarkdown
-        class="text-fluid-sm text-content-muted"
-        :class="compact ? 'markdown-clamp' : ''"
-        :source="announcement.content"
+      <UiBaseMarkdown class="text-fluid-sm text-content-muted" :source="announcement.content" />
+
+      <!--
+        附件放在內文之後、卡片最底下：它是補充資料，不該擠在標題與內容之間。
+        `mt-auto` 讓同一列的卡片附件對齊底部。
+      -->
+      <NewsAttachmentList
+        v-if="announcement.attachments.length"
+        class="mt-auto pt-1"
+        :attachments="announcement.attachments"
       />
     </div>
   </article>

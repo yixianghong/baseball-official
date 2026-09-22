@@ -12,7 +12,22 @@ import { ApiError } from '~/utils/api-error'
  * 壓縮在 `useUploadActions()` 裡完成（長邊 1600px），所以這個元件不需要
  * 知道任何圖片處理細節。
  */
-const props = defineProps<{ label: string; folder: UploadFolder; hint?: string }>()
+const props = withDefaults(
+  defineProps<{
+    label: string
+    folder: UploadFolder
+    hint?: string
+    /**
+     * 預覽的縮放方式。
+     *
+     * 球員照片要 `cover`（裁成方形的大頭照才整齊），但隊徽、聯盟標誌、
+     * 公告封面要 `contain` —— 那些圖上有字，裁掉邊緣就是裁掉資訊。
+     * 預覽和前台的呈現要一致，不然「後台看起來好好的」會變成常態。
+     */
+    fit?: 'cover' | 'contain'
+  }>(),
+  { fit: 'cover' },
+)
 
 const model = defineModel<string>({ required: true })
 
@@ -51,7 +66,13 @@ async function handleFile(event: Event) {
       <div
         class="flex size-28 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-muted"
       >
-        <img v-if="model" :src="model" alt="目前的圖片" class="size-full object-cover" />
+        <img
+          v-if="model"
+          :src="model"
+          alt="目前的圖片"
+          class="size-full"
+          :class="props.fit === 'contain' ? 'object-contain' : 'object-cover'"
+        />
         <span v-else class="text-2xl text-content-muted" aria-hidden="true">🖼️</span>
       </div>
 

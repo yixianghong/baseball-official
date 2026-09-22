@@ -20,8 +20,8 @@ import { SAFE_METHODS } from '../../shared/constants/http'
  * 代價是 base64 會膨脹約 33%，設定上限時要把這點算進去。
  */
 
-/** 帶圖片的路由前綴，適用較寬的 body 上限。 */
-const IMAGE_ROUTE_PREFIXES = ['/api/admin/uploads', '/api/admin/ai/']
+/** 帶檔案的路由前綴，適用較寬的 body 上限。 */
+const UPLOAD_ROUTE_PREFIXES = ['/api/admin/uploads', '/api/admin/attachments', '/api/admin/ai/']
 
 /** 允許的 request body 內容型別。 */
 const ALLOWED_CONTENT_TYPES = [
@@ -41,8 +41,8 @@ export default defineEventHandler((event) => {
   // 這一關擋不到。它是「成本極低的第一道防線」，不是唯一防線 ——
   // 正式環境請同時在反向代理（Nginx 的 client_max_body_size、
   // ALB / Cloudflare 的 body size limit）設定硬上限。
-  const isImageRoute = IMAGE_ROUTE_PREFIXES.some((prefix) => event.path.startsWith(prefix))
-  const limit = isImageRoute ? config.maxUploadBytes : config.maxBodyBytes
+  const isUploadRoute = UPLOAD_ROUTE_PREFIXES.some((prefix) => event.path.startsWith(prefix))
+  const limit = isUploadRoute ? config.maxUploadBytes : config.maxBodyBytes
 
   const contentLengthHeader = getRequestHeader(event, 'content-length')
   if (contentLengthHeader) {
@@ -54,7 +54,7 @@ export default defineEventHandler((event) => {
       )
       throw new AppError(
         ERROR_CODE.PAYLOAD_TOO_LARGE,
-        `傳送的資料超過上限（${Math.floor(limit / 1024 / 1024)} MB），請壓縮圖片後再試`,
+        `傳送的資料超過上限（${Math.floor(limit / 1024 / 1024)} MB），請壓縮或改用較小的檔案`,
       )
     }
   }

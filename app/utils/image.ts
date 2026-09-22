@@ -52,7 +52,7 @@ export async function prepareImage(
     // 其餘多半是解碼失敗（例如 HEIC），退回讀原檔，下面會再檢查大小
   }
 
-  const base64 = await readAsBase64(file)
+  const base64 = await readFileAsBase64(file)
   const bytes = Math.floor((base64.length * 3) / 4)
   if (bytes > MAX_BYTES) {
     throw new Error('圖片太大且無法在瀏覽器中壓縮，請先轉成 JPEG 或 PNG 再上傳')
@@ -148,7 +148,8 @@ function hasTransparency(
   }
 }
 
-function readAsBase64(file: File): Promise<string> {
+/** 把檔案讀成不含 `data:` 前綴的 base64。圖片與公告附件共用。 */
+export function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {

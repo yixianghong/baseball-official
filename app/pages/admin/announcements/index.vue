@@ -35,6 +35,7 @@ const emptyForm = (): AnnouncementForm => ({
   status: 'published',
   publishedAt: '',
   coverImageUrl: '',
+  attachments: [],
 })
 
 const form = ref<AnnouncementForm>(emptyForm())
@@ -59,6 +60,9 @@ function startEdit(announcement: Announcement) {
     status: announcement.status,
     publishedAt: announcement.publishedAt,
     coverImageUrl: announcement.coverImageUrl,
+    // 複製一份陣列：直接指向原物件的話，在表單裡按移除會連列表上的
+    // 那一筆也跟著變，看起來像「還沒存檔就已經生效」
+    attachments: announcement.attachments.map((item) => ({ ...item })),
   }
 }
 
@@ -194,7 +198,14 @@ useHead({ title: '公告管理' })
           </div>
         </div>
 
-        <AdminImageField v-model="form.coverImageUrl" label="封面圖片" folder="announcements" />
+        <AdminImageField
+          v-model="form.coverImageUrl"
+          label="封面圖片"
+          folder="announcements"
+          fit="contain"
+        />
+
+        <AdminAttachmentField v-model="form.attachments" />
 
         <div class="flex flex-wrap gap-2 border-t border-border pt-4">
           <UiBaseButton :loading="saving" @click="submit('published')">

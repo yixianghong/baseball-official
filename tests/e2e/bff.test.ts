@@ -230,6 +230,7 @@ describe('後台權限：所有寫入都需要登入', () => {
     ['POST', '/api/admin/announcements'],
     ['PUT', '/api/admin/settings'],
     ['POST', '/api/admin/uploads'],
+    ['POST', '/api/admin/attachments'],
     ['POST', '/api/admin/players/batch'],
     ['POST', '/api/admin/ai/parse-schedule'],
     ['POST', '/api/admin/ai/parse-scoreboard'],

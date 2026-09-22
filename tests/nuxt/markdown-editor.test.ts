@@ -21,6 +21,7 @@ const announcement = {
   status: 'published' as const,
   publishedAt: '2026-09-20T02:00:00.000Z',
   coverImageUrl: '',
+  attachments: [],
   createdAt: '',
   updatedAt: '',
 }
@@ -37,22 +38,9 @@ describe('NewsAnnouncementCard', () => {
     expect(wrapper.find('h1').exists()).toBe(false)
   })
 
-  it('摘要模式（首頁）渲染同一份 Markdown，只是限制高度', async () => {
-    const wrapper = await mountSuspended(AnnouncementCard, {
-      props: { announcement, compact: true },
-    })
-
-    const markdown = wrapper.find('.markdown')
-    expect(markdown.exists()).toBe(true)
-    expect(markdown.classes()).toContain('markdown-clamp')
-    // 語法記號不該露出來 —— 露出來就代表根本沒渲染
-    expect(markdown.text()).not.toContain('**')
-    expect(markdown.find('strong').text()).toBe('週六 09:00')
-  })
-
-  it('完整模式不套高度限制', async () => {
+  it('語法記號不會露出來（露出來就代表根本沒渲染）', async () => {
     const wrapper = await mountSuspended(AnnouncementCard, { props: { announcement } })
-    expect(wrapper.find('.markdown').classes()).not.toContain('markdown-clamp')
+    expect(wrapper.find('.markdown').text()).not.toContain('**')
   })
 })
 

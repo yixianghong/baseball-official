@@ -480,24 +480,6 @@
     border-radius: 0.5rem;
   }
 
-  /**
-   * 摘要模式：裁掉超出的部分，底部淡出。
-   *
-   * ## 漸層的停點用 em 而不是百分比
-   * 用百分比（`transparent 100%`）的話，內容只有兩行時「最後 20%」還是會被
-   * 淡化 —— 明明沒有裁到任何東西，卡片下緣卻糊掉，看起來像壞掉。
-   *
-   * 停點改成從**頂端**起算的固定距離之後，短內容整塊都落在不透明的範圍裡，
-   * 自然就不會有淡出；只有真的長到被 `max-height` 裁掉時才看得到。
-   * 純 CSS 就能分辨這兩種情況，不需要量測元素高度。
-   */
-  .markdown-clamp {
-    max-height: 7em;
-    overflow: hidden;
-    -webkit-mask-image: linear-gradient(to bottom, #000 5em, transparent 7em);
-    mask-image: linear-gradient(to bottom, #000 5em, transparent 7em);
-  }
-
   .markdown :where(table) {
     width: 100%;
     border-collapse: collapse;

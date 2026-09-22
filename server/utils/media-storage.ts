@@ -2,6 +2,7 @@ import { AppError, ERROR_CODE } from './errors'
 import { getBucket, isFirebaseConfigured } from './firebase'
 import { logger } from './logger'
 import type { UploadRequest, UploadResponse } from '../../shared/schemas/ai'
+import { attachmentType } from '../../shared/schemas/attachment'
 
 /**
  * 圖片上傳 —— 球員照片、公告封面、比賽照片。
@@ -20,21 +21,33 @@ import type { UploadRequest, UploadResponse } from '../../shared/schemas/ai'
  * 刻意的取捨，換來不必為了看畫面就得先開通 Firebase Storage。
  */
 
-/** 副檔名對照。Storage 上的檔名帶正確副檔名，瀏覽器才不會下載成無名檔。 */
-const EXTENSIONS: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/heic': 'heic',
+/** 上傳一個檔案所需要知道的一切。圖片與公告附件共用同一條路。 */
+export interface FileUpload {
+  base64: string
+  mimeType: string
+  /** 原始檔名。只用來取得可讀的下載名稱，不參與路徑組成。 */
+  filename: string
+  folder: string
 }
 
-export async function uploadImage(request: UploadRequest): Promise<UploadResponse> {
-  const buffer = Buffer.from(request.imageBase64, 'base64')
+export function uploadImage(request: UploadRequest): Promise<UploadResponse> {
+  return uploadFile({
+    base64: request.imageBase64,
+    mimeType: request.mimeType,
+    filename: request.filename,
+    folder: request.folder,
+  })
+}
+
+export async function uploadFile(request: FileUpload): Promise<UploadResponse> {
+  const buffer = Buffer.from(request.base64, 'base64')
   if (buffer.length === 0) {
-    throw new AppError(ERROR_CODE.BAD_REQUEST, '圖片內容為空')
+    throw new AppError(ERROR_CODE.BAD_REQUEST, '檔案內容為空')
   }
 
-  const extension = EXTENSIONS[request.mimeType] ?? 'bin'
+  // 副檔名一律由 MIME 決定，不採信使用者傳來的檔名 —— 檔名裡的
+  // `../`、`.html` 都不該有機會影響存到 Storage 上的物件路徑。
+  const extension = attachmentType(request.mimeType).ext
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   const objectPath = `${request.folder}/${id}.${extension}`
 
@@ -57,6 +70,9 @@ export async function uploadImage(request: UploadRequest): Promise<UploadRespons
     contentType: request.mimeType,
     metadata: {
       cacheControl: 'public, max-age=31536000, immutable',
+      // `inline` 讓瀏覽器能開的就直接開（圖片、PDF），開不了的自動變成下載；
+      // filename 則讓「另存新檔」拿到原本的檔名，而不是一串亂碼 ID。
+      contentDisposition: contentDisposition(request.filename, extension),
       metadata: { originalName: request.filename },
     },
   })
@@ -81,7 +97,7 @@ async function saveToMemory(
   objectPath: string,
   id: string,
   extension: string,
-  request: UploadRequest,
+  request: FileUpload,
   buffer: Buffer,
 ): Promise<UploadResponse> {
   const storage = useStorage('cache')
@@ -91,17 +107,39 @@ async function saveToMemory(
     filename: request.filename,
   })
 
-  logger.warn({ objectPath }, '未設定 Firebase Storage，圖片暫存於記憶體（重啟即失）')
+  logger.warn({ objectPath }, '未設定 Firebase Storage，檔案暫存於記憶體（重啟即失）')
 
   return { url: `/api/media/${id}.${extension}`, path: objectPath }
 }
 
-/** 讀取開發模式暫存的圖片。 */
-export async function readMemoryImage(
+/** 讀取開發模式暫存的檔案。 */
+export async function readMemoryFile(
   id: string,
-): Promise<{ mimeType: string; buffer: Buffer } | null> {
+): Promise<{ mimeType: string; buffer: Buffer; filename: string } | null> {
   const storage = useStorage('cache')
-  const item = await storage.getItem<{ mimeType: string; base64: string }>(`media:${id}`)
+  const item = await storage.getItem<{ mimeType: string; base64: string; filename?: string }>(
+    `media:${id}`,
+  )
   if (!item) return null
-  return { mimeType: item.mimeType, buffer: Buffer.from(item.base64, 'base64') }
+  return {
+    mimeType: item.mimeType,
+    buffer: Buffer.from(item.base64, 'base64'),
+    filename: item.filename ?? '',
+  }
+}
+
+/**
+ * 組出 `Content-Disposition`。
+ *
+ * 中文檔名不能直接塞進 `filename="…"` —— 這個標頭是 latin-1，非 ASCII 字元
+ * 會被丟掉或變成亂碼。RFC 5987 的 `filename*=UTF-8''…` 才是正解，同時保留
+ * 一個純 ASCII 的 `filename` 給看不懂 `filename*` 的舊用戶端。
+ *
+ * 抽成獨立的純函式是為了能測：這段邏輯錯了，症狀是「下載下來的檔案叫
+ * `___.pdf`」，而那要真的上傳一個中文檔名的檔案才會發現。
+ */
+export function contentDisposition(filename: string, extension: string): string {
+  const safe = filename.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '')
+  const fallback = safe && safe !== `.${extension}` ? safe : `file.${extension}`
+  return `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`
 }

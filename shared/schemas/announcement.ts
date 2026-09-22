@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { attachmentSchema, MAX_ATTACHMENTS } from './attachment'
 
 /**
  * 公告的共用契約。
@@ -55,6 +56,13 @@ export const announcementInputSchema = z.object({
   /** 發布時間（ISO 8601）。留空時由後端填入當下時間。 */
   publishedAt: z.string().default(''),
   coverImageUrl: z.string().trim().default(''),
+  /**
+   * 附件（報名表、賽程 PDF、活動照片…）。
+   *
+   * 與 `coverImageUrl` 分開：封面是版面的一部分，附件是**內容**。
+   * 把封面也塞進這個陣列會讓「第一張圖到底是不是封面」變成一條隱性規則。
+   */
+  attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).default([]),
 })
 
 export type AnnouncementInput = z.input<typeof announcementInputSchema>

@@ -205,7 +205,6 @@ useHead({ title: '首頁' })
             :key="announcement.id"
             :announcement="announcement"
             :delay="index * 90"
-            compact
           />
         </div>
       </section>
