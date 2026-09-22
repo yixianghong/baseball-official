@@ -5,6 +5,7 @@ import type { Scoreboard } from '../../shared/schemas/game'
 import GameScoreboard from '../../app/components/game/GameScoreboard.vue'
 import { emptyScoreboard } from '../../shared/schemas/game'
 import GameCard from '../../app/components/game/GameCard.vue'
+import HomeScoreBanner from '../../app/components/home/ScoreBanner.vue'
 import GameLineupCard from '../../app/components/game/GameLineupCard.vue'
 import GameAttendance from '../../app/components/game/GameAttendance.vue'
 
@@ -261,5 +262,78 @@ describe('GameAttendance', () => {
     })
 
     expect(component.text()).not.toContain('不出席')
+  })
+})
+
+/**
+ * 首頁資訊帶的「最新比數」。
+ *
+ * 這一格最容易出錯的地方是**延賽的場次**：它的計分板是空的，兩邊總分都是 0，
+ * 直接畫出來就變成「0 0」—— 看起來像打完了而且是和局。
+ */
+describe('ScoreBanner 的最新比數', () => {
+  const game = {
+    id: 'g1',
+    date: '2026-09-06',
+    time: '08:00',
+    opponent: '天行者',
+    venue: '',
+    mapUrl: '',
+    city: '' as const,
+    league: '',
+    homeAway: 'home' as const,
+    note: '',
+    coverImageUrl: '',
+    opponentLogoUrl: '',
+    attendance: [],
+    lineup: [],
+    pitchers: [],
+    scoreboard: {
+      innings: [],
+      totals: { our: { r: 6, h: 0, e: 0 }, opponent: { r: 3, h: 0, e: 0 } },
+    },
+    createdAt: '',
+    updatedAt: '',
+  }
+
+  const mount = (overrides: Record<string, unknown>) =>
+    mountSuspended(HomeScoreBanner, {
+      props: {
+        lastGame: { ...game, status: 'finished', result: 'win', ...overrides },
+        upcoming: [],
+        teamName: 'HG MERCENARIES',
+        teamLogoUrl: '',
+      },
+    })
+
+  /**
+   * 比對「文字裡有沒有冒號」會被時間的 `08:00` 騙到，所以改成找
+   * **整個元素剛好只有一個冒號**的那一個 —— 那才是比分中間的分隔。
+   */
+  const hasScoreSeparator = (component: { findAll: (s: string) => { text: () => string }[] }) =>
+    component.findAll('span').some((el) => el.text() === ':')
+
+  it('打完的比賽顯示兩隊比數，中間有分隔的冒號', async () => {
+    const component = await mount({})
+
+    // 比分是最大的那兩個數字
+    const scores = component.findAll('.text-3xl').map((el) => el.text())
+    expect(scores).toContain('6')
+    expect(scores).toContain('3')
+
+    // 手機版沒有中間的標題塊，少了冒號就變成「6 3」
+    expect(hasScoreSeparator(component)).toBe(true)
+  })
+
+  it.each([
+    ['因雨延賽', 'postponed'],
+    ['取消', 'canceled'],
+  ])('%s 的場次把狀態寫出來，不顯示比數', async (label, status) => {
+    const component = await mount({ status, result: null })
+
+    expect(component.text()).toContain(label)
+    // 這場根本沒打，不該有比分 —— 計分板是空的，畫出來會是「0 0」
+    expect(component.findAll('.text-3xl')).toHaveLength(0)
+    expect(hasScoreSeparator(component)).toBe(false)
   })
 })

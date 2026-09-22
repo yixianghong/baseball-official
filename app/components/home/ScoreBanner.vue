@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Game } from '#shared/schemas/game'
 import type { WeatherMap } from '#shared/schemas/weather'
+import { GAME_STATUS_LABELS, isNotPlayed } from '#shared/schemas/game'
 import { formatGameDate } from '~/utils/format'
 
 /**
@@ -47,6 +48,19 @@ const sides = computed(() => {
 
   return game.homeAway === 'home' ? [theirs, ours] : [ours, theirs]
 })
+
+/**
+ * 沒有打成的場次（延賽、取消）。
+ *
+ * 這種場次的計分板是空的，總分兩邊都是 0 —— 直接顯示就變成「0 0」，
+ * 看起來像打完了而且是和局。必須把狀態寫出來，而不是讓比數代替它說話。
+ */
+const notPlayed = computed(() => (props.lastGame ? isNotPlayed(props.lastGame) : false))
+
+/** 延賽是「出事了」，取消則是中性的結束 —— 與後台列表用同一套語彙。 */
+const statusTone = computed(() =>
+  props.lastGame?.status === 'postponed' ? ('warning' as const) : ('neutral' as const),
+)
 
 const nextGames = computed(() => props.upcoming.slice(0, 3))
 
@@ -113,25 +127,47 @@ const columnsClass = computed(() => {
 
             <!-- 比分與標題 -->
             <div class="flex items-center gap-2 sm:gap-4 md:gap-6">
-              <span
-                class="text-3xl font-black tabular-nums sm:text-5xl md:text-6xl"
-                :class="sides[0]!.isOurs ? '' : 'text-white/75'"
-              >
-                {{ sides[0]!.score }}
-              </span>
+              <template v-if="!notPlayed">
+                <span
+                  class="text-3xl font-black tabular-nums sm:text-5xl md:text-6xl"
+                  :class="sides[0]!.isOurs ? '' : 'text-white/75'"
+                >
+                  {{ sides[0]!.score }}
+                </span>
 
-              <div class="hidden text-center sm:block">
-                <p class="text-fluid-lg font-bold tracking-widest">LAST SCORE</p>
-                <p class="text-fluid-sm text-white/70">最新比數</p>
-                <p class="mt-1 text-fluid-sm tabular-nums text-white/70">
-                  {{ formatGameDate(lastGame.date) }}
-                  <span class="ml-1 underline decoration-white/40 underline-offset-4">
-                    {{ lastGame.time }}
-                  </span>
-                </p>
+                <!--
+                  冒號只在手機出現。桌機的標題塊就夾在兩個比分中間，
+                  本身就是分隔；手機把標題移到上方之後，兩個數字之間
+                  只剩一個空隙 —— 看起來像「0 0」而不是「0 比 0」。
+                -->
+                <span class="text-3xl font-black text-white/50 sm:hidden" aria-hidden="true"
+                  >:</span
+                >
+              </template>
+
+              <!--
+                沒打成的場次要把狀態寫出來，所以這一塊在手機上也要顯示
+                （平常它是 `hidden sm:block`，標題另外排在上方）。
+              -->
+              <div class="text-center" :class="notPlayed ? '' : 'hidden sm:block'">
+                <div class="hidden sm:block">
+                  <p class="text-fluid-lg font-bold tracking-widest">LAST SCORE</p>
+                  <p class="text-fluid-sm text-white/70">最新比數</p>
+                  <p class="mt-1 text-fluid-sm tabular-nums text-white/70">
+                    {{ formatGameDate(lastGame.date) }}
+                    <span class="ml-1 underline decoration-white/40 underline-offset-4">
+                      {{ lastGame.time }}
+                    </span>
+                  </p>
+                </div>
+
+                <UiBaseBadge v-if="notPlayed" :tone="statusTone" class="sm:mt-2">
+                  {{ GAME_STATUS_LABELS[lastGame.status] }}
+                </UiBaseBadge>
               </div>
 
               <span
+                v-if="!notPlayed"
                 class="text-3xl font-black tabular-nums sm:text-5xl md:text-6xl"
                 :class="sides[1]!.isOurs ? '' : 'text-white/75'"
               >
