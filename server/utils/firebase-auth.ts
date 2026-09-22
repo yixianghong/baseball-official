@@ -163,6 +163,9 @@ function mapSignInError(err: unknown): AppError {
     : new AppError(ERROR_CODE.UPSTREAM_ERROR, undefined, { cause: err })
 }
 
+/** 開發模式登入用的密碼。接上 Firebase 之後這個常數就不再有任何作用。 */
+export const DEV_PASSWORD = 'password1234'
+
 /**
  * 開發用登入。
  *
@@ -188,6 +191,3 @@ function devSignIn(email: string, password: string): SignInResult {
     expiresInSeconds: 3600,
   }
 }
-
-/** 開發模式登入用的密碼。接上 Firebase 之後這個常數就不再有任何作用。 */
-export const DEV_PASSWORD = 'password1234'

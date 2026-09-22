@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { MAX_GAME_QUERY_LIMIT } from '#shared/schemas/game'
-import { formatMonth, toMonthKey } from '~/utils/calendar'
+import { clampMonth, formatMonth, toMonthKey } from '~/utils/calendar'
 /**
  * 比賽結果。
  *
@@ -47,16 +47,16 @@ const availableMonths = computed(() => [
 const selectedMonth = ref('')
 
 /*
- * 預設停在最近有比賽的那個月。
+ * 預設停在最近有比賽的那個月，並確保選到的月份沒有超出範圍。
  *
- * 用 `watchEffect` 而不是初始化時指定：資料是非同步載入的，表單建立的當下
- * 還沒有值。切換年度之後原本選的月份可能已經不在範圍內，也要跳回去。
+ * 用 `watchEffect` 而不是初始化時指定：資料是非同步載入的，建立的當下
+ * 還沒有值。切換年度之後原本選的月份可能已經不屬於這一年，也要拉回來。
+ *
+ * ⚠️ 判斷條件是「超出最早～最晚的範圍」，**不是「這個月有沒有比賽」**。
+ * 詳見 `clampMonth()` —— 用後者會讓「上一個月」在遇到空月份時看起來壞掉。
  */
 watchEffect(() => {
-  const months = availableMonths.value
-  if (months.length === 0) return
-  if (selectedMonth.value && months.includes(selectedMonth.value)) return
-  selectedMonth.value = [...months].sort().at(-1)!
+  selectedMonth.value = clampMonth(selectedMonth.value, availableMonths.value)
 })
 
 /** 當月的場次，由新到舊。 */

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildMonthGrid, formatMonth, shiftMonth, toMonthKey } from '../../app/utils/calendar'
+import {
+  buildMonthGrid,
+  clampMonth,
+  formatMonth,
+  shiftMonth,
+  toMonthKey,
+} from '../../app/utils/calendar'
 
 /**
  * 月曆的日期計算。
@@ -78,5 +84,49 @@ describe('toMonthKey 與 formatMonth', () => {
   it('月份不補零地顯示', () => {
     expect(formatMonth('2026-09')).toBe('2026 年 9 月')
     expect(formatMonth('2026-12')).toBe('2026 年 12 月')
+  })
+})
+
+/**
+ * 迴歸測試：範圍內沒有比賽的月份必須可以停留。
+ *
+ * 線上資料是 2026-07 與 2026-09 各一場、八月空著。原本的判斷是
+ * 「這個月有沒有比賽」，於是按「上一個月」切到八月時立刻被彈回九月 ——
+ * 值改了又在同一幀被改回來，使用者看到的是**按鈕完全沒反應**。
+ */
+describe('clampMonth', () => {
+  const available = ['2026-07', '2026-09']
+
+  it('範圍內沒有比賽的月份可以停留（就是按鈕看起來壞掉的那個 bug）', () => {
+    expect(clampMonth('2026-08', available)).toBe('2026-08')
+  })
+
+  it('有比賽的月份當然可以停留', () => {
+    expect(clampMonth('2026-07', available)).toBe('2026-07')
+    expect(clampMonth('2026-09', available)).toBe('2026-09')
+  })
+
+  it('超出最晚的月份拉回最晚', () => {
+    expect(clampMonth('2026-10', available)).toBe('2026-09')
+    expect(clampMonth('2027-03', available)).toBe('2026-09')
+  })
+
+  it('早於最早的月份拉回最早', () => {
+    expect(clampMonth('2026-06', available)).toBe('2026-07')
+    expect(clampMonth('2025-01', available)).toBe('2026-07')
+  })
+
+  it('還沒選過時給最近有比賽的那個月', () => {
+    expect(clampMonth('', available)).toBe('2026-09')
+  })
+
+  it('完全沒有比賽時原樣回傳，不要亂猜一個月份', () => {
+    expect(clampMonth('2026-08', [])).toBe('2026-08')
+    expect(clampMonth('', [])).toBe('')
+  })
+
+  it('只有一個月份時，所有輸入都收斂到它', () => {
+    expect(clampMonth('2026-01', ['2026-09'])).toBe('2026-09')
+    expect(clampMonth('2026-12', ['2026-09'])).toBe('2026-09')
   })
 })

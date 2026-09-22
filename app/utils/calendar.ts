@@ -77,3 +77,32 @@ function splitMonth(monthKey: string): [number, number] {
 function pad(value: number): string {
   return String(value).padStart(2, '0')
 }
+
+/**
+ * 把月份收斂到「有比賽的範圍」之內。
+ *
+ * ## 範圍內沒有比賽的月份是可以停留的
+ * 這裡**不能**用「這個月有沒有比賽」來判斷。球隊常常整個月沒出賽 ——
+ * 例如七月與九月各一場、八月空著。若把八月視為無效並彈回九月，
+ * 使用者按「上一個月」會看到畫面完全沒反應（值改了又被改回來），
+ * 看起來就是按鈕壞掉。
+ *
+ * 只有真的超出「最早～最晚」這個範圍才拉回來 —— 那才是沒有意義的地方
+ * （例如切換年度之後，原本選的月份已經不屬於這一年）。
+ *
+ * @param month    想切換到的月份 `YYYY-MM`
+ * @param available 有比賽的月份，順序不拘
+ * @returns 可以停留的月份；`available` 是空的就原樣回傳
+ */
+export function clampMonth(month: string, available: string[]): string {
+  if (available.length === 0) return month
+
+  const sorted = [...available].sort()
+  const earliest = sorted[0]!
+  const latest = sorted.at(-1)!
+
+  if (!month) return latest
+  if (month < earliest) return earliest
+  if (month > latest) return latest
+  return month
+}

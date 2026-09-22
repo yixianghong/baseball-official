@@ -37,6 +37,20 @@ export default withNuxt(
       'vue/attributes-order': 'warn',
 
       // ── 一般 ──
+      /*
+       * 在宣告之前使用變數 —— 這一條是踩過才加的。
+       *
+       * `watchEffect(() => { ... form.city ... })` 寫在 `const form = reactive(...)`
+       * 之前，因為 `watchEffect` 會立刻執行一次，而 `const` 在宣告之前是
+       * 暫時性死區（TDZ），開啟頁面當下就拋
+       * `Cannot access 'form' before initialization`，整個表單掛掉。
+       * 原本的設定會讓這段順利通過 lint 與 typecheck，只有實際打開頁面才發現。
+       *
+       * 函式不在此限（`functions: false`）：函式宣告會提升，而且「先寫主流程、
+       * 輔助函式放後面」是這個 repo 既有的寫法。
+       */
+      'no-use-before-define': ['error', { functions: false, classes: true, variables: true }],
+
       // 正式程式碼不留 console，但 warn/error 允許（server 端的 fallback 輸出）
       'no-console': ['warn', { allow: ['warn', 'error'] }],
       'no-debugger': 'error',

@@ -114,6 +114,16 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
   記得回來加一行。**
 - **flex/grid item 的 `min-width: auto`** 會撐破容器，`minmax(0,1fr)` 只約束軌道管不到 item。
 - **Tailwind 掃不到執行期拼出來的 class**（`sm:${變數}`），完整名稱要寫死在原始碼裡。
+- **`watchEffect` 會立刻執行一次，所以不能放在它用到的 `const` 之前** —
+  `const` 在宣告前是暫時性死區，開啟頁面當下就拋
+  `Cannot access 'X' before initialization`，整頁掛掉。`computed` 是惰性的所以
+  放前面不會爆，但兩者看起來一模一樣、讀者分不出來。
+  `eslint.config.mjs` 的 `no-use-before-define` 現在會擋下這種寫法。
+- **「有沒有資料」不等於「是不是有效的選擇」** — 比賽月曆原本用
+  「這個月有沒有比賽」判斷選到的月份是否有效，於是翻到空月份時立刻被彈回去，
+  看起來就是**上一個月／下一個月按鈕沒反應**（值改了又在同一幀被改回來）。
+  正確的條件是「有沒有超出最早～最晚的範圍」，見 `clampMonth()`。
+  種子資料的月份剛好連續，所以本機測不出來 —— 線上是七月與九月各一場、八月空著。
 - **改檔案前先讀** — prettier 會重排 template，憑印象做字串替換常常匹配不到。
 - **SSR 內部的 `$fetch` 一樣會經過 server middleware，但沒有來源 IP。**
   限流因此把全站訪客的 SSR 請求算進同一個 `'unknown'` 桶子 —— 一次首頁渲染

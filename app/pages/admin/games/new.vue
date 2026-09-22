@@ -115,10 +115,27 @@ async function importSelected() {
 }
 
 // ── 手動新增 ────────────────────────────────────────────────────
+const form = reactive({
+  date: '',
+  time: '09:00',
+  opponent: '',
+  venue: '',
+  mapUrl: '',
+  city: '' as TaiwanCity | '',
+  league: '',
+  homeAway: 'home' as HomeAway,
+  note: '',
+})
+
 /*
  * 主場縣市帶進來當預設。`watchEffect` 而不是初始化時指定：網站設定是
  * 非同步載入的，表單建立的當下還沒有值。只在使用者還沒自己選過時才帶，
  * 否則設定一載完就會把他剛選的客場縣市蓋掉。
+ *
+ * ⚠️ 這段**必須放在 `form` 之後**。`watchEffect` 會立刻執行一次，而
+ * `const` 在宣告之前是暫時性死區 —— 放在前面會在開啟頁面的當下就拋
+ * `Cannot access 'form' before initialization`，整個表單掛掉。
+ * （`computed` 是惰性的，放前面不會立刻爆，但同樣別冒這個險。）
  */
 const cityTouched = ref(false)
 watchEffect(() => {
@@ -132,18 +149,6 @@ const mapUrlError = computed(() =>
     ? '請貼 Google 地圖的連結（maps.app.goo.gl 或 google.com/maps）'
     : '',
 )
-
-const form = reactive({
-  date: '',
-  time: '09:00',
-  opponent: '',
-  venue: '',
-  mapUrl: '',
-  city: '' as TaiwanCity | '',
-  league: '',
-  homeAway: 'home' as HomeAway,
-  note: '',
-})
 
 async function submitManual() {
   const created = await createGame({

@@ -59,22 +59,6 @@ const tabs = [
 ] as const
 const activeTab = ref<(typeof tabs)[number]['key']>('basic')
 
-/**
- * 表單的完整內容。
- *
- * 自動儲存時整份送出（PATCH），而不是每個分頁各送各的欄位 —— 單一使用者
- * 在單一頁面編輯，沒有互相覆蓋的問題，而一份 payload 換來的是一個 timer、
- * 一個狀態指示、一套錯誤處理。
- */
-const formState = computed(() => ({
-  ...basic,
-  attendance: attendance.value,
-  lineup: lineup.value,
-  pitchers: pitchers.value,
-  scoreboard: scoreboard.value,
-  result: resultOverride.value || null,
-}))
-
 // ── 各分頁的表單狀態 ────────────────────────────────────────────
 const basic = reactive({
   date: '',
@@ -110,6 +94,22 @@ const pitchers = ref<PitcherEntry[]>([])
 const scoreboard = ref<Scoreboard>(emptyScoreboard(0))
 /** 空字串代表「依計分板自動判定」。做成選項之一，型別才不必和 placeholder 打架。 */
 const resultOverride = ref<GameResult | ''>('')
+
+/**
+ * 表單的完整內容。
+ *
+ * 自動儲存時整份送出（PATCH），而不是每個分頁各送各的欄位 —— 單一使用者
+ * 在單一頁面編輯，沒有互相覆蓋的問題，而一份 payload 換來的是一個 timer、
+ * 一個狀態指示、一套錯誤處理。
+ */
+const formState = computed(() => ({
+  ...basic,
+  attendance: attendance.value,
+  lineup: lineup.value,
+  pitchers: pitchers.value,
+  scoreboard: scoreboard.value,
+  result: resultOverride.value || null,
+}))
 
 /** 把伺服器資料灌進表單。載入完成時執行一次。 */
 function syncFromGame() {
