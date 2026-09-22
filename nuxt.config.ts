@@ -1,4 +1,5 @@
 import tailwindcss from '@tailwindcss/vite'
+import { COLOR_MODE_BOOTSTRAP } from './shared/constants/theme'
 
 /**
  * Nuxt 設定 —— 球隊官網。
@@ -16,6 +17,15 @@ import tailwindcss from '@tailwindcss/vite'
  * 前端**完全不載入 Firebase SDK**，也拿不到任何 Firebase token —— 這是
  * 選擇 BFF 架構最直接的收穫。
  */
+/**
+ * 公開頁面的快取指示。詳細理由寫在下方 `nitro.routeRules` 的註解。
+ * 瀏覽器不留（`max-age=0`）、CDN 留 60 秒、過期後還能先用舊的撐 10 分鐘。
+ */
+const PUBLIC_CACHE = 'public, max-age=0, s-maxage=60, stale-while-revalidate=600'
+
+/** 後台與認證相關端點：任何共用快取都不准碰。 */
+const PRIVATE_CACHE = 'private, no-store'
+
 export default defineNuxtConfig({
   // 鎖定 Nitro 的行為基準日，升級 Nuxt 時不會被預設值變動偷襲
   compatibilityDate: '2025-07-15',
@@ -157,13 +167,57 @@ export default defineNuxtConfig({
       cache: { driver: 'memory' },
     },
 
-    // 移除會洩漏技術棧的預設 header
+    /**
+     * ## 路由規則
+     *
+     * ### 公開頁面走 CDN 快取
+     * App Hosting 的 CDN **只有在回應帶 `max-age` 或 `s-maxage` 時才會快取**，
+     * 預設什麼都不快取（每一次瀏覽都要叫醒 Cloud Run，冷啟動約 2.7 秒）。
+     * 這裡替公開頁面補上快取指示：
+     *
+     * - `s-maxage=60`：CDN 保存 60 秒。後台改完資料，最慢一分鐘後前台換新。
+     * - `stale-while-revalidate=600`：過期後 CDN 先把舊的送出去，同時在背景
+     *   向來源要新的。**冷啟動因此離開了使用者的等待路徑** —— 這才是重點，
+     *   不是省那幾次請求。
+     * - `max-age=0`：瀏覽器自己不留快取，重新整理一定會去問 CDN。
+     *
+     * ### 會被快取就代表「對所有人都一樣」
+     * 同一份 HTML 會送給每個訪客，所以公開頁面的 SSR 輸出不能包含任何個人狀態：
+     * 配色偏好改由開機腳本在瀏覽器端套用（見 `shared/constants/theme.ts`），
+     * 登入狀態改由瀏覽器端還原（見 `app/app.vue`），i18n 的語言偵測 cookie
+     * 也關掉了 —— **回應只要帶 `Set-Cookie`，CDN 就完全不會快取**。
+     *
+     * ### 沒有清除快取的手段
+     * App Hosting 沒有提供 CDN purge API，過期只能靠 TTL。60 秒是「後台改完
+     * 馬上想看到」與「快取有效」之間的折衷，不要隨手調大。
+     *
+     * ### API 刻意不快取
+     * SSR 取資料走的是 Nitro 內部呼叫，根本不經過 CDN，快取 API 對首屏沒有幫助；
+     * 而後台讀的是同一批端點，快取只會讓「我明明存檔了」變成客訴。
+     * 例外是 `/api/media/[id]`，它在 handler 內自己設了長一點的快取。
+     */
     routeRules: {
+      // 移除會洩漏技術棧的預設 header
       '/api/**': {
         headers: {
           'x-powered-by': '',
         },
       },
+
+      // 後台：絕對不能進任何共用快取
+      '/admin': { headers: { 'cache-control': PRIVATE_CACHE } },
+      '/admin/**': { headers: { 'cache-control': PRIVATE_CACHE } },
+      '/api/auth/**': { headers: { 'cache-control': PRIVATE_CACHE } },
+      '/api/admin/**': { headers: { 'cache-control': PRIVATE_CACHE } },
+
+      // 公開頁面
+      '/': { headers: { 'cache-control': PUBLIC_CACHE } },
+      '/schedule': { headers: { 'cache-control': PUBLIC_CACHE } },
+      '/results': { headers: { 'cache-control': PUBLIC_CACHE } },
+      '/news': { headers: { 'cache-control': PUBLIC_CACHE } },
+      '/players': { headers: { 'cache-control': PUBLIC_CACHE } },
+      '/players/**': { headers: { 'cache-control': PUBLIC_CACHE } },
+      '/games/**': { headers: { 'cache-control': PUBLIC_CACHE } },
     },
   },
 
@@ -177,17 +231,24 @@ export default defineNuxtConfig({
       { code: 'zh-TW', language: 'zh-TW', name: '繁體中文', file: 'zh-TW.json' },
       { code: 'en', language: 'en-US', name: 'English', file: 'en.json' },
     ],
-    detectBrowserLanguage: {
-      useCookie: true,
-      cookieKey: 'i18n_locale',
-      redirectOn: 'root',
-      cookieSecure: process.env.NODE_ENV === 'production',
-    },
+    /**
+     * 關閉瀏覽器語言偵測。
+     *
+     * 它會在每個回應帶上 `Set-Cookie: i18n_locale=...`，而帶 `Set-Cookie`
+     * 的回應 App Hosting 的 CDN 一律不快取 —— 為了一個只維護 zh-TW 的網站，
+     * 這個代價不划算。內容本來就只有繁體中文，偵測也沒有東西可切。
+     */
+    detectBrowserLanguage: false,
   },
 
   app: {
     head: {
       htmlAttrs: { lang: 'zh-TW' },
+      /**
+       * 配色開機腳本。必須是 `<head>` 裡的同步 inline script，
+       * 才能趕在 `<body>` 繪製之前把 `.dark` 掛上去。
+       */
+      script: [{ innerHTML: COLOR_MODE_BOOTSTRAP, tagPosition: 'head', tagPriority: 'critical' }],
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },

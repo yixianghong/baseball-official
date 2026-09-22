@@ -489,21 +489,71 @@ describe('SSR', () => {
     expect(response.status).toBe(404)
   })
 
-  it('深色模式偏好由 cookie 決定，SSR 就輸出正確的 class（不會閃爍）', async () => {
-    const html = await $fetch<string>('/', { headers: { cookie: 'color_mode=dark' } })
-    expect(html).toContain('class="dark"')
-  })
+  /**
+   * ## 公開頁面必須可以被 CDN 快取
+   *
+   * App Hosting 的 CDN 有兩條硬規則，違反任何一條就整個不快取：
+   * 1. 回應要帶 `max-age` 或 `s-maxage`
+   * 2. 回應**不能帶 `Set-Cookie`**
+   *
+   * 第 2 條特別容易被無意中破壞 —— `useCookie` 給個 default、i18n 打開語言
+   * 偵測、隨手加個 A/B 測試 cookie，都會讓快取默默失效，而且從畫面上完全
+   * 看不出來。這幾條測試就是守在這裡。
+   */
+  describe('CDN 快取', () => {
+    const publicPaths = ['/', '/schedule', '/results', '/news', '/players']
 
-  it('沒有 cookie 時預設就是深色（第一次進站看到的是深色）', async () => {
-    const html = await $fetch<string>('/')
-    expect(html).toContain('class="dark"')
-  })
+    it.each(publicPaths)('%s 帶著可被 CDN 快取的 cache-control', async (path) => {
+      const response = await fetch(path)
+      const cacheControl = response.headers.get('cache-control') ?? ''
 
-  it('cookie 指定亮色時就不會帶上 dark class', async () => {
-    const html = await $fetch<string>('/', { headers: { cookie: 'color_mode=light' } })
-    expect(html).not.toContain('class="dark"')
+      expect(cacheControl).toContain('public')
+      expect(cacheControl).toMatch(/s-maxage=\d+/)
+      expect(cacheControl).toContain('stale-while-revalidate')
+    })
+
+    it.each(publicPaths)('%s 不會帶 Set-Cookie（帶了就完全不快取）', async (path) => {
+      const response = await fetch(path)
+      expect(response.headers.get('set-cookie')).toBeNull()
+    })
+
+    it('後台頁面永遠不進共用快取', async () => {
+      const response = await fetch('/admin/login')
+      expect(response.headers.get('cache-control')).toBe('private, no-store')
+    })
+
+    /**
+     * 會被快取代表「同一份 HTML 送給所有人」，所以 SSR 輸出不能依 cookie 而不同。
+     * 配色改由 `<head>` 裡的開機腳本在瀏覽器端套用。
+     */
+    it('SSR 輸出不含配色偏好，兩種 cookie 拿到的畫面一樣', async () => {
+      const dark = await $fetch<string>('/', { headers: { cookie: 'color_mode=dark' } })
+      const light = await $fetch<string>('/', { headers: { cookie: 'color_mode=light' } })
+
+      expect(dark).not.toContain('class="dark"')
+      expect(light).not.toContain('class="dark"')
+
+      // 比對渲染出來的畫面。SSR payload 裡有 requestId 與時間戳，每次請求
+      // 本來就不同（跟 cookie 無關），比對前先拿掉。
+      expect(renderedMarkup(dark)).toBe(renderedMarkup(light))
+    })
+
+    it('配色的開機腳本有被注入（沒有它會閃一下白的）', async () => {
+      const html = await $fetch<string>('/')
+
+      expect(html).toContain('color_mode=(light|dark)')
+      expect(html).toContain('classList.toggle')
+    })
   })
 })
+
+/**
+ * 只留下渲染出來的畫面，拿掉 SSR payload 與日誌那幾個 `<script type="application/json">`
+ * —— 它們裝的是 requestId 與時間戳，每次請求都不一樣，跟使用者是誰無關。
+ */
+function renderedMarkup(html: string): string {
+  return html.replace(/<script type="application\/json"[\s\S]*?<\/script>/g, '')
+}
 
 describe('後台頁面的存取控制', () => {
   it('未登入訪問後台會被導向登入頁', async () => {

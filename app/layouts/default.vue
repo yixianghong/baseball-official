@@ -18,7 +18,7 @@
  * 一次 SSR 只會實際請求一次。
  */
 const { isLoggedIn, logout } = useAuth()
-const { isDark, toggle: toggleTheme } = useTheme()
+const { toggle: toggleTheme } = useTheme()
 const { t } = useI18n()
 const config = useRuntimeConfig()
 
@@ -124,15 +124,22 @@ useHead({
             Windows、macOS、Android 各畫各的，某些環境（含無頭瀏覽器）甚至
             完全不渲染。圖示是介面的一部分，不該交給字型決定它長什麼樣。
           -->
+          <!--
+            圖示由 CSS 的 `dark:` variant 決定，不是 `v-if="isDark"`。
+
+            這個頁面會被 CDN 快取：同一份 HTML 送給所有訪客，所以 SSR 輸出
+            不能依使用者的配色偏好而不同。兩個圖示都渲染、讓 `<html>` 上的
+            `.dark` 去挑一個顯示，HTML 就對每個人都一樣了。
+            aria-label 同理，用不隨狀態改變的說法。
+          -->
           <button
             type="button"
             class="flex size-10 items-center justify-center rounded text-white/70 transition hover:bg-white/10 hover:text-white"
-            :aria-label="isDark ? t('theme.toLight') : t('theme.toDark')"
+            :aria-label="t('theme.toggle')"
             @click="toggleTheme"
           >
             <svg
-              v-if="isDark"
-              class="size-5"
+              class="hidden size-5 dark:block"
               viewBox="0 0 24 24"
               fill="currentColor"
               aria-hidden="true"
@@ -141,7 +148,12 @@ useHead({
                 d="M21.64 13a1 1 0 0 0-1.05-.14 8.05 8.05 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.6 8.6 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Z"
               />
             </svg>
-            <svg v-else class="size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <svg
+              class="size-5 dark:hidden"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
               <path
                 d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12Zm0-16a1 1 0 0 1 1 1v1a1 1 0 0 1-2 0V3a1 1 0 0 1 1-1Zm0 18a1 1 0 0 1 1 1v1a1 1 0 0 1-2 0v-1a1 1 0 0 1 1-1ZM4.22 5.64a1 1 0 0 1 1.42-1.42l.7.71a1 1 0 0 1-1.41 1.41ZM17.66 19.07a1 1 0 0 1 1.41-1.41l.71.7a1 1 0 0 1-1.42 1.42ZM2 12a1 1 0 0 1 1-1h1a1 1 0 0 1 0 2H3a1 1 0 0 1-1-1Zm18 0a1 1 0 0 1 1-1h1a1 1 0 0 1 0 2h-1a1 1 0 0 1-1-1ZM4.93 19.07a1 1 0 0 1 0-1.41l.71-.71a1 1 0 0 1 1.41 1.41l-.7.71a1 1 0 0 1-1.42 0ZM18.36 5.64a1 1 0 0 1 0-1.42l.71-.7a1 1 0 1 1 1.41 1.41l-.7.71a1 1 0 0 1-1.42 0Z"
               />

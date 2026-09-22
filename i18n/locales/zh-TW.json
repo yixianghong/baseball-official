@@ -13,8 +13,7 @@
     "toggleMenu": "開啟或關閉選單"
   },
   "theme": {
-    "toDark": "切換至深色模式",
-    "toLight": "切換至亮色模式"
+    "toggle": "切換深色或亮色模式"
   },
   "auth": {
     "login": "後台登入",

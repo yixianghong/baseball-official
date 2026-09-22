@@ -103,6 +103,9 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 - **flex/grid item 的 `min-width: auto`** 會撐破容器，`minmax(0,1fr)` 只約束軌道管不到 item。
 - **Tailwind 掃不到執行期拼出來的 class**（`sm:${變數}`），完整名稱要寫死在原始碼裡。
 - **改檔案前先讀** — prettier 會重排 template，憑印象做字串替換常常匹配不到。
+- **公開頁面的 SSR 輸出不能因人而異** — 它們會被 CDN 快取送給所有訪客。加 cookie、
+  依 cookie 改渲染、把登入狀態畫進 HTML，都會默默破壞快取或把狀態送給別人，
+  而且畫面上完全看不出來。詳見「部署」章節。
 
 ## 部署
 
@@ -116,6 +119,30 @@ apphosting.yaml」時**選 No** —— 它推導出的變數名沒有 `NUXT_` �
 
 `firestore.rules` 全部拒絕、`storage.rules` 只開放讀取：所有存取都走 BFF 的 service
 account（不受規則限制），規則擋的是「瀏覽器直接連資料庫」那條路。
+
+### 公開頁面走 CDN 快取
+
+`minInstances: 0`，沒人看的時候縮到零（冷啟動實測約 2.7 秒）。冷啟動不靠付錢
+解決，靠 CDN：公開頁面在 `nuxt.config.ts` 的 `routeRules` 帶
+`public, max-age=0, s-maxage=60, stale-while-revalidate=600`，過期後 CDN 先送舊的
+再背景更新，**冷啟動因此不在使用者的等待路徑上**。
+
+代價是「同一份 HTML 送給所有人」，所以公開頁面的 SSR 輸出**不能包含任何個人狀態**：
+
+- 配色偏好由 `<head>` 的開機腳本在瀏覽器端套用（`shared/constants/theme.ts`），
+  SSR 不輸出 `class="dark"`。會被快取的頁面裡不要用 `isDark` 決定渲染什麼，
+  改用 Tailwind 的 `dark:` variant 讓 CSS 決定。
+- 登入狀態只在 `/admin` 的 SSR 還原，公開頁面進瀏覽器後才問 `/api/auth/me`
+  （`app/app.vue`）。
+- **回應只要帶一個 `Set-Cookie`，CDN 就完全不快取。** i18n 的語言偵測因此關掉，
+  `useCookie` 也不能給 `default`（給了 SSR 就會寫回 cookie）。
+
+`tests/e2e/bff.test.ts` 的「CDN 快取」那組測試守著這些條件 —— 它們檢查的是
+header 與「兩種 cookie 拿到的畫面一樣」，因為這類失效在畫面上完全看不出來。
+
+App Hosting **沒有清除 CDN 快取的手段**，只能等 TTL。60 秒是「後台改完馬上想看到」
+與「快取有效」的折衷。API 刻意不快取：SSR 取資料走 Nitro 內部呼叫不經過 CDN，
+而後台讀的是同一批端點，快取只會讓「我明明存檔了」變成客訴。
 
 ## 其他
 
