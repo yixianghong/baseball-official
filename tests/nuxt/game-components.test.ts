@@ -262,6 +262,51 @@ describe('GameLineupCard', () => {
   })
 
   /*
+   * ── 名牌上只有「#背號 名字」 ───────────────────────────────
+   *
+   * 參考的轉播圖卡上有打擊率、OPS、CLEANUP 徽章那些東西，這裡刻意都不放：
+   * 資料模型沒有球員數據（明確的範圍外項目），而名單會被截圖傳出去 ——
+   * 上面的每個數字都會被當真。剩下的標籤也一併拿掉，讓名字本身最醒目。
+   */
+  it('名牌上不出現投打習慣、CLEANUP、先發投手這些標籤', async () => {
+    const batting = {
+      order: 4,
+      playerId: 'p5',
+      name: '王建民',
+      number: '18',
+      position: 'P' as const,
+    }
+    const component = await mountSuspended(GameLineupCard, {
+      props: { ...baseProps, entries: [...entries, batting], pitchers: [starter] },
+    })
+
+    const text = component.text()
+    expect(text).not.toContain('CLEANUP')
+    expect(text).not.toContain('右投')
+    expect(text).not.toContain('左打')
+
+    // 打序那一列不再掛「先發投手」標籤。比對整張卡的文字會誤判 ——
+    // 下面獨立那一段的標題與 SP 牌的 sr-only 文字都含有這四個字
+    const lineup = component.findAll('ul')[0]!
+    expect(lineup.text()).toContain('#18 王建民')
+    expect(lineup.text()).not.toContain('先發投手')
+  })
+
+  it('也不顯示人數與 DH 摘要', async () => {
+    const component = await mountSuspended(GameLineupCard, { props: baseProps })
+
+    expect(component.text()).not.toContain('人名單')
+    expect(component.text()).not.toContain('DH')
+  })
+
+  it('投手紀錄的備註有填才顯示', async () => {
+    const withNote = await mountSuspended(GameLineupCard, {
+      props: { ...baseProps, pitchers: [{ ...starter, note: '6 局 2 失分' }] },
+    })
+    expect(withNote.text()).toContain('6 局 2 失分')
+  })
+
+  /*
    * ── 日期與地點 ─────────────────────────────────────────────
    *
    * 這張卡會被截圖丟到群組裡。脫離網站之後，「9/29（二）」少了年份就可能

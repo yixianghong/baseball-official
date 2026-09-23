@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import type { AttendanceEntry, LineupEntry, PitcherEntry } from '#shared/schemas/game'
 import { POSITION_LABELS } from '#shared/schemas/player'
+import { NuxtLink } from '#components'
 import { formatGameStamp } from '~/utils/format'
+
+/*
+ * `NuxtLink` 用匯入的而不是寫成字串 `'NuxtLink'`。
+ *
+ * `<component :is="'NuxtLink'">` 靠的是「執行期用名稱把元件查出來」，而那份
+ * 註冊表在測試環境裡不一定存在 —— 症狀是連結整個不渲染（`<a>` 變成什麼都沒有），
+ * 而且**不會報錯**。直接給元件物件就沒有這層不確定性。
+ */
 
 /**
  * 出賽名單圖卡。
@@ -100,9 +109,15 @@ function onShare() {
 
 <template>
   <div>
+    <!--
+      底色是墨藍家族的對角漸層（`ink-soft → ink → ink-deep`），不是單一色塊。
+      一整片純色在這個尺寸會顯得很平，而深色介面沒辦法靠陰影做層次
+      （見 `main.css` 的 `.surface-card`）—— 漸層是深色底最直接的立體感來源。
+      色相全部維持在 250～255，所以看起來仍然是同一個顏色，只是有光從左上來。
+    -->
     <div
       ref="cardRef"
-      class="relative isolate overflow-hidden rounded-2xl bg-ink-deep text-white shadow-lg"
+      class="relative isolate overflow-hidden rounded-2xl bg-gradient-to-br from-ink-soft via-ink to-ink-deep text-white shadow-lg"
     >
       <!-- 球場紋理。純裝飾，要對輔助科技隱藏 -->
       <div class="field-pattern absolute inset-0" aria-hidden="true" />
@@ -116,7 +131,9 @@ function onShare() {
         >
           <p class="[writing-mode:vertical-rl] text-fluid-lg font-black tracking-[0.2em]">
             出賽名單
-            <span class="ml-1 text-xs font-bold tracking-[0.3em] opacity-70">GAME ROSTER</span>
+            <span class="ml-1 font-display text-xs font-bold tracking-[0.3em] opacity-70">
+              GAME ROSTER
+            </span>
           </p>
         </div>
 
@@ -133,39 +150,42 @@ function onShare() {
           </div>
 
           <!-- ══ 先發打序 ════════════════════════════════════════ -->
-          <p class="mb-1.5 text-xs font-black tracking-[0.25em] text-accent-400">先發打序</p>
+          <p class="mb-2 font-display text-fluid-sm font-bold tracking-wide text-accent-400">
+            <span aria-hidden="true">▤</span>
+            先發打序
+            <span class="tracking-[0.15em] opacity-70">(STARTING LINEUP)</span>
+          </p>
 
-          <ul class="space-y-1">
+          <ul class="space-y-1.5">
             <li
               v-for="entry in entries"
               :key="entry.order"
-              class="grid grid-cols-[2rem_minmax(0,1fr)_2.75rem] items-stretch gap-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_3.25rem]"
+              class="grid grid-cols-[1.75rem_minmax(0,1fr)_2.5rem] items-stretch gap-1.5 sm:grid-cols-[2.25rem_minmax(0,1fr)_3rem]"
             >
+              <!-- 棒次：窄黑體、金色，整張卡最先被看到的東西 -->
               <span
-                class="flex items-center justify-center text-fluid-lg font-black tabular-nums text-accent-400"
+                class="flex items-center justify-center font-display text-fluid-xl leading-none font-bold tabular-nums text-accent-400"
               >
                 {{ entry.order }}
               </span>
-              <NuxtLink
-                v-if="entry.playerId"
-                :to="`/players/${entry.playerId}`"
-                class="flex min-w-0 items-center justify-center truncate rounded bg-white/95 px-2 py-1.5 text-center font-bold text-ink-deep transition hover:bg-white hover:underline hover:underline-offset-4"
+
+              <!-- 名牌。左緣一道金條是「這是打序上的人」的視覺記號 -->
+              <component
+                :is="entry.playerId ? NuxtLink : 'span'"
+                :to="entry.playerId ? `/players/${entry.playerId}` : undefined"
+                class="flex min-w-0 items-center justify-center rounded-lg border-l-4 border-l-accent-500/70 bg-white/95 px-2.5 py-1.5 text-ink-deep transition hover:bg-white"
               >
-                {{ displayName(entry) }}
-              </NuxtLink>
-              <span
-                v-else
-                class="flex min-w-0 items-center justify-center truncate rounded bg-white/95 px-2 py-1.5 text-center font-bold text-ink-deep"
-              >
-                {{ displayName(entry) }}
-              </span>
+                <span class="min-w-0 truncate text-center font-display text-fluid-base font-bold">
+                  {{ displayName(entry) }}
+                </span>
+              </component>
 
               <!--
-              視覺上是縮寫、念出來是中文全名。
-              螢幕閱讀器把 `2B` 念成「二 B」對聽的人完全沒有意義。
-            -->
+                守位。視覺上是縮寫、念出來是中文全名 ——
+                螢幕閱讀器把 `2B` 念成「二 B」對聽的人完全沒有意義。
+              -->
               <span
-                class="flex items-center justify-center rounded bg-brand-700 px-1 py-1.5 text-fluid-sm font-black"
+                class="flex items-center justify-center rounded-lg bg-brand-700 font-display text-fluid-sm font-bold tracking-wide shadow-[inset_0_1px_0_oklch(1_0_0/0.15)]"
                 :title="POSITION_LABELS[entry.position]"
               >
                 <span aria-hidden="true">{{ entry.position }}</span>
@@ -180,27 +200,39 @@ function onShare() {
             而「今天誰先發」是這張卡上最常被問的一件事，值得一個標題。
           -->
           <template v-if="startingPitcher">
-            <p class="mt-4 mb-1.5 text-xs font-black tracking-[0.25em] text-accent-400">先發投手</p>
+            <div class="mt-4 mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <p class="font-display text-fluid-sm font-bold tracking-wide text-accent-400">
+                <span aria-hidden="true">◈</span>
+                先發投手
+                <span class="tracking-[0.15em] opacity-70">(STARTING PITCHER)</span>
+              </p>
+            </div>
 
             <div
-              class="grid grid-cols-[2rem_minmax(0,1fr)_2.75rem] items-stretch gap-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_3.25rem]"
+              class="grid grid-cols-[minmax(0,1fr)_2.5rem] items-stretch gap-1.5 sm:grid-cols-[minmax(0,1fr)_3rem]"
             >
-              <span />
-              <NuxtLink
-                v-if="startingPitcher.playerId"
-                :to="`/players/${startingPitcher.playerId}`"
-                class="flex min-w-0 items-center justify-center truncate rounded bg-white/95 px-2 py-1.5 text-center font-bold text-ink-deep transition hover:bg-white hover:underline hover:underline-offset-4"
+              <component
+                :is="startingPitcher.playerId ? NuxtLink : 'span'"
+                :to="startingPitcher.playerId ? `/players/${startingPitcher.playerId}` : undefined"
+                class="flex min-w-0 flex-col items-center justify-center rounded-lg border-l-4 border-l-accent-500 bg-white/95 px-3 py-2 text-center text-ink-deep transition hover:bg-white"
               >
-                {{ displayName(startingPitcher) }}
-              </NuxtLink>
+                <span class="min-w-0 max-w-full truncate font-display text-fluid-lg font-bold">
+                  {{ displayName(startingPitcher) }}
+                </span>
+                <!--
+                  投手紀錄的備註（例如「6 局 2 失分」）放在名字下面而不是右邊：
+                  擺右邊會把名字擠成偏左，而這一段的重點就是那個名字。沒填就不佔位。
+                -->
+                <span
+                  v-if="startingPitcher.note"
+                  class="max-w-full truncate text-fluid-sm text-ink-soft/70"
+                >
+                  {{ startingPitcher.note }}
+                </span>
+              </component>
+
               <span
-                v-else
-                class="flex min-w-0 items-center justify-center truncate rounded bg-white/95 px-2 py-1.5 text-center font-bold text-ink-deep"
-              >
-                {{ displayName(startingPitcher) }}
-              </span>
-              <span
-                class="flex items-center justify-center rounded bg-accent-500 px-1 py-1.5 text-fluid-sm font-black text-ink-deep"
+                class="flex items-center justify-center rounded-lg bg-accent-500 font-display text-fluid-base font-bold tracking-wide text-ink-deep"
                 title="先發投手"
               >
                 <span aria-hidden="true">SP</span>
@@ -211,29 +243,29 @@ function onShare() {
 
           <!-- ══ 候補 ════════════════════════════════════════════ -->
           <template v-if="bench.length">
-            <p class="mt-4 mb-1.5 text-xs font-black tracking-[0.25em] text-accent-400">候補</p>
+            <p class="mt-4 mb-2 font-display text-fluid-sm font-bold tracking-wide text-accent-400">
+              <span aria-hidden="true">▤</span>
+              候補
+              <span class="tracking-[0.15em] opacity-70">(BENCH)</span>
+            </p>
 
-            <ul class="space-y-1">
+            <ul class="space-y-1.5">
               <li
                 v-for="person in bench"
                 :key="person.playerId || person.name"
-                class="grid grid-cols-[2rem_minmax(0,1fr)] gap-1 sm:grid-cols-[2.5rem_minmax(0,1fr)]"
+                class="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-1.5 sm:grid-cols-[2.25rem_minmax(0,1fr)]"
               >
                 <span />
-                <!-- 沒有守位，姓名牌就佔到底。底色淡一階，與先發區分開 -->
-                <NuxtLink
-                  v-if="person.playerId"
-                  :to="`/players/${person.playerId}`"
-                  class="flex min-w-0 items-center justify-center truncate rounded bg-white/75 px-2 py-1.5 text-center font-bold text-ink-deep transition hover:bg-white hover:underline hover:underline-offset-4"
+                <!-- 沒有棒次也沒有守位，名牌就佔到底。底色淡一階，與先發區分開 -->
+                <component
+                  :is="person.playerId ? NuxtLink : 'span'"
+                  :to="person.playerId ? `/players/${person.playerId}` : undefined"
+                  class="flex min-w-0 items-center justify-center rounded-lg border-l-4 border-l-white/40 bg-white/75 px-2.5 py-1.5 text-ink-deep transition hover:bg-white"
                 >
-                  {{ displayName(person) }}
-                </NuxtLink>
-                <span
-                  v-else
-                  class="flex min-w-0 items-center justify-center truncate rounded bg-white/75 px-2 py-1.5 text-center font-bold text-ink-deep"
-                >
-                  {{ displayName(person) }}
-                </span>
+                  <span class="min-w-0 truncate text-center font-display text-fluid-base font-bold">
+                    {{ displayName(person) }}
+                  </span>
+                </component>
               </li>
             </ul>
           </template>
@@ -242,12 +274,12 @@ function onShare() {
           <div
             class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3"
           >
-            <p class="min-w-0 text-fluid-sm font-bold">
+            <p class="min-w-0 font-display text-fluid-sm font-bold">
               <span class="tabular-nums">{{ formatGameStamp(date, time) }}</span>
               <span v-if="venue" class="text-accent-400">・{{ venue }}</span>
             </p>
             <p class="flex items-center gap-2 text-fluid-sm font-bold">
-              <span class="text-white/60">VS</span>
+              <span class="font-display tracking-[0.15em] text-white/60">VS</span>
               <CommonTeamCrest
                 :name="opponent"
                 :logo-url="opponentLogoUrl"

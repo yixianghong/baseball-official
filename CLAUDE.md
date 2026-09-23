@@ -152,6 +152,33 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 
 縣市是後台明確選的，不從場地名稱猜：猜錯會顯示成別的縣市的天氣，比不顯示更糟。
 
+### 出賽名單圖卡的字體與資料界線
+
+數字、背號、守位縮寫與英文標籤用 **Oswald**（窄黑體，`--font-display`），中文姓名
+維持系統黑體。兩者靠 `@font-face` 的 `unicode-range` 自動分工 —— Oswald 只宣告
+latin，所以 `#97 陳育廷` 不需要拆成兩個 span 就會自動「數字窄黑體、名字蘋方」。
+
+**字型檔案自己放在 `public/fonts/`，不連 Google Fonts。** 三個理由各自都足夠：
+CSP 的 `font-src`／`style-src` 都只有 `'self'`；`modern-screenshot` 截圖時要把字型
+內嵌進 PNG，跨網域常常抓不到（症狀是螢幕上好好的、下載下來的圖字型不一樣）；
+PWA 離線時外部字型不在 service worker 的快取裡。latin 子集只有 21KB。
+
+`useShareRoster()` 的 `capture()` 會先 `await document.fonts.ready`。
+`font-display: swap` 在螢幕上只是閃一下，但**截圖會把那一瞬間定格**，
+而且只發生在字型還沒被快取的第一次，極難重現。
+
+**名牌上只有「#背號 名字」。** 轉播圖卡上的打擊率、OPS、CLEANUP 徽章那些東西
+一概不放：資料模型裡沒有球員數據（統計是明確的範圍外項目），而名單會被截圖
+傳到群組，上面的每個數字都會被當真 —— 憑空生一個 `AVG .342` 比留白糟糕得多。
+
+曾經放過三項「推導得出來」的資訊（投打習慣、`CLEANUP`、有沒有 DH），後來全部
+拿掉了：算得出來不等於該放，一張要被快速掃過的名單上，每多一個標籤就讓名字
+少一分醒目。卡片上唯一的附加文字是投手紀錄的 `note`（例如「6 局 2 失分」），
+那是人自己填的。
+
+拿掉投打習慣之後，`/games/[id]` 也不再需要抓球員名冊 —— 那支 `usePlayers()`
+當初就只是為了它。
+
 ### 公告的 Markdown（`app/utils/markdown.ts`）
 
 資料庫存的是 **Markdown 原始碼**，不是 HTML —— 存 HTML 等於把一堆可執行的標記

@@ -566,10 +566,14 @@ describe('SSR', () => {
    */
   it('未開打的場次會列出候補（出席但不在先發名單）', async () => {
     const markup = renderedMarkup(await $fetch<string>('/games/g1'))
-    const benchSection = markup.slice(markup.indexOf('>候補<'))
+
+    // 找「候補」兩個字的位置就好，不要比對 `>候補<` —— 標題裡還有圖示與
+    // 英文小標，多包一層 span 就會match不到，而失敗訊息只會說「expected '>'」
+    const benchAt = markup.indexOf('候補')
+    expect(benchAt, '找不到候補區塊').toBeGreaterThan(-1)
 
     // 出席但沒排進先發的那一位，帶背號
-    expect(benchSection).toContain('#24 鄭凱文')
+    expect(markup.slice(benchAt)).toContain('#24 鄭凱文')
   })
 
   /**

@@ -135,6 +135,16 @@ async function capture(node: HTMLElement): Promise<Blob | null> {
   try {
     const { domToBlob } = await import('modern-screenshot')
 
+    /*
+     * 等字型載完再截。
+     *
+     * 圖卡的棒次、背號、守位縮寫都用自架的 Oswald（`main.css` 的 @font-face），
+     * 而它是 `font-display: swap` —— 還沒載完時畫面先用系統字型頂著。這在螢幕上
+     * 只是閃一下，但**截圖會把那一瞬間定格**：下載下來的圖字型和網頁上看到的
+     * 不一樣，而且只有在「字型還沒被快取的第一次」才會發生，極難重現。
+     */
+    await document.fonts.ready
+
     return await domToBlob(node, {
       // 2 倍解析度，轉貼到聊天室縮圖時才不會糊
       scale: 2,
