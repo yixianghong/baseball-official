@@ -135,7 +135,7 @@ useHead({
             的東西都不能進 SSR 輸出。
           -->
           <ClientOnly>
-            <CommonPushSwitch compact class="mr-2 hidden lg:flex" />
+            <CommonPushSwitch compact class="mr-2 flex" />
           </ClientOnly>
 
           <!--
@@ -228,12 +228,6 @@ useHead({
         :aria-label="t('nav.mobile')"
       >
         <div class="flex flex-col py-2">
-          <!-- 通知開關擺在選單最上面：它是設定，不是導覽的一個目的地 -->
-          <ClientOnly>
-            <CommonPushSwitch />
-            <hr class="my-2 border-white/10" />
-          </ClientOnly>
-
           <NuxtLink
             v-for="link in navLinks"
             :key="link.to"
@@ -317,6 +311,16 @@ useHead({
             {{ link.label }}
           </NuxtLink>
         </nav>
+
+        <!--
+          完整版的通知開關。導覽列那顆是精簡版，開不了的時候會整個隱藏
+          （一個永遠按不動的開關擺在導覽列上只是噪音）—— 但「為什麼開不了」
+          總得有地方講。iPhone 要先加入主畫面這件事沒有任何程式可以代勞，
+          只能靠文字，而頁尾正是放這種持續性說明的地方。
+        -->
+        <ClientOnly>
+          <CommonPushSwitch class="max-w-sm" />
+        </ClientOnly>
 
         <ul v-if="settings?.socialLinks?.length" class="flex flex-wrap gap-2">
           <li v-for="social in settings.socialLinks" :key="social.url">
