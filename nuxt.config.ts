@@ -324,6 +324,23 @@ export default defineNuxtConfig({
         { name: 'apple-mobile-web-app-title', content: 'MERCS' },
       ],
       link: [
+        /*
+         * 預載窄黑體。
+         *
+         * 它是全站的預設字體（見 `main.css` 的 body 規則），每一頁的首次繪製
+         * 都會用到。不預載的話，`font-display: swap` 會讓所有數字與英文先用
+         * 系統字型畫一次再跳掉 —— 而這些正是比數、日期這類最顯眼的東西。
+         *
+         * `crossorigin` 是必要的：字型一律以匿名模式請求，少了它瀏覽器會認為
+         * 預載的和實際用的是兩個不同的請求，於是下載兩次。
+         */
+        {
+          rel: 'preload',
+          as: 'font',
+          type: 'font/woff2',
+          href: '/fonts/oswald-latin-var.woff2',
+          crossorigin: 'anonymous',
+        },
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
         { rel: 'manifest', href: '/manifest.webmanifest' },
         // iOS 不看 manifest 的 icons，安裝到主畫面時只認這個

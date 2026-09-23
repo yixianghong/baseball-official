@@ -152,16 +152,31 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 
 縣市是後台明確選的，不從場地名稱猜：猜錯會顯示成別的縣市的天氣，比不顯示更糟。
 
-### 出賽名單圖卡的字體與資料界線
+### 字體（全站）
 
-數字、背號、守位縮寫與英文標籤用 **Oswald**（窄黑體，`--font-display`），中文姓名
-維持系統黑體。兩者靠 `@font-face` 的 `unicode-range` 自動分工 —— Oswald 只宣告
-latin，所以 `#97 陳育廷` 不需要拆成兩個 span 就會自動「數字窄黑體、名字蘋方」。
+**`body` 的預設字體是 `--font-display`（Oswald + 系統黑體），不是 `--font-sans`。**
+這一行的影響範圍比看起來小得多：Oswald 的 `@font-face` 只宣告了 latin 的
+`unicode-range`，所以**中文永遠落在後面的系統黑體**，改變的只有數字與英文字母。
+`#97 陳育廷` 因此不需要拆成兩個 span 就會自動「數字窄黑體、名字蘋方」。
+
+**表單控制項是例外**，維持 `--font-sans`。窄黑體適合「被掃過的標籤與數字」，
+不適合「正在被輸入的內容」—— 後台要打的是網址、信箱、公告內文這些需要逐字確認的
+東西。⚠️ 那條規則**不能包在 `:where()` 裡**：Tailwind 的 preflight 有一條
+`input, textarea, select { font: inherit }`，權重 (0,0,3) 會贏過 `:where()` 的 0，
+結果是規則看起來沒生效、輸入框安靜地繼承了窄黑體。
+
+**⚠️ Oswald 沒有 tabular figures。** `font-variant-numeric: tabular-nums` 在它身上
+是完全無效的（實測 `111` 45px、`888` 60px，加不加一樣）。所以**數字欄位的對齊必須
+來自版面**（表格的欄寬、格子的置中），不能指望 `tabular-nums`。計分板與月曆都是
+靠 `<table>` 與 grid 對齊的，所以沒有受影響 —— 但新增會排成一欄的數字時要記得這件事。
 
 **字型檔案自己放在 `public/fonts/`，不連 Google Fonts。** 三個理由各自都足夠：
 CSP 的 `font-src`／`style-src` 都只有 `'self'`；`modern-screenshot` 截圖時要把字型
 內嵌進 PNG，跨網域常常抓不到（症狀是螢幕上好好的、下載下來的圖字型不一樣）；
-PWA 離線時外部字型不在 service worker 的快取裡。latin 子集只有 21KB。
+PWA 離線時外部字型不在 service worker 的快取裡。latin 子集只有 21KB，
+在 `nuxt.config.ts` 的 `head.link` 預載（它是全站每一頁首次繪製都會用到的字體）。
+
+### 出賽名單圖卡的資料界線
 
 `useShareRoster()` 的 `capture()` 會先 `await document.fonts.ready`。
 `font-display: swap` 在螢幕上只是閃一下，但**截圖會把那一瞬間定格**，

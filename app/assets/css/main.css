@@ -233,7 +233,17 @@
     overflow-x: clip;
     background-color: var(--color-surface);
     color: var(--color-content);
-    font-family: var(--font-sans);
+    /*
+     * 全站的預設字體是 `--font-display`，不是 `--font-sans`。
+     *
+     * 這一行的影響範圍比看起來小得多：Oswald 的 `@font-face` 只宣告了 latin 的
+     * `unicode-range`，所以**中文永遠落在後面的系統黑體**，改變的只有數字與
+     * 英文字母。整站因此有了一致的語言 —— 比數、日期、背號、守位縮寫、
+     * NEWS／RESULTS 這些標籤全部是同一套窄黑體，而中文內文完全沒有被動到。
+     *
+     * 表單控制項是例外，見下面。
+     */
+    font-family: var(--font-display);
     font-size: var(--text-fluid-base);
     line-height: 1.65;
     -webkit-font-smoothing: antialiased;
@@ -248,6 +258,25 @@
     outline: 2px solid var(--color-brand-500);
     outline-offset: 2px;
     border-radius: 0.25rem;
+  }
+
+  /*
+   * 表單控制項維持系統字體。
+   *
+   * 窄黑體適合「被掃過的標籤與數字」，不適合「正在被輸入的內容」——
+   * 後台要打的是網址、信箱、公告內文這類需要逐字確認的東西，
+   * 而 Oswald 這種 condensed 的字面在那個情境下辨識度明顯變差。
+   */
+  /*
+   * ⚠️ 不能用 `:where()` 包起來。Tailwind 的 preflight 有一條
+   * `input, textarea, select { font: inherit }`，權重是 (0,0,3)；
+   * `:where()` 的權重是 0，會直接輸給它，結果就是這條規則看起來沒生效，
+   * 而輸入框安靜地繼承了 body 的窄黑體。
+   */
+  input,
+  textarea,
+  select {
+    font-family: var(--font-sans);
   }
 
   /* 圖片預設不溢出容器，這是 RWD 最基本的一條 */

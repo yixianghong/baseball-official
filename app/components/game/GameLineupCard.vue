@@ -37,6 +37,11 @@ import { formatGameStamp } from '~/utils/format'
  *   螢幕閱讀器把 `2B` 念成「二 B」對聽的人毫無意義
  *
  * 換句話說**不能再把 `aria-hidden` 加回來**。
+ *
+ * ## 字體
+ * 棒次、背號、守位縮寫的窄黑體來自**全站的預設字體**（`main.css` 的 body
+ * 規則），這裡不需要、也刻意不再重複標 `font-display`。Oswald 只涵蓋 latin，
+ * 中文自動落回系統黑體，所以 `#97 陳育廷` 混排不必拆成兩個 span。
  */
 const props = withDefaults(
   defineProps<{
@@ -131,9 +136,7 @@ function onShare() {
         >
           <p class="[writing-mode:vertical-rl] text-fluid-lg font-black tracking-[0.2em]">
             出賽名單
-            <span class="ml-1 font-display text-xs font-bold tracking-[0.3em] opacity-70">
-              GAME ROSTER
-            </span>
+            <span class="ml-1 text-xs font-bold tracking-[0.3em] opacity-70"> GAME ROSTER </span>
           </p>
         </div>
 
@@ -150,7 +153,7 @@ function onShare() {
           </div>
 
           <!-- ══ 先發打序 ════════════════════════════════════════ -->
-          <p class="mb-2 font-display text-fluid-sm font-bold tracking-wide text-accent-400">
+          <p class="mb-2 text-fluid-sm font-bold tracking-wide text-accent-400">
             <span aria-hidden="true">▤</span>
             先發打序
             <span class="tracking-[0.15em] opacity-70">(STARTING LINEUP)</span>
@@ -164,7 +167,7 @@ function onShare() {
             >
               <!-- 棒次：窄黑體、金色，整張卡最先被看到的東西 -->
               <span
-                class="flex items-center justify-center font-display text-fluid-xl leading-none font-bold tabular-nums text-accent-400"
+                class="flex items-center justify-center text-fluid-xl leading-none font-bold tabular-nums text-accent-400"
               >
                 {{ entry.order }}
               </span>
@@ -175,7 +178,7 @@ function onShare() {
                 :to="entry.playerId ? `/players/${entry.playerId}` : undefined"
                 class="flex min-w-0 items-center justify-center rounded-lg border-l-4 border-l-accent-500/70 bg-white/95 px-2.5 py-1.5 text-ink-deep transition hover:bg-white"
               >
-                <span class="min-w-0 truncate text-center font-display text-fluid-base font-bold">
+                <span class="min-w-0 truncate text-center text-fluid-base font-bold">
                   {{ displayName(entry) }}
                 </span>
               </component>
@@ -185,7 +188,7 @@ function onShare() {
                 螢幕閱讀器把 `2B` 念成「二 B」對聽的人完全沒有意義。
               -->
               <span
-                class="flex items-center justify-center rounded-lg bg-brand-700 font-display text-fluid-sm font-bold tracking-wide shadow-[inset_0_1px_0_oklch(1_0_0/0.15)]"
+                class="flex items-center justify-center rounded-lg bg-brand-700 text-fluid-sm font-bold tracking-wide shadow-[inset_0_1px_0_oklch(1_0_0/0.15)]"
                 :title="POSITION_LABELS[entry.position]"
               >
                 <span aria-hidden="true">{{ entry.position }}</span>
@@ -201,7 +204,7 @@ function onShare() {
           -->
           <template v-if="startingPitcher">
             <div class="mt-4 mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <p class="font-display text-fluid-sm font-bold tracking-wide text-accent-400">
+              <p class="text-fluid-sm font-bold tracking-wide text-accent-400">
                 <span aria-hidden="true">◈</span>
                 先發投手
                 <span class="tracking-[0.15em] opacity-70">(STARTING PITCHER)</span>
@@ -216,7 +219,7 @@ function onShare() {
                 :to="startingPitcher.playerId ? `/players/${startingPitcher.playerId}` : undefined"
                 class="flex min-w-0 flex-col items-center justify-center rounded-lg border-l-4 border-l-accent-500 bg-white/95 px-3 py-2 text-center text-ink-deep transition hover:bg-white"
               >
-                <span class="min-w-0 max-w-full truncate font-display text-fluid-lg font-bold">
+                <span class="min-w-0 max-w-full truncate text-fluid-lg font-bold">
                   {{ displayName(startingPitcher) }}
                 </span>
                 <!--
@@ -232,7 +235,7 @@ function onShare() {
               </component>
 
               <span
-                class="flex items-center justify-center rounded-lg bg-accent-500 font-display text-fluid-base font-bold tracking-wide text-ink-deep"
+                class="flex items-center justify-center rounded-lg bg-accent-500 text-fluid-base font-bold tracking-wide text-ink-deep"
                 title="先發投手"
               >
                 <span aria-hidden="true">SP</span>
@@ -243,7 +246,7 @@ function onShare() {
 
           <!-- ══ 候補 ════════════════════════════════════════════ -->
           <template v-if="bench.length">
-            <p class="mt-4 mb-2 font-display text-fluid-sm font-bold tracking-wide text-accent-400">
+            <p class="mt-4 mb-2 text-fluid-sm font-bold tracking-wide text-accent-400">
               <span aria-hidden="true">▤</span>
               候補
               <span class="tracking-[0.15em] opacity-70">(BENCH)</span>
@@ -262,7 +265,7 @@ function onShare() {
                   :to="person.playerId ? `/players/${person.playerId}` : undefined"
                   class="flex min-w-0 items-center justify-center rounded-lg border-l-4 border-l-white/40 bg-white/75 px-2.5 py-1.5 text-ink-deep transition hover:bg-white"
                 >
-                  <span class="min-w-0 truncate text-center font-display text-fluid-base font-bold">
+                  <span class="min-w-0 truncate text-center text-fluid-base font-bold">
                     {{ displayName(person) }}
                   </span>
                 </component>
@@ -274,12 +277,12 @@ function onShare() {
           <div
             class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3"
           >
-            <p class="min-w-0 font-display text-fluid-sm font-bold">
+            <p class="min-w-0 text-fluid-sm font-bold">
               <span class="tabular-nums">{{ formatGameStamp(date, time) }}</span>
               <span v-if="venue" class="text-accent-400">・{{ venue }}</span>
             </p>
             <p class="flex items-center gap-2 text-fluid-sm font-bold">
-              <span class="font-display tracking-[0.15em] text-white/60">VS</span>
+              <span class="tracking-[0.15em] text-white/60">VS</span>
               <CommonTeamCrest
                 :name="opponent"
                 :logo-url="opponentLogoUrl"
