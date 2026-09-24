@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Game } from '#shared/schemas/game'
-import { GAME_STATUS_LABELS, isNotPlayed } from '#shared/schemas/game'
+import { GAME_STATUS_LABELS, gameResult, isNotPlayed } from '#shared/schemas/game'
 import {
   buildMonthGrid,
   formatMonth,
@@ -118,8 +118,9 @@ function pick(key: string) {
 /** 格子上小圓點的顏色。與賽程卡左側的色條同一套語彙。 */
 function dotClass(game: Game): string {
   if (isNotPlayed(game)) return 'bg-warning'
-  if (game.result === 'win') return 'bg-accent-500'
-  if (game.result === 'loss') return 'bg-danger'
+  const result = gameResult(game)
+  if (result === 'win') return 'bg-accent-500'
+  if (result === 'loss') return 'bg-danger'
   return 'bg-content-muted'
 }
 

@@ -398,24 +398,96 @@ describe('資料寫入與讀取', () => {
     expect(list.data.some((player) => player.id === created.data.id)).toBe(true)
   })
 
-  it('標記為已結束且未指定結果時，由計分板自動推導勝敗', async () => {
+  /**
+   * 比賽的一生：尚未開始 → 比賽中 → 比賽結束。
+   *
+   * 分成三段各自驗證的話，測到的都只是「schema 收不收這個字串」。真正會壞掉的
+   * 是**狀態之間的轉換**：進行中的場次有沒有留在賽程頁、結束之後有沒有從賽程頁
+   * 換到結果頁。這些都是 BFF 的 `scope` 決定的，而頁面完全照著它畫。
+   */
+  it('比賽中的場次留在賽程頁，標記結束後才換到結果頁', async () => {
     const { cookie, csrfToken } = await login()
 
-    const body = await $fetch<{ data: { result: string; status: string } }>('/api/admin/games/g2', {
+    const created = await $fetch<{ data: { id: string } }>('/api/admin/games', {
+      method: 'POST',
+      headers: { cookie, 'x-csrf-token': csrfToken },
+      body: { date: '2027-07-04', opponent: '即時隊', status: 'scheduled', venue: '市立棒球場' },
+    })
+    const id = created.data.id
+
+    const patch = (body: Record<string, unknown>) =>
+      $fetch<{
+        data: { status: string; venue: string; scoreboard: { totals: { our: { r: number } } } }
+      }>(`/api/admin/games/${id}`, {
+        method: 'PATCH',
+        headers: { cookie, 'x-csrf-token': csrfToken },
+        body,
+      })
+
+    const scopes = async () => {
+      const [past, upcoming] = await Promise.all([
+        $fetch<{ data: Array<{ id: string }> }>('/api/games?scope=past'),
+        $fetch<{ data: Array<{ id: string }> }>('/api/games?scope=upcoming'),
+      ])
+      return {
+        past: past.data.some((game) => game.id === id),
+        upcoming: upcoming.data.some((game) => game.id === id),
+      }
+    }
+
+    await patch({
+      status: 'live',
+      scoreboard: {
+        innings: [{ inning: 1, our: 5, opponent: 2 }],
+        totals: { our: { r: 5, h: 8, e: 0 }, opponent: { r: 2, h: 3, e: 2 } },
+      },
+    })
+    // 正在打的比賽就是「現在這一場」，賽程頁是唯一看得到它的地方
+    expect(await scopes()).toEqual({ past: false, upcoming: true })
+
+    /*
+     * 只送狀態 —— 這是「按一下比賽結束」最自然的寫法，也曾經是個資料殺手：
+     * `gamePatchSchema` 用 `.partial()` 時，沒送的欄位會被預設值填回來，
+     * 於是這一下會把場地與計分板一起清空，而回應看起來完全正常。
+     */
+    const finished = await patch({ status: 'finished' })
+    expect(await scopes()).toEqual({ past: true, upcoming: false })
+    expect(finished.data.venue).toBe('市立棒球場')
+    expect(finished.data.scoreboard.totals.our.r).toBe(5)
+  })
+
+  /**
+   * 勝敗一律由計分板推導，**而且只有結束的比賽才有**。
+   *
+   * 這支端點曾經收一個 `result` 欄位讓後台手動覆寫。拿掉之後 schema 是最後
+   * 一道防線：只要它還收，一次手動的 PATCH 就能把「1:4 獲勝」寫進資料庫。
+   */
+  it('比賽結果由計分板推導，送上來的 result 一律被忽略', async () => {
+    const { cookie, csrfToken } = await login()
+
+    const body = await $fetch<{
+      data: Record<string, unknown> & { scoreboard: { totals: { our: { r: number; h: number } } } }
+    }>('/api/admin/games/g2', {
       method: 'PATCH',
       headers: { cookie, 'x-csrf-token': csrfToken },
       body: {
         status: 'finished',
-        result: null,
+        // 和比數完全矛盾的結果：資料庫裡不該留下它
+        result: 'loss',
         scoreboard: {
           innings: [{ inning: 1, our: 5, opponent: 2 }],
-          totals: { our: { r: 5, h: 8, e: 0 }, opponent: { r: 2, h: 3, e: 2 } },
+          // R 也故意寫錯：它是逐局加總，不是一個可以自己填的數字
+          totals: { our: { r: 99, h: 8, e: 0 }, opponent: { r: 2, h: 3, e: 2 } },
         },
       },
     })
 
     expect(body.data.status).toBe('finished')
-    expect(body.data.result).toBe('win')
+    expect(body.data.result).toBeUndefined()
+    // 前台的比數、勝敗、戰績全部讀 R —— 它和逐局對不上，錯的是整個網站
+    expect(body.data.scoreboard.totals.our.r).toBe(5)
+    // H 沒有逐局欄位可以加總，維持送上來的值
+    expect(body.data.scoreboard.totals.our.h).toBe(8)
   })
 
   it.each([

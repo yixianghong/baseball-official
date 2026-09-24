@@ -1,8 +1,8 @@
 import {
-  deriveResult,
   gameInputSchema,
   gameSchema,
   taipeiDateKey,
+  withSummedRuns,
   type Game,
   type GameInput,
   type GamePatch,
@@ -35,7 +35,12 @@ export async function listGames(query: GameQueryOptions = {}): Promise<Game[]> {
     .filter((game) => (query.status ? game.status === query.status : true))
     .filter((game) => (year ? game.date.startsWith(String(year)) : true))
     .filter((game) => {
-      if (scope === 'upcoming') return game.status === 'scheduled' && game.date >= today
+      if (scope === 'upcoming') {
+        // 進行中的場次一律留在賽程裡，不看日期：它就是「現在正在打的那一場」，
+        // 而賽程頁是唯一看得到它的地方。跨過午夜的比賽也才不會突然消失。
+        if (game.status === 'live') return true
+        return game.status === 'scheduled' && game.date >= today
+      }
       // 延賽的場次也列在「過去」：那一天確實有安排過，只是沒打成。
       // 讓它從賽程頁消失又不出現在結果頁，等於整場比賽憑空不見了。
       if (scope === 'past') return game.status === 'finished' || game.status === 'postponed'
@@ -63,7 +68,7 @@ export async function getGame(id: string): Promise<Game | null> {
 }
 
 export async function createGame(input: GameInput): Promise<Game> {
-  const data = withDerivedResult(gameInputSchema.parse(input))
+  const data = withDerivedRuns(gameInputSchema.parse(input))
   const timestamps = { createdAt: nowIso(), updatedAt: nowIso() }
 
   if (!isFirebaseConfigured()) {
@@ -81,7 +86,7 @@ export async function updateGame(id: string, patch: GamePatch): Promise<Game> {
   const existing = await getGame(id)
   if (!existing) throw notFound('比賽')
 
-  const merged = withDerivedResult(gameSchema.parse({ ...existing, ...patch, updatedAt: nowIso() }))
+  const merged = withDerivedRuns(gameSchema.parse({ ...existing, ...patch, updatedAt: nowIso() }))
 
   if (!isFirebaseConfigured()) {
     getMemoryStore().games.set(id, merged)
@@ -97,8 +102,8 @@ export async function updateGame(id: string, patch: GamePatch): Promise<Game> {
 /**
  * 記下「這場的某種提醒已經送出去了」。
  *
- * 不走 `updateGame()`：那支會跑 `gameInputSchema` 的驗證與結果推導，
- * 而這裡要改的欄位刻意不在 input schema 裡（理由見 `gameSchema`）。
+ * 不走 `updateGame()`：那支會跑整份 schema 的驗證，而這裡要改的欄位
+ * 刻意不在 input schema 裡（理由見 `gameSchema`）。
  * 只動這一個欄位，也不會把管理者同時在後台編輯的內容蓋掉。
  */
 export async function markReminderSent(id: string, kind: string): Promise<void> {
@@ -144,17 +149,14 @@ export async function createGames(inputs: GameInput[]): Promise<Game[]> {
 }
 
 /**
- * 已結束的比賽若沒有手動指定結果，就依計分板總分推導。
+ * R（總得分）一律等於逐局加總。
  *
- * 放在 repository 而不是端點：不論從哪個入口寫入（後台表單、AI 辨識、
- * 批次匯入），存進去的資料都保證一致。
+ * 放在 repository 而不是端點或表單：不論從哪個入口寫入（後台表單、AI 辨識
+ * 計分板照片、批次匯入），存進去的資料都保證一致。前台的比數、勝敗、
+ * 戰績全部讀 R，它一旦和逐局對不上，錯的是整個網站而不只是那張表格。
  */
-function withDerivedResult<
-  T extends { status: Game['status']; result: Game['result']; scoreboard: Game['scoreboard'] },
->(game: T): T {
-  if (game.status !== 'finished') return game
-  if (game.result) return game
-  return { ...game, result: deriveResult(game.scoreboard.totals) }
+function withDerivedRuns<T extends { scoreboard: Game['scoreboard'] }>(game: T): T {
+  return { ...game, scoreboard: withSummedRuns(game.scoreboard) }
 }
 
 async function readAll(): Promise<Game[]> {

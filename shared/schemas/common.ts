@@ -25,3 +25,35 @@ export type PaginationQueryOutput = z.output<typeof paginationQuerySchema>
 export const idParamSchema = z.object({
   id: z.string().min(1, 'ID 不可為空'),
 })
+
+/**
+ * 由「新增用」的 schema 產生「部分更新用」的 schema。
+ *
+ * ## ⚠️ 為什麼不能直接用 `.partial()`
+ * `.partial()` 只是把欄位變成選填，**帶 `.default()` 的欄位在鍵不存在時照樣會
+ * 套用預設值**。於是一個只想把狀態改成「比賽結束」的 PATCH，實際送進資料層的
+ * 是「狀態改成結束，順便把場地、出席、打線、計分板全部重設成空的」——
+ * 而且 API 回應看起來完全正常，畫面上也不會有任何錯誤。
+ *
+ * 這裡先把 `ZodDefault` 拆掉再轉成選填，「沒送這個欄位」才真的等於
+ * 「不要動它」。`updateGame()` 這類 `{ ...existing, ...patch }` 的合併
+ * 完全依賴這個前提。
+ *
+ * 型別另外標註是因為推導出來的形狀對呼叫端沒有意義 —— 對他們來說它就是
+ * 「輸入 schema 的每個欄位都可以省略」。
+ */
+export function patchSchemaOf<Shape extends z.ZodRawShape>(
+  input: z.ZodObject<Shape>,
+): z.ZodType<Partial<z.output<z.ZodObject<Shape>>>, Partial<z.input<z.ZodObject<Shape>>>> {
+  const shape = Object.fromEntries(
+    Object.entries(input.shape).map(([key, field]) => {
+      // `removeDefault()` 的回傳型別是 zod 內部的 `$ZodType`，接不上 `.optional()`
+      const inner = (field instanceof z.ZodDefault ? field.removeDefault() : field) as z.ZodType
+      return [key, inner.optional()]
+    }),
+  )
+  return z.object(shape) as unknown as z.ZodType<
+    Partial<z.output<z.ZodObject<Shape>>>,
+    Partial<z.input<z.ZodObject<Shape>>>
+  >
+}

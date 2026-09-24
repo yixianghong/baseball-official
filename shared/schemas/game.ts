@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { patchSchemaOf } from './common'
 import { citySchema } from './weather'
 import { positionSchema } from './player'
 
@@ -20,18 +21,36 @@ import { positionSchema } from './player'
 /**
  * 比賽狀態。
  *
- * 延賽與取消分開：延賽是「這天沒打成，之後會再排」，取消是「不打了」。
- * 對球隊來說是兩件事 —— 延賽的場次還會回來，取消的不會。
+ * ## 三個主要狀態走的是一條時間線
+ * `scheduled` → `live` → `finished`，對應的是同一場比賽的賽前、進行中、賽後。
+ * 前台完全依它決定要顯示什麼：尚未開始看出席與先發，比賽中看即時比數（LIVE），
+ * 結束後看最終比數與勝敗（FINAL）。
+ *
+ * ## 延賽與取消是岔出去的兩條，彼此也不一樣
+ * 延賽是「這天沒打成，之後會再排」，取消是「不打了」。對球隊來說是兩件事 ——
+ * 延賽的場次還會回來，取消的不會，所以不能合併成一個「沒打成」。
  */
-export const gameStatusSchema = z.enum(['scheduled', 'finished', 'postponed', 'canceled'])
+export const gameStatusSchema = z.enum(['scheduled', 'live', 'finished', 'postponed', 'canceled'])
 export type GameStatus = z.infer<typeof gameStatusSchema>
 
 export const GAME_STATUS_LABELS: Record<GameStatus, string> = {
-  scheduled: '未開打',
-  finished: '已結束',
+  scheduled: '尚未開始',
+  live: '比賽中',
+  finished: '比賽結束',
   postponed: '因雨延賽',
   canceled: '取消',
 }
+
+/**
+ * 主要流程上的三個狀態，依時間先後排列。
+ *
+ * 後台的狀態切換器用它產生按鈕 —— 順序寫在這裡而不是在頁面上重排一次，
+ * 因為「賽前 → 進行中 → 賽後」這個順序本身就是這個欄位的意義的一部分。
+ */
+export const GAME_FLOW_STATUSES = ['scheduled', 'live', 'finished'] as const
+
+/** 岔出去的狀態：這一天沒有打成。 */
+export const GAME_EXCEPTION_STATUSES = ['postponed', 'canceled'] as const
 
 /** 主客場。 */
 export const homeAwaySchema = z.enum(['home', 'away'])
@@ -48,7 +67,7 @@ export const ATTENDANCE_LABELS: Record<AttendanceStatus, string> = {
   pending: '未回覆',
 }
 
-/** 比賽結果。由計分板推導，後台可覆寫（例如裁定比賽）。 */
+/** 比賽結果。一律由計分板推導，見 `gameResult()`。 */
 export const gameResultSchema = z.enum(['win', 'loss', 'tie'])
 export type GameResult = z.infer<typeof gameResultSchema>
 
@@ -149,11 +168,84 @@ export function sumInnings(scoreboard: Scoreboard): { our: number; opponent: num
   )
 }
 
-/** 由總分推導勝敗。後台未手動覆寫時使用。 */
+/**
+ * 把 R（總得分）對齊逐局加總。
+ *
+ * ## 為什麼 R 不是一個自己輸入的欄位
+ * 它完全由逐局得分決定，多存一份就多一個會不同步的東西 —— 和勝敗
+ * （`gameResult()`）、候補名單（`deriveBench()`）是同一個道理。
+ *
+ * 後台曾經有一顆「用逐局加總填入 R」的按鈕，等於把「保持一致」這件事
+ * 外包給使用者記得按；沒按的下場是計分板上逐局是 3:1、R 欄寫著 0:0，
+ * 而前台的比數、勝敗、戰績全部讀 R。
+ *
+ * H／E 沒有逐局欄位可以加總，所以它們維持人工輸入。
+ */
+export function withSummedRuns(scoreboard: Scoreboard): Scoreboard {
+  const sums = sumInnings(scoreboard)
+  if (sums.our === scoreboard.totals.our.r && sums.opponent === scoreboard.totals.opponent.r) {
+    return scoreboard
+  }
+  return {
+    ...scoreboard,
+    totals: {
+      our: { ...scoreboard.totals.our, r: sums.our },
+      opponent: { ...scoreboard.totals.opponent, r: sums.opponent },
+    },
+  }
+}
+
+/** 由總分推導勝敗。 */
 export function deriveResult(totals: Scoreboard['totals']): GameResult {
   if (totals.our.r > totals.opponent.r) return 'win'
   if (totals.our.r < totals.opponent.r) return 'loss'
   return 'tie'
+}
+
+/**
+ * 這場比賽的勝敗。**只有「比賽結束」才有結果**，其餘一律是 `null`。
+ *
+ * ## 為什麼是推導的，而不是一個存起來的欄位
+ * 勝敗完全由「狀態」與「計分板總分」兩份既有資料決定，和候補名單是同一個
+ * 道理（見 `deriveBench()`）—— 多存一份就多一個會不同步的東西。曾經有一個
+ * 「比賽結果」下拉選單可以手動覆寫，實際發生的事是：後台改了計分板、忘了
+ * 回頭改那個選單，於是前台出現「6:3」配上一個「敗」。
+ *
+ * ## 為什麼要綁在 `finished` 上
+ * 空的計分板總分是 0:0，推導出來會是「和」。不綁狀態的話，每一場還沒打的
+ * 比賽都會帶著一個「和」的結果 —— 而 0:0 的「和」和「還沒打」在畫面上
+ * 長得一模一樣。進行中的比賽同理：領先不等於贏了。
+ */
+export function gameResult(game: Pick<Game, 'status' | 'scoreboard'>): GameResult | null {
+  if (game.status !== 'finished') return null
+  return deriveResult(game.scoreboard.totals)
+}
+
+/** 一段期間的戰績。 */
+export interface TeamRecord {
+  win: number
+  loss: number
+  tie: number
+  /** 實際打完的場次數 —— 延賽與取消不算。 */
+  total: number
+}
+
+/**
+ * 統計一批比賽的勝敗。
+ *
+ * **只算已經結束的場次。** 傳進來的列表通常直接就是「過去的比賽」，而那裡面
+ * 混著延賽的場次（它們也列在結果頁上）。拿 `games.length` 當場次數的話，
+ * 「近 3 戰 2 勝 0 敗」裡那消失的一場其實是延賽 —— 看起來像少算了一場。
+ */
+export function tallyRecord(games: Pick<Game, 'status' | 'scoreboard'>[]): TeamRecord {
+  const record: TeamRecord = { win: 0, loss: 0, tie: 0, total: 0 }
+  for (const game of games) {
+    const result = gameResult(game)
+    if (!result) continue
+    record[result] += 1
+    record.total += 1
+  }
+  return record
 }
 
 /**
@@ -266,13 +358,11 @@ export const gameInputSchema = z.object({
   lineup: z.array(lineupEntrySchema).max(15).default([]),
   pitchers: z.array(pitcherEntrySchema).max(10).default([]),
   scoreboard: scoreboardSchema.default(emptyScoreboard()),
-  /** 留空表示由計分板自動推導。 */
-  result: gameResultSchema.nullable().default(null),
 })
 
 export type GameInput = z.input<typeof gameInputSchema>
 
-export const gamePatchSchema = gameInputSchema.partial()
+export const gamePatchSchema = patchSchemaOf(gameInputSchema)
 export type GamePatch = z.input<typeof gamePatchSchema>
 
 /** 從 Firestore 讀出、回傳給前端的完整比賽資料。 */
@@ -333,6 +423,27 @@ export function isFinished(game: Pick<Game, 'status'>): boolean {
 }
 
 /**
+ * 比賽正在進行中 —— 前台顯示 LIVE 與即時比數。
+ *
+ * 同樣以 `status` 為準而不是「日期是今天、時間已過」：一場比賽打多久沒有定數，
+ * 而用時間推算的話，忘了按結束的場次會自己「打完」，真正還在打的場次卻
+ * 可能因為超過某個時數而被判定結束。這是一個人按下去的狀態。
+ */
+export function isLive(game: Pick<Game, 'status'>): boolean {
+  return game.status === 'live'
+}
+
+/**
+ * 有沒有比數可以顯示（進行中的即時比數、或結束後的最終比數）。
+ *
+ * 延賽與取消的場次計分板是空的，總分兩邊都是 0 —— 直接顯示就變成「0:0」，
+ * 看起來像打完了而且是和局。
+ */
+export function hasScore(game: Pick<Game, 'status'>): boolean {
+  return game.status === 'live' || game.status === 'finished'
+}
+
+/**
  * 候補名單 —— 確定出席、但不在先發打線上的人。
  *
  * ## 為什麼是推導出來的，不另外存一份
@@ -368,13 +479,16 @@ export function isNotPlayed(game: Pick<Game, 'status'>): boolean {
 }
 
 /**
- * 日期已過但仍標記為未開打 —— 後台列表據此提醒你補登結果。
+ * 日期已過、卻還停在「尚未開始」或「比賽中」—— 後台列表據此提醒你補登結果。
  *
  * @param today `YYYY-MM-DD` 格式的今天，由呼叫端傳入而不在這裡取
  *              `new Date()`，SSR 與 client 才不會因為時區差異算出不同結果。
  */
 export function needsResultUpdate(game: Pick<Game, 'status' | 'date'>, today: string): boolean {
-  return game.status === 'scheduled' && game.date < today
+  if (game.date >= today) return false
+  // 進行中也算：那代表當天按了「比賽中」卻沒有按「比賽結束」，
+  // 而這種場次會在前台一直掛著 LIVE，比忘了登錄結果更明顯地錯
+  return game.status === 'scheduled' || game.status === 'live'
 }
 
 /**

@@ -102,7 +102,6 @@ function toDraftInput(draft: DraftMatch): GameInput {
     lineup: [],
     pitchers: [],
     scoreboard: emptyScoreboard(0),
-    result: null,
   }
 }
 
@@ -159,7 +158,6 @@ async function submitManual() {
     lineup: [],
     pitchers: [],
     scoreboard: emptyScoreboard(0),
-    result: null,
   })
   await navigateTo(`/admin/games/${created.id}`)
 }
@@ -177,7 +175,7 @@ useHead({ title: '新增比賽' })
       title="新增比賽"
       description="上傳官方賽程公告圖自動辨識，或手動填寫。"
       back-to="/admin/games"
-      back-label="回到賽程列表"
+      back-label="回到賽事列表"
     />
 
     <div class="mb-6 flex gap-2" role="group" aria-label="新增方式">

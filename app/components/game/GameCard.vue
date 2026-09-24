@@ -1,15 +1,22 @@
 <script setup lang="ts">
 import type { WeatherResult } from '#shared/schemas/weather'
 import type { Game } from '#shared/schemas/game'
-import { GAME_RESULT_LABELS, GAME_STATUS_LABELS, isNotPlayed } from '#shared/schemas/game'
+import {
+  GAME_RESULT_LABELS,
+  GAME_STATUS_LABELS,
+  gameResult,
+  hasScore,
+  isNotPlayed,
+} from '#shared/schemas/game'
 import { describeCountdown, daysUntil, formatGameDate } from '~/utils/format'
 
 /**
  * 賽程／結果卡片。近期賽程、比賽結果、首頁都用同一個元件。
  *
- * 未來與過去的比賽要強調的資訊不同：
+ * 三種比賽要強調的資訊不同：
  * - **未來**：什麼時候、還有幾天、在哪裡打
- * - **過去**：贏了還是輸了、比數多少
+ * - **進行中**：現在幾比幾（LIVE）
+ * - **過去**：贏了還是輸了、比數多少（FINAL）
  *
  * 用同一個元件並依 `status` 切換，而不是寫兩個長得很像的元件 ——
  * 卡片的外框、間距、hover 行為只需要維護一份。
@@ -25,16 +32,21 @@ const props = defineProps<{
 }>()
 
 const isFinished = computed(() => props.game.status === 'finished')
-/** 延賽與取消都沒有打成，不該顯示比數。 */
+const isLive = computed(() => props.game.status === 'live')
+/** 進行中與已結束都有比數可看；延賽與取消沒有打成，不該顯示比數。 */
+const showScore = computed(() => hasScore(props.game))
 const notPlayed = computed(() => isNotPlayed(props.game))
+
+/** 勝敗是推導的，不是存下來的欄位 —— 只有結束的比賽才有值。 */
+const result = computed(() => gameResult(props.game))
 
 const countdown = computed(() => describeCountdown(daysUntil(props.game.date, props.today)))
 
 const resultTone = computed(() => {
   // 勝場用隊徽的金色而不是綠色：綠與品牌 teal 太接近，一排卡片掃過去
   // 會分不出哪個是隊色、哪個是「贏了」。
-  if (props.game.result === 'win') return 'accent' as const
-  if (props.game.result === 'loss') return 'danger' as const
+  if (result.value === 'win') return 'accent' as const
+  if (result.value === 'loss') return 'danger' as const
   return 'neutral' as const
 })
 
@@ -49,9 +61,11 @@ const resultTone = computed(() => {
  */
 const accentClass = computed(() => {
   if (notPlayed.value) return 'border-l-warning'
+  // 進行中用紅色，和 LIVE 標籤同一個顏色 —— 一排賽程卡片裡它要最先被看到
+  if (isLive.value) return 'border-l-danger'
   if (!isFinished.value) return 'border-l-brand-600'
-  if (props.game.result === 'win') return 'border-l-accent-500'
-  if (props.game.result === 'loss') return 'border-l-danger'
+  if (result.value === 'win') return 'border-l-accent-500'
+  if (result.value === 'loss') return 'border-l-danger'
   return 'border-l-border'
 })
 
@@ -76,8 +90,9 @@ const score = computed(() => ({
       <UiBaseBadge v-if="notPlayed" :tone="game.status === 'postponed' ? 'warning' : 'neutral'">
         {{ GAME_STATUS_LABELS[game.status] }}
       </UiBaseBadge>
-      <UiBaseBadge v-else-if="isFinished && game.result" :tone="resultTone">
-        {{ GAME_RESULT_LABELS[game.result] }}
+      <GameLiveBadge v-else-if="isLive" />
+      <UiBaseBadge v-else-if="result" :tone="resultTone">
+        {{ GAME_RESULT_LABELS[result] }}
       </UiBaseBadge>
       <UiBaseBadge v-else tone="brand">{{ countdown }}</UiBaseBadge>
     </div>
@@ -93,18 +108,33 @@ const score = computed(() => ({
           <span>{{ game.homeAway === 'home' ? '主場' : '客場' }}</span>
           <span v-if="game.venue">· {{ game.venue }}</span>
           <span v-if="game.league">· {{ game.league }}</span>
-          <!-- 已結束的比賽不顯示「預報」，那沒有意義 -->
-          <GameWeather v-if="!isFinished && !notPlayed" :weather="weather ?? null" variant="mini" />
+          <!-- 已經開打的比賽不顯示「預報」，那沒有意義 -->
+          <GameWeather v-if="!showScore && !notPlayed" :weather="weather ?? null" variant="mini" />
         </p>
       </div>
 
-      <!-- 已結束的比賽把比數放在最顯眼的位置，這是大家點進來最想看的 -->
-      <div v-if="isFinished" class="shrink-0 text-right">
-        <p class="text-fluid-xl font-bold tabular-nums">
-          <span :class="score.our >= score.opponent ? 'text-brand-600 dark:text-brand-300' : ''">
+      <!-- 開打之後比數就是最重要的資訊，放在最顯眼的位置 -->
+      <div v-if="showScore" class="shrink-0 text-right">
+        <!--
+          「FINAL」是給已結束的場次的：少了它，一個停在 3:2 的比數看不出來
+          是打完了還是正在打。進行中的場次不重複寫 LIVE —— 右上角已經有了。
+        -->
+        <p v-if="isFinished" class="text-[0.65rem] font-bold tracking-widest text-content-muted">
+          FINAL
+        </p>
+        <p
+          class="text-fluid-xl font-bold tabular-nums"
+          :class="isLive ? 'text-danger' : ''"
+          :aria-label="`比數 ${score.our} 比 ${score.opponent}`"
+        >
+          <span
+            :class="
+              !isLive && score.our >= score.opponent ? 'text-brand-600 dark:text-brand-300' : ''
+            "
+          >
             {{ score.our }}
           </span>
-          <span class="mx-1 text-content-muted">:</span>
+          <span class="mx-1" :class="isLive ? 'text-danger/60' : 'text-content-muted'">:</span>
           <span>{{ score.opponent }}</span>
         </p>
       </div>

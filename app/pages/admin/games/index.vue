@@ -4,15 +4,18 @@ import {
   GAME_RESULT_LABELS,
   GAME_STATUS_LABELS,
   MAX_GAME_QUERY_LIMIT,
+  gameResult,
+  hasScore,
   needsResultUpdate,
 } from '#shared/schemas/game'
 import { formatGameDate } from '~/utils/format'
 
 /**
- * 賽程與結果管理。
+ * 賽事管理。
  *
- * 一張表管所有場次。日期已過卻還沒登錄結果的那幾場會被標示出來 ——
- * 這是實際使用時最容易漏掉的事。
+ * 一張表管所有場次。日期已過卻還停在「尚未開始」或「比賽中」的那幾場會被
+ * 標示出來 —— 這是實際使用時最容易漏掉的事，而忘了按「比賽結束」的場次
+ * 會在前台一直掛著 LIVE。
  */
 definePageMeta({ layout: 'admin', middleware: 'auth' })
 
@@ -28,7 +31,14 @@ const {
 })
 const { removeGame, loading: deleting } = useGameActions()
 
-const filter = ref<'all' | 'scheduled' | 'finished'>('all')
+const filter = ref<'all' | GameStatus>('all')
+
+const filterOptions = [
+  { value: 'all', label: '全部' },
+  { value: 'scheduled', label: GAME_STATUS_LABELS.scheduled },
+  { value: 'live', label: GAME_STATUS_LABELS.live },
+  { value: 'finished', label: GAME_STATUS_LABELS.finished },
+] as const
 
 /** 狀態對應的標籤色：延賽要看得出是「出事了」，取消則是中性的結束。 */
 function statusTone(status: GameStatus) {
@@ -49,12 +59,12 @@ async function handleDelete(id: string) {
   await refresh()
 }
 
-useHead({ title: '賽程管理' })
+useHead({ title: '賽事管理' })
 </script>
 
 <template>
   <div>
-    <AdminHeader title="賽程與結果" description="管理所有比賽、出席、打線與計分板。">
+    <AdminHeader title="賽事管理" description="管理所有比賽、出席、打線與計分板。">
       <template #actions>
         <UiBaseButton variant="secondary" @click="navigateTo('/admin/games/new?mode=manual')">
           手動新增
@@ -65,11 +75,7 @@ useHead({ title: '賽程管理' })
 
     <div class="mb-4 flex flex-wrap gap-2" role="group" aria-label="狀態篩選">
       <button
-        v-for="option in [
-          { value: 'all', label: '全部' },
-          { value: 'scheduled', label: '未開打' },
-          { value: 'finished', label: '已結束' },
-        ]"
+        v-for="option in filterOptions"
         :key="option.value"
         type="button"
         class="min-h-9 rounded-full border px-4 text-fluid-sm font-medium transition"
@@ -118,7 +124,9 @@ useHead({ title: '賽程管理' })
             <td class="px-4 py-3 font-medium">{{ game.opponent }}</td>
             <td class="px-4 py-3 text-content-muted">{{ game.venue || '—' }}</td>
             <td class="px-4 py-3">
-              <UiBaseBadge :tone="statusTone(game.status)" size="sm">
+              <!-- 進行中的那一場在整張表裡要最先被看到，所以用和前台一樣的 LIVE -->
+              <GameLiveBadge v-if="game.status === 'live'" size="sm" />
+              <UiBaseBadge v-else :tone="statusTone(game.status)" size="sm">
                 {{ GAME_STATUS_LABELS[game.status] }}
               </UiBaseBadge>
               <span v-if="needsResultUpdate(game, today)" class="ml-2 text-xs text-warning">
@@ -126,10 +134,11 @@ useHead({ title: '賽程管理' })
               </span>
             </td>
             <td class="px-4 py-3 tabular-nums">
-              <template v-if="game.status === 'finished'">
+              <template v-if="hasScore(game)">
                 {{ game.scoreboard.totals.our.r }} : {{ game.scoreboard.totals.opponent.r }}
-                <span v-if="game.result" class="ml-1 text-content-muted">
-                  （{{ GAME_RESULT_LABELS[game.result] }}）
+                <!-- 勝敗是推導的，而且只有結束的比賽才有 —— 領先不等於贏了 -->
+                <span v-if="gameResult(game)" class="ml-1 text-content-muted">
+                  （{{ GAME_RESULT_LABELS[gameResult(game)!] }}）
                 </span>
               </template>
               <span v-else class="text-content-muted">—</span>

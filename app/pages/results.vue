@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { MAX_GAME_QUERY_LIMIT } from '#shared/schemas/game'
+import { MAX_GAME_QUERY_LIMIT, tallyRecord } from '#shared/schemas/game'
 import { clampMonth, formatMonth, toMonthKey } from '~/utils/calendar'
 /**
  * 比賽結果。
@@ -64,16 +64,8 @@ const monthGames = computed(() =>
   (games.value ?? []).filter((game) => toMonthKey(game.date) === selectedMonth.value),
 )
 
-const record = computed(() => {
-  // 延賽的場次也列在這一頁，但它沒有打成，不該算進戰績的場次數
-  const played = (games.value ?? []).filter((game) => game.status === 'finished')
-  return {
-    win: played.filter((game) => game.result === 'win').length,
-    loss: played.filter((game) => game.result === 'loss').length,
-    tie: played.filter((game) => game.result === 'tie').length,
-    total: played.length,
-  }
-})
+// 延賽的場次也列在這一頁，但它沒有打成 —— `tallyRecord()` 只算已結束的場次
+const record = computed(() => tallyRecord(games.value ?? []))
 
 /** 列在這一頁但沒打成的場次數，顯示在戰績旁邊當註記。 */
 const postponedCount = computed(

@@ -22,7 +22,7 @@ watch(
 
 const links = [
   { to: '/admin', label: '總覽', icon: '📊', exact: true },
-  { to: '/admin/games', label: '賽程與結果', icon: '⚾' },
+  { to: '/admin/games', label: '賽事管理', icon: '⚾' },
   { to: '/admin/players', label: '球員名單', icon: '🧢' },
   { to: '/admin/announcements', label: '公告', icon: '📣' },
   { to: '/admin/push', label: '推播通知', icon: '🔔' },

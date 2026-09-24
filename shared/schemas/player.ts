@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { patchSchemaOf } from './common'
 
 /**
  * 球員資料的共用契約。
@@ -94,7 +95,7 @@ export type PlayerInput = z.input<typeof playerInputSchema>
 export type PlayerForm = z.output<typeof playerInputSchema>
 
 /** 編輯時允許只送部分欄位。 */
-export const playerPatchSchema = playerInputSchema.partial()
+export const playerPatchSchema = patchSchemaOf(playerInputSchema)
 export type PlayerPatch = z.input<typeof playerPatchSchema>
 
 /** 從 Firestore 讀出、回傳給前端的完整球員資料。 */

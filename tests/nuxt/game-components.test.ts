@@ -122,23 +122,67 @@ describe('GameCard 的狀態色條', () => {
     updatedAt: '',
   }
 
+  /** 勝敗是由總分推導的，所以「贏了」這件事要靠比數寫出來，不能直接給一個結果。 */
+  const withScore = (our: number, opponent: number) => ({
+    scoreboard: {
+      innings: [],
+      totals: { our: { r: our, h: 0, e: 0 }, opponent: { r: opponent, h: 0, e: 0 } },
+    },
+  })
+
   const mount = (overrides: Record<string, unknown>) =>
     mountSuspended(GameCard, {
       props: {
-        game: { ...base, status: 'scheduled', result: null, ...overrides },
+        game: { ...base, status: 'scheduled', ...overrides },
         ourName: '城市隊',
         today: '2026-09-22',
       },
     })
 
   it.each([
-    ['未開打', { status: 'scheduled', result: null }, 'border-l-brand-600'],
-    ['勝', { status: 'finished', result: 'win' }, 'border-l-accent-500'],
-    ['敗', { status: 'finished', result: 'loss' }, 'border-l-danger'],
-    ['因雨延賽', { status: 'postponed', result: null }, 'border-l-warning'],
+    ['尚未開始', { status: 'scheduled' }, 'border-l-brand-600'],
+    ['比賽中', { status: 'live', ...withScore(2, 1) }, 'border-l-danger'],
+    ['勝', { status: 'finished', ...withScore(6, 3) }, 'border-l-accent-500'],
+    ['敗', { status: 'finished', ...withScore(1, 4) }, 'border-l-danger'],
+    ['因雨延賽', { status: 'postponed' }, 'border-l-warning'],
   ])('%s 用對應的顏色', async (_label, overrides, expected) => {
     const component = await mount(overrides)
     expect(component.find('a').classes()).toContain(expected)
+  })
+
+  it('比賽中顯示 LIVE 與即時比數，而且不寫 FINAL', async () => {
+    const component = await mount({ status: 'live', ...withScore(2, 1) })
+    const text = component.text()
+
+    expect(text).toContain('LIVE')
+    expect(text).toContain('2')
+    expect(text).toContain('1')
+    // 一個停在 2:1 的比數若標著 FINAL，看起來就是打完了
+    expect(text).not.toContain('FINAL')
+    // 球都在打了，還顯示「還有幾天」會很奇怪
+    expect(text).not.toContain('天')
+  })
+
+  it('比賽結束寫 FINAL 並標出勝敗', async () => {
+    const component = await mount({ status: 'finished', ...withScore(6, 3) })
+    const text = component.text()
+
+    expect(text).toContain('FINAL')
+    expect(text).toContain('勝')
+    expect(text).not.toContain('LIVE')
+  })
+
+  /**
+   * 迴歸測試：勝敗必須跟著計分板走。
+   *
+   * 舊版的勝敗是一個可以手動覆寫的欄位，改了計分板卻忘了改它，前台就會出現
+   * 「1:4」配上一個「勝」。現在它是推導的，這種狀態不可能存在。
+   */
+  it('勝敗完全跟著比數，不存在「比數說輸、結果說贏」', async () => {
+    const component = await mount({ status: 'finished', ...withScore(1, 4) })
+
+    expect(component.text()).toContain('敗')
+    expect(component.text()).not.toContain('勝')
   })
 })
 
@@ -426,7 +470,7 @@ describe('ScoreBanner 的最新比數', () => {
   const mount = (overrides: Record<string, unknown>) =>
     mountSuspended(HomeScoreBanner, {
       props: {
-        lastGame: { ...game, status: 'finished', result: 'win', ...overrides },
+        scoreGame: { ...game, status: 'finished', ...overrides },
         upcoming: [],
         teamName: 'HG MERCENARIES',
         teamLogoUrl: '',
@@ -456,12 +500,32 @@ describe('ScoreBanner 的最新比數', () => {
     ['因雨延賽', 'postponed'],
     ['取消', 'canceled'],
   ])('%s 的場次把狀態寫出來，不顯示比數', async (label, status) => {
-    const component = await mount({ status, result: null })
+    const component = await mount({ status })
 
     expect(component.text()).toContain(label)
     // 這場根本沒打，不該有比分 —— 計分板是空的，畫出來會是「0 0」
     expect(component.findAll('.text-3xl')).toHaveLength(0)
     expect(hasScoreSeparator(component)).toBe(false)
+  })
+
+  /**
+   * 有比賽正在打的時候，首頁第一屏的重點就是它。
+   *
+   * 標題必須整個換掉而不是只加一個標籤：「LAST SCORE ／ 最新比數」配著一個
+   * 還在跑的比數，會被讀成「上一場打完是 6:3」。
+   */
+  it('進行中的場次把標題換成 LIVE NOW 並顯示即時比數', async () => {
+    const component = await mount({ status: 'live' })
+    const text = component.text()
+
+    expect(text).toContain('LIVE')
+    expect(text).toContain('即時比數')
+    expect(text).not.toContain('LAST SCORE')
+    expect(text).not.toContain('最新比數')
+
+    const scores = component.findAll('.text-3xl').map((el) => el.text())
+    expect(scores).toContain('6')
+    expect(scores).toContain('3')
   })
 })
 
@@ -484,7 +548,6 @@ describe('GameCalendar', () => {
     league: '',
     homeAway: 'home' as const,
     status: 'finished' as const,
-    result: 'win' as const,
     note: '',
     coverImageUrl: '',
     opponentLogoUrl: '',
@@ -517,10 +580,16 @@ describe('GameCalendar', () => {
   })
 
   it('小圓點的顏色對應結果', async () => {
+    // 勝敗是由總分推導的，所以「輸了」要用比數表示 —— 基底那場是 6:3 獲勝
     const component = await mount([
-      game('g1', '2026-09-02', { result: 'loss' }),
-      game('g2', '2026-09-09', { status: 'postponed', result: null }),
-      game('g3', '2026-09-16', { result: 'win' }),
+      game('g1', '2026-09-02', {
+        scoreboard: {
+          innings: [],
+          totals: { our: { r: 1, h: 0, e: 0 }, opponent: { r: 4, h: 0, e: 0 } },
+        },
+      }),
+      game('g2', '2026-09-09', { status: 'postponed' }),
+      game('g3', '2026-09-16', {}),
     ])
 
     const html = component.html()

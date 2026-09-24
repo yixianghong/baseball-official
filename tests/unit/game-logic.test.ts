@@ -6,12 +6,18 @@ import {
   gameMapUrl,
   isGoogleMapsUrl,
   gameInputSchema,
+  gamePatchSchema,
   gameQuerySchema,
+  gameResult,
+  hasScore,
   isFinished,
+  isLive,
   isNotPlayed,
   MAX_GAME_QUERY_LIMIT,
   needsResultUpdate,
   sumInnings,
+  tallyRecord,
+  withSummedRuns,
   toDateKey,
 } from '../../shared/schemas/game'
 import {
@@ -59,6 +65,161 @@ describe('deriveResult', () => {
   })
 })
 
+/**
+ * R（總得分）一律等於逐局加總。
+ *
+ * 後台曾經有一顆「用逐局加總填入 R」的按鈕，等於把「保持一致」外包給使用者
+ * 記得按。沒按的下場是計分板上逐局是 3:1、R 欄寫著 0:0 —— 而前台的比數、
+ * 勝敗、戰績全部讀 R，錯的是整個網站而不只是那張表格。
+ */
+describe('withSummedRuns', () => {
+  const board = (innings: Array<[number | null, number | null]>, r: [number, number]) => ({
+    innings: innings.map(([our, opponent], i) => ({ inning: i + 1, our, opponent })),
+    totals: { our: { r: r[0], h: 5, e: 1 }, opponent: { r: r[1], h: 7, e: 0 } },
+  })
+
+  it('把 R 改成逐局加總', () => {
+    const result = withSummedRuns(
+      board(
+        [
+          [0, 1],
+          [2, 0],
+          [1, 0],
+        ],
+        [0, 0],
+      ),
+    )
+
+    expect(result.totals.our.r).toBe(3)
+    expect(result.totals.opponent.r).toBe(1)
+  })
+
+  it('不動 H 與 E —— 它們沒有逐局欄位可以加總', () => {
+    const result = withSummedRuns(board([[3, 1]], [0, 0]))
+
+    expect(result.totals.our.h).toBe(5)
+    expect(result.totals.our.e).toBe(1)
+    expect(result.totals.opponent.h).toBe(7)
+  })
+
+  it('沒打的半局（null）當 0 計', () => {
+    const result = withSummedRuns(
+      board(
+        [
+          [1, 2],
+          [2, null],
+        ],
+        [0, 0],
+      ),
+    )
+
+    expect(result.totals.our.r).toBe(3)
+    expect(result.totals.opponent.r).toBe(2)
+  })
+
+  it('本來就一致時回傳同一個物件', () => {
+    // 自動儲存靠「內容有沒有變」判斷要不要寫入，每次都回新物件會讓光是
+    // 打開頁面就送出一次 PATCH
+    const input = board([[3, 1]], [3, 1])
+
+    expect(withSummedRuns(input)).toBe(input)
+  })
+
+  it('空計分板是 0:0', () => {
+    expect(withSummedRuns(emptyScoreboard(7)).totals.our.r).toBe(0)
+  })
+})
+
+/**
+ * 勝敗是推導的，不是一個存下來、可以手動覆寫的欄位。
+ *
+ * 這一組守的是兩件事：**只有結束的比賽才有結果**，而且**結果一定跟著比數**。
+ * 舊版兩者都可能不成立 —— 空計分板的未開打場次會帶著一個「和」，
+ * 而手動覆寫過的場次可能出現「1:4」配上「勝」。
+ */
+describe('gameResult', () => {
+  const board = (our: number, opponent: number) => ({
+    innings: [],
+    totals: { our: { r: our, h: 0, e: 0 }, opponent: { r: opponent, h: 0, e: 0 } },
+  })
+
+  it.each([
+    ['win', 6, 3],
+    ['loss', 1, 4],
+    ['tie', 2, 2],
+  ] as const)('結束的比賽依總分判定為 %s', (expected, our, opponent) => {
+    expect(gameResult({ status: 'finished', scoreboard: board(our, opponent) })).toBe(expected)
+  })
+
+  it.each(['scheduled', 'live', 'postponed', 'canceled'] as const)(
+    '%s 沒有結果（領先不等於贏了）',
+    (status) => {
+      expect(gameResult({ status, scoreboard: board(6, 3) })).toBeNull()
+    },
+  )
+
+  it('未開打的空計分板不會被判成「和」', () => {
+    // 0:0 的「和」和「還沒打」在畫面上長得一模一樣
+    expect(gameResult({ status: 'scheduled', scoreboard: emptyScoreboard(7) })).toBeNull()
+  })
+})
+
+describe('比賽中', () => {
+  it.each([
+    ['live', true],
+    ['scheduled', false],
+    ['finished', false],
+  ] as const)('%s → isLive = %s', (status, expected) => {
+    expect(isLive({ status })).toBe(expected)
+  })
+
+  it.each([
+    ['live', true],
+    ['finished', true],
+    ['scheduled', false],
+    ['postponed', false],
+    ['canceled', false],
+  ] as const)('%s → hasScore = %s', (status, expected) => {
+    // 沒打成的場次計分板是空的，顯示出來會是「0:0」，看起來像和局
+    expect(hasScore({ status })).toBe(expected)
+  })
+})
+
+describe('tallyRecord', () => {
+  const played = (our: number, opponent: number, status = 'finished' as const) => ({
+    status,
+    scoreboard: {
+      innings: [],
+      totals: { our: { r: our, h: 0, e: 0 }, opponent: { r: opponent, h: 0, e: 0 } },
+    },
+  })
+
+  it('只統計已結束的場次', () => {
+    expect(
+      tallyRecord([
+        played(6, 3),
+        played(1, 4),
+        played(2, 2),
+        played(0, 0, 'postponed'),
+        played(9, 0, 'live'),
+      ]),
+    ).toEqual({ win: 1, loss: 1, tie: 1, total: 3 })
+  })
+
+  it('場次數不含延賽 —— 否則「近 3 戰 2 勝 0 敗」看起來像少算了一場', () => {
+    expect(tallyRecord([played(6, 3), played(5, 1), played(0, 0, 'postponed')])).toEqual({
+      win: 2,
+      loss: 0,
+      tie: 0,
+      total: 2,
+    })
+  })
+
+  it('沒有比賽時回傳全 0', () => {
+    expect(tallyRecord([])).toEqual({ win: 0, loss: 0, tie: 0, total: 0 })
+  })
+})
+
 describe('needsResultUpdate', () => {
   const today = '2026-05-10'
 
@@ -72,6 +233,15 @@ describe('needsResultUpdate', () => {
 
   it('已登錄結果的比賽不需要補登', () => {
     expect(needsResultUpdate({ status: 'finished', date: '2026-01-01' }, today)).toBe(false)
+  })
+
+  it('日期已過卻還停在「比賽中」→ 需要補登', () => {
+    // 忘了按「比賽結束」的場次會在前台一直掛著 LIVE，比忘了登錄結果更明顯地錯
+    expect(needsResultUpdate({ status: 'live', date: '2026-05-09' }, today)).toBe(true)
+  })
+
+  it('今天正在打的比賽不算逾期', () => {
+    expect(needsResultUpdate({ status: 'live', date: today }, today)).toBe(false)
   })
 
   it('取消的比賽不需要補登', () => {
@@ -96,6 +266,38 @@ describe('emptyScoreboard', () => {
   })
 })
 
+/**
+ * 迴歸測試：部分更新只能動送上來的欄位。
+ *
+ * 這裡曾經是 `gameInputSchema.partial()`，而 `.partial()` 只讓欄位變成選填 ——
+ * 帶 `.default()` 的欄位在鍵不存在時**照樣會套用預設值**。結果是一個
+ * 「只把狀態改成比賽結束」的 PATCH，會順手把場地、出席、打線、計分板
+ * 全部清空，而 API 回應與畫面都看不出任何異常。
+ *
+ * `updateGame()` 的 `{ ...existing, ...patch }` 完全依賴「沒送的鍵不存在」。
+ */
+describe('gamePatchSchema', () => {
+  it('只送一個欄位時，其他欄位不會被預設值填回來', () => {
+    const patch = gamePatchSchema.parse({ status: 'finished' }) as Record<string, unknown>
+
+    expect(Object.keys(patch)).toEqual(['status'])
+    for (const field of ['lineup', 'attendance', 'pitchers', 'scoreboard', 'venue', 'time']) {
+      expect(field in patch, `${field} 不該出現在 patch 裡`).toBe(false)
+    }
+  })
+
+  it('送上來的欄位照樣要通過驗證', () => {
+    expect(() => gamePatchSchema.parse({ date: '2026/03/05' })).toThrow()
+  })
+
+  it('合併之後保留原本的內容', () => {
+    const existing = { status: 'scheduled', venue: '市立棒球場', lineup: [{ order: 1 }] }
+    const merged = { ...existing, ...gamePatchSchema.parse({ status: 'live' }) }
+
+    expect(merged).toEqual({ status: 'live', venue: '市立棒球場', lineup: [{ order: 1 }] })
+  })
+})
+
 describe('gameInputSchema', () => {
   const base = { date: '2026-03-05', opponent: '藍鷹棒球隊' }
 
@@ -106,7 +308,18 @@ describe('gameInputSchema', () => {
     expect(parsed.status).toBe('scheduled')
     expect(parsed.homeAway).toBe('home')
     expect(parsed.attendance).toEqual([])
-    expect(parsed.result).toBeNull()
+  })
+
+  /**
+   * 勝敗不是可以送進來的欄位。
+   *
+   * 後台的表單上沒有這個控制項了，但 schema 才是真正的防線 —— 只要它還收，
+   * 任何一個舊的前端、一次手動的 PATCH，就能把一個和計分板矛盾的結果寫進去。
+   */
+  it('不接受手動指定的比賽結果', () => {
+    const parsed = gameInputSchema.parse({ ...base, result: 'win' }) as Record<string, unknown>
+
+    expect(parsed.result).toBeUndefined()
   })
 
   it('拒絕格式錯誤的日期', () => {
@@ -182,6 +395,7 @@ describe('沒有打成的場次', () => {
     ['canceled', true],
     ['finished', false],
     ['scheduled', false],
+    ['live', false],
   ] as const)('%s → isNotPlayed = %s', (status, expected) => {
     expect(isNotPlayed({ status })).toBe(expected)
   })

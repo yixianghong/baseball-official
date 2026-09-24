@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { tallyRecord } from '#shared/schemas/game'
 import { describeCountdown, daysUntil, formatGameDateLong } from '~/utils/format'
 
 /**
@@ -9,7 +10,7 @@ import { describeCountdown, daysUntil, formatGameDateLong } from '~/utils/format
  * ┌─────────────────────────────┐
  * │        滿版主視覺            │  球隊形象
  * ├──────────────┬──────────────┤
- * │  最新比數     │  近期賽事     │  ← 第一屏就回答完最常被問的兩件事
+ * │  比數         │  近期賽事     │  ← 第一屏就回答完最常被問的兩件事
  * ├──────────────┴──────────────┤
  * │  下一場比賽詳情              │
  * │  最新公告 / 最近戰績 / 簡介   │
@@ -32,9 +33,34 @@ const weatherIds = computed(() => (upcoming.value ?? []).map((game) => game.id))
 const { data: weather } = useGamesWeather(weatherIds)
 
 const teamName = computed(() => settings.value?.teamName ?? '')
-const nextGame = computed(() => upcoming.value?.[0] ?? null)
-/** 最近一場已結束的比賽。列表已由 BFF 依日期新到舊排序，取第一筆即可。 */
-const lastGame = computed(() => recent.value?.[0] ?? null)
+
+/**
+ * 正在打的那一場。
+ *
+ * `scope: 'upcoming'` 會把進行中的場次排在最前面（見
+ * `server/repositories/games.ts`），但這裡用 `find` 而不是取 `[0]` ——
+ * 排序是那一層的決定，首頁不該依賴它。
+ */
+const liveGame = computed(
+  () => (upcoming.value ?? []).find((game) => game.status === 'live') ?? null,
+)
+
+/**
+ * 還沒開打的場次。
+ *
+ * 進行中的那一場要從這裡拿掉：它已經佔住左邊的比數區了，再出現在「近期賽事」
+ * 或「下一場比賽」裡，等於同一場比賽在第一屏出現兩次，而且旁邊還寫著
+ * 「還有 0 天」—— 球都在打了。
+ */
+const scheduled = computed(() => (upcoming.value ?? []).filter((game) => game.status !== 'live'))
+
+const nextGame = computed(() => scheduled.value[0] ?? null)
+
+/**
+ * 要放在比數區的那一場：正在打的優先，否則是最近一場已結束的
+ * （列表已由 BFF 依日期新到舊排序，取第一筆即可）。
+ */
+const scoreGame = computed(() => liveGame.value ?? recent.value?.[0] ?? null)
 
 /** 下一場比賽的天氣。不該顯示的狀態回 null，那一欄就整個不出現。 */
 const nextGameWeather = computed(() => {
@@ -48,15 +74,7 @@ const nextGameCountdown = computed(() =>
 )
 
 /** 近三戰的勝敗摘要，做成「近 3 戰 2 勝 1 敗」這種一眼看得懂的句子。 */
-const recentSummary = computed(() => {
-  const games = recent.value ?? []
-  return {
-    win: games.filter((game) => game.result === 'win').length,
-    loss: games.filter((game) => game.result === 'loss').length,
-    tie: games.filter((game) => game.result === 'tie').length,
-    total: games.length,
-  }
-})
+const recentSummary = computed(() => tallyRecord(recent.value ?? []))
 
 useHead({ title: '首頁' })
 </script>
@@ -126,10 +144,10 @@ useHead({ title: '首頁' })
       </div>
     </section>
 
-    <!-- ══ 最新比數 ／ 近期賽事 ═════════════════════════════════ -->
+    <!-- ══ 比數 ／ 近期賽事 ═══════════════════════════════════ -->
     <HomeScoreBanner
-      :last-game="lastGame"
-      :upcoming="upcoming ?? []"
+      :score-game="scoreGame"
+      :upcoming="scheduled"
       :weather="weather ?? undefined"
       :team-name="teamName"
       :team-logo-url="settings?.logoUrl ?? ''"

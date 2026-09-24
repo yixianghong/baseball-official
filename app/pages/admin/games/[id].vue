@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import type {
   AttendanceEntry,
-  GameResult,
   GameStatus,
   LineupEntry,
   PitcherEntry,
   Scoreboard,
 } from '#shared/schemas/game'
 import {
-  deriveResult,
   emptyScoreboard,
+  GAME_EXCEPTION_STATUSES,
+  GAME_FLOW_STATUSES,
   GAME_RESULT_LABELS,
   GAME_STATUS_LABELS,
+  gameResult,
   isGoogleMapsUrl,
+  withSummedRuns,
 } from '#shared/schemas/game'
 import { teamNameCandidates } from '#shared/schemas/settings'
 import { TAIWAN_CITIES, type TaiwanCity } from '#shared/schemas/weather'
@@ -28,8 +30,14 @@ import { formatGameDateLong } from '~/utils/format'
  * - 表單短、可以馬上儲存，不必為了改一個時間而捲過整個計分板
  *
  * ## 出席與打線在哪個分頁看得到
- * 未開打的比賽前台顯示「出席＋先發陣容」，已結束的顯示「打線＋計分板」。
+ * 未開打的比賽前台顯示「出席＋先發陣容」，開打之後顯示「打線＋計分板」。
  * 後台四個分頁一律都在 —— 比賽結束後仍可能要回頭補出席紀錄。
+ *
+ * ## 「賽事管理」分頁
+ * 賽事狀態與計分板放在同一個分頁，因為它們是同一件事的兩面：比賽開打時
+ * 按「比賽中」並開始填分，打完按「比賽結束」。狀態原本擺在「基本資料」
+ * 裡當成一個下拉選單，但那是比賽當天最常按的東西，不該和場地、地圖連結
+ * 這些建檔一次就不再碰的欄位放在一起。
  */
 definePageMeta({ layout: 'admin', middleware: 'auth' })
 
@@ -45,17 +53,11 @@ const teamName = computed(() => settings.value?.teamName ?? '我隊')
 const teamNames = computed(() => (settings.value ? teamNameCandidates(settings.value) : []))
 const roster = computed(() => players.value ?? [])
 
-/** 狀態選項直接由標籤表產生 —— 之後新增狀態只要改 shared 那一份。 */
-const statusOptions = (Object.keys(GAME_STATUS_LABELS) as GameStatus[]).map((status) => ({
-  value: status,
-  label: GAME_STATUS_LABELS[status],
-}))
-
 const tabs = [
   { key: 'basic', label: '基本資料' },
   { key: 'attendance', label: '出席統計' },
   { key: 'lineup', label: '打線' },
-  { key: 'result', label: '計分板與結果' },
+  { key: 'result', label: '賽事管理' },
 ] as const
 const activeTab = ref<(typeof tabs)[number]['key']>('basic')
 
@@ -69,7 +71,7 @@ const basic = reactive({
   city: '' as TaiwanCity | '',
   league: '',
   homeAway: 'home' as 'home' | 'away',
-  status: 'scheduled' as 'scheduled' | 'finished' | 'canceled',
+  status: 'scheduled' as GameStatus,
   note: '',
   coverImageUrl: '',
   opponentLogoUrl: '',
@@ -92,8 +94,14 @@ const attendance = ref<AttendanceEntry[]>([])
 const lineup = ref<LineupEntry[]>([])
 const pitchers = ref<PitcherEntry[]>([])
 const scoreboard = ref<Scoreboard>(emptyScoreboard(0))
-/** 空字串代表「依計分板自動判定」。做成選項之一，型別才不必和 placeholder 打架。 */
-const resultOverride = ref<GameResult | ''>('')
+
+/**
+ * 計分板，R 一律對齊逐局加總（見 `withSummedRuns()`）。
+ *
+ * 判定結果與比數都看它，而不是直接看 `scoreboard.value.totals` —— 載入的資料
+ * 如果是這條規則之前寫進去的，那個 R 可能停在別的數字。
+ */
+const board = computed(() => withSummedRuns(scoreboard.value))
 
 /**
  * 表單的完整內容。
@@ -107,8 +115,7 @@ const formState = computed(() => ({
   attendance: attendance.value,
   lineup: lineup.value,
   pitchers: pitchers.value,
-  scoreboard: scoreboard.value,
-  result: resultOverride.value || null,
+  scoreboard: board.value,
 }))
 
 /** 把伺服器資料灌進表單。載入完成時執行一次。 */
@@ -135,7 +142,6 @@ function syncFromGame() {
   lineup.value = [...current.lineup]
   pitchers.value = [...current.pitchers]
   scoreboard.value = structuredClone(toRaw(current.scoreboard))
-  resultOverride.value = current.result ?? ''
 }
 
 const autosave = useAutosave(
@@ -154,23 +160,29 @@ watch(
 )
 
 /**
- * 標記為已結束。
+ * 目前的判定結果。
  *
- * 這一步刻意保持手動：自動儲存負責的是「把你填的東西存起來」，
- * 而「這場比賽打完了」是一個決定，不該因為你開始填計分板就被代為認定。
+ * **沒有手動覆寫的選項。** 勝敗完全由「狀態」與「計分板總分」決定，所以這裡
+ * 顯示的就是前台會顯示的那一個（同一支 `gameResult()`）—— 後台看到「勝」，
+ * 前台就不可能是「敗」。
+ *
+ * 曾經有一個可以手選的下拉選單，實際發生的事是：改完計分板忘了回頭改它，
+ * 於是前台出現「6:3」配上一個「敗」。要讓結果不一樣，就去改計分板。
  */
-function markAsFinished() {
-  basic.status = 'finished'
+const result = computed(() => gameResult({ status: basic.status, scoreboard: board.value }))
+
+/**
+ * 狀態按鈕的外觀。
+ *
+ * 「比賽中」用紅色，和前台的 LIVE 標籤是同一個顏色 —— 這顆按鈕按下去，
+ * 官網首頁就會變成紅色的即時比數，按鈕本身要先說出這件事。
+ */
+function statusButtonClass(status: GameStatus): string {
+  if (basic.status !== status) return 'border-border text-content-muted hover:bg-surface-muted'
+  if (status === 'live') return 'border-danger bg-danger text-white'
+  if (status === 'postponed' || status === 'canceled') return 'border-warning bg-warning text-white'
+  return 'border-brand-600 bg-brand-600 text-white'
 }
-
-const autoResult = computed(() => deriveResult(scoreboard.value.totals))
-
-const resultOptions = computed<Array<{ value: GameResult | ''; label: string }>>(() => [
-  { value: '', label: `自動判定（目前為「${GAME_RESULT_LABELS[autoResult.value]}」）` },
-  { value: 'win', label: '勝' },
-  { value: 'loss', label: '敗' },
-  { value: 'tie', label: '和' },
-])
 
 function addPitcher() {
   pitchers.value = [
@@ -198,12 +210,12 @@ function onPitcherPlayerChange(index: number, playerId: string) {
 /**
  * 先發投手，做成「先發陣容」分頁上的一個欄位。
  *
- * 它實際上編輯的就是 `pitchers` 裡 `role: 'starter'` 的那一筆 —— 和「計分板與
- * 結果」分頁的投手紀錄是同一份資料，不是另外存一個會不同步的欄位。
+ * 它實際上編輯的就是 `pitchers` 裡 `role: 'starter'` 的那一筆 —— 和「賽事管理」
+ * 分頁的投手紀錄是同一份資料，不是另外存一個會不同步的欄位。
  *
  * 為什麼要在這裡也放一個：先發投手是**賽前**就決定的事，會印在出賽名單圖卡上，
- * 而投手紀錄整段是為了賽後登錄而設計的。要為了填一個賽前欄位跑去「計分板與
- * 結果」分頁，這件事本身就會讓人不填 —— 然後圖卡上永遠少一項。
+ * 而投手紀錄整段是為了賽後登錄而設計的。要為了填一個賽前欄位跑去「賽事管理」
+ * 分頁，這件事本身就會讓人不填 —— 然後圖卡上永遠少一項。
  */
 const startingPitcherId = computed<string>({
   get: () => pitchers.value.find((pitcher) => pitcher.role === 'starter')?.playerId ?? '',
@@ -251,7 +263,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         :title="`${teamName} vs ${game.opponent}`"
         :description="formatGameDateLong(game.date)"
         back-to="/admin/games"
-        back-label="回到賽程列表"
+        back-label="回到賽事列表"
       >
         <template #actions>
           <UiBaseButton variant="ghost" @click="navigateTo(`/games/${game.id}`)">
@@ -320,23 +332,20 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           :error="mapUrlError"
         />
 
-        <div class="grid gap-4 sm:grid-cols-2">
-          <UiBaseSelect
-            v-model="basic.homeAway"
-            label="主客場"
-            :options="[
-              { value: 'home', label: '主場（後攻）' },
-              { value: 'away', label: '客場（先攻）' },
-            ]"
-            hint="影響計分板上下半局的排列方式"
-          />
-          <UiBaseSelect
-            v-model="basic.status"
-            label="比賽狀態"
-            :options="statusOptions"
-            hint="「已結束」會在前台改為顯示打線與計分板；「因雨延賽」會列在比賽結果頁並標注"
-          />
-        </div>
+        <!--
+          比賽狀態不在這裡 —— 它在「賽事管理」分頁。這一頁的欄位是建檔時填一次
+          就不再碰的東西，而狀態是比賽當天要按兩次的按鈕，混在一起只會讓它難找。
+        -->
+        <UiBaseSelect
+          v-model="basic.homeAway"
+          label="主客場"
+          class="sm:max-w-xs"
+          :options="[
+            { value: 'home', label: '主場（後攻）' },
+            { value: 'away', label: '客場（先攻）' },
+          ]"
+          hint="影響計分板上下半局的排列方式"
+        />
 
         <UiBaseTextarea v-model="basic.note" label="備註" :rows="3" :maxlength="500" />
 
@@ -375,7 +384,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             label="先發投手"
             placeholder="— 尚未決定 —"
             :options="pitcherOptions.filter((option) => option.value)"
-            hint="會顯示在前台的出賽名單圖卡上。和「計分板與結果」分頁的投手紀錄是同一筆。"
+            hint="會顯示在前台的出賽名單圖卡上。和「賽事管理」分頁的投手紀錄是同一筆。"
           />
         </div>
 
@@ -390,10 +399,70 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         </AdminLineupEditor>
       </section>
 
-      <!-- ══ 計分板與結果 ══════════════════════════════════════ -->
+      <!-- ══ 賽事管理 ══════════════════════════════════════════ -->
       <section v-show="activeTab === 'result'" role="tabpanel" class="space-y-8">
+        <!-- ── 賽事狀態 ────────────────────────────────────────── -->
+        <fieldset class="space-y-3">
+          <legend class="text-fluid-lg font-bold">賽事狀態</legend>
+          <p class="text-fluid-sm text-content-muted">
+            按下去就會立刻反映在官網上：「比賽中」會在賽程與首頁顯示紅色的 LIVE
+            與即時比數，「比賽結束」會顯示 FINAL 與勝敗。
+          </p>
+
+          <div class="flex flex-wrap items-center gap-2" role="group" aria-label="賽事狀態">
+            <button
+              v-for="status in GAME_FLOW_STATUSES"
+              :key="status"
+              type="button"
+              class="min-h-11 rounded-full border px-5 text-fluid-sm font-semibold transition"
+              :class="statusButtonClass(status)"
+              :aria-pressed="basic.status === status"
+              @click="basic.status = status"
+            >
+              {{ GAME_STATUS_LABELS[status] }}
+            </button>
+
+            <!--
+              延賽與取消是岔出主流程的兩條，所以用一條分隔線隔開而不是排成同一排。
+              它們還是同一個欄位的值，做成第二個控制項只會讓人不知道該以哪個為準。
+            -->
+            <span class="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
+
+            <button
+              v-for="status in GAME_EXCEPTION_STATUSES"
+              :key="status"
+              type="button"
+              class="min-h-11 rounded-full border px-4 text-fluid-sm font-medium transition"
+              :class="statusButtonClass(status)"
+              :aria-pressed="basic.status === status"
+              @click="basic.status = status"
+            >
+              {{ GAME_STATUS_LABELS[status] }}
+            </button>
+          </div>
+        </fieldset>
+
+        <hr class="border-border" />
+
         <div class="space-y-4">
-          <h2 class="text-fluid-lg font-bold">計分板</h2>
+          <div class="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 class="text-fluid-lg font-bold">計分板</h2>
+
+            <!--
+              判定結果只顯示、不能改：它是計分板總分推導出來的，而且只有
+              「比賽結束」才有值 —— 領先不等於贏了。
+            -->
+            <p v-if="result" class="text-fluid-sm">
+              <span class="text-content-muted">判定結果</span>
+              <span class="ml-2 font-bold">{{ GAME_RESULT_LABELS[result] }}</span>
+              <span class="ml-2 tabular-nums text-content-muted">
+                （{{ board.totals.our.r }} : {{ board.totals.opponent.r }}）
+              </span>
+            </p>
+            <p v-else class="text-fluid-sm text-content-muted">
+              標記為「比賽結束」後，這裡會依計分板總分自動判定勝敗。
+            </p>
+          </div>
 
           <AdminScoreboardEditor
             v-model="scoreboard"
@@ -401,22 +470,6 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             :opponent-name="game.opponent"
             :team-names="teamNames"
           />
-
-          <UiBaseSelect
-            v-model="resultOverride"
-            label="比賽結果"
-            :options="resultOptions"
-            hint="選「自動判定」則依計分板總分決定勝敗。裁定比賽等特殊情況才需要手動指定。"
-            class="max-w-xs"
-          />
-
-          <div v-if="basic.status !== 'finished'" class="flex flex-wrap items-center gap-3">
-            <UiBaseButton variant="secondary" @click="markAsFinished">標記為已結束</UiBaseButton>
-            <span class="text-fluid-sm text-content-muted">
-              計分板會自動儲存；標記為已結束之後，前台才會改為顯示打線與計分板。
-            </span>
-          </div>
-          <p v-else class="text-fluid-sm text-success">✓ 這場比賽已標記為結束。</p>
         </div>
 
         <hr class="border-border" />

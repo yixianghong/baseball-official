@@ -4,6 +4,8 @@ import {
   GAME_STATUS_LABELS,
   deriveBench,
   gameMapUrl,
+  gameResult,
+  hasScore,
   isNotPlayed,
 } from '#shared/schemas/game'
 import { describeCountdown, daysUntil, formatGameDateLong } from '~/utils/format'
@@ -16,12 +18,16 @@ import { describeCountdown, daysUntil, formatGameDateLong } from '~/utils/format
  *
  * | 狀態 | 顯示 |
  * |---|---|
- * | `scheduled`（未來） | 預計出席名單、先發陣容、比賽資訊 |
- * | `finished`（過去） | 計分板、當天打線、投手、比賽結果 |
+ * | `scheduled`（尚未開始） | 預計出席名單、先發陣容、比賽資訊 |
+ * | `live`（比賽中） | 即時計分板、當天打線、投手 |
+ * | `finished`（比賽結束） | 最終計分板、當天打線、投手、勝敗 |
+ * | `postponed` / `canceled` | 沒打成的說明 |
  *
  * 打線只有一份（`game.lineup`）：比賽前排好的陣容就是賽後的出賽紀錄，
- * 這裡只是依狀態換個說法 —— 未開打標示「預計」，結束後就是當天打線。
- * | `canceled` | 取消說明 |
+ * 這裡只是依狀態換個說法 —— 未開打標示「預計」，開打之後就是當天打線。
+ *
+ * 進行中與已結束看的是同一組區塊（計分板＋名單），差別只在標題與比數旁邊
+ * 寫的是 LIVE 還是 FINAL：比賽打到一半時，人想看的東西和打完之後一模一樣。
  *
  * 判斷依 `status` 而不是日期：比賽可能因雨延賽，日期過了卻還沒打。
  *
@@ -39,9 +45,15 @@ const today = useToday()
 const teamName = computed(() => settings.value?.teamName ?? '我隊')
 
 const isFinished = computed(() => game.value?.status === 'finished')
+const isLive = computed(() => game.value?.status === 'live')
 const isPostponed = computed(() => game.value?.status === 'postponed')
+/** 進行中與已結束都有比數可看。 */
+const showScore = computed(() => (game.value ? hasScore(game.value) : false))
 /** 延賽與取消都沒有打成。 */
 const notPlayed = computed(() => (game.value ? isNotPlayed(game.value) : false))
+
+/** 勝敗是推導的（只有結束的比賽才有值），不是一個存下來的欄位。 */
+const result = computed(() => (game.value ? gameResult(game.value) : null))
 
 const countdown = computed(() =>
   game.value ? describeCountdown(daysUntil(game.value.date, today.value)) : '',
@@ -49,8 +61,8 @@ const countdown = computed(() =>
 
 const resultTone = computed(() => {
   // 與 GameCard 同一套語彙：勝場用隊徽的金色
-  if (game.value?.result === 'win') return 'accent' as const
-  if (game.value?.result === 'loss') return 'danger' as const
+  if (result.value === 'win') return 'accent' as const
+  if (result.value === 'loss') return 'danger' as const
   return 'neutral' as const
 })
 
@@ -80,6 +92,8 @@ const { data: weather } = useGameWeather(gameId)
  * 沒有指定縣市、或站台沒設定授權碼時 `GameWeather` 自己會不顯示，但主視覺的
  * `<dt>當天天氣</dt>` 是外面這一層畫的 —— 不一起判斷就會留下一個空標籤。
  *
+ * 開打之後（進行中、已結束）就不顯示了：那一欄寫的是「預報」，而球已經在打了。
+ *
  * ⚠️ **這個判斷不能把 `pending` 算進去。** 天氣是 `server: false` 查的，
  * SSR 階段的狀態是 idle（不是 pending），但瀏覽器一 hydrate 就立刻變成
  * pending —— 兩邊畫出來的東西不一樣，就是 hydration mismatch。
@@ -87,6 +101,7 @@ const { data: weather } = useGameWeather(gameId)
  */
 const showWeather = computed(
   () =>
+    !showScore.value &&
     weather.value !== null &&
     weather.value.status !== 'no-city' &&
     weather.value.status !== 'not-configured',
@@ -124,8 +139,9 @@ useHead({
             <UiBaseBadge v-if="notPlayed" :tone="isPostponed ? 'warning' : 'neutral'" on-dark>
               {{ GAME_STATUS_LABELS[game.status] }}
             </UiBaseBadge>
-            <UiBaseBadge v-else-if="isFinished && game.result" :tone="resultTone" on-dark>
-              {{ GAME_RESULT_LABELS[game.result] }}
+            <GameLiveBadge v-else-if="isLive" />
+            <UiBaseBadge v-else-if="result" :tone="resultTone" on-dark>
+              {{ GAME_RESULT_LABELS[result] }}
             </UiBaseBadge>
             <UiBaseBadge v-else tone="brand" on-dark>{{ countdown }}</UiBaseBadge>
 
@@ -148,16 +164,28 @@ useHead({
               <p class="mt-2 text-white/70">{{ formatGameDateLong(game.date) }} {{ game.time }}</p>
             </div>
 
-            <!-- 已結束的比賽，比數是最重要的資訊，字級拉到最大 -->
-            <p v-if="isFinished" class="text-fluid-3xl font-black tabular-nums">
-              <span :class="score.our >= score.opponent ? '' : 'text-white/70'">{{
-                score.our
-              }}</span>
-              <span class="mx-2 text-white/50">:</span>
-              <span :class="score.opponent > score.our ? '' : 'text-white/70'">
-                {{ score.opponent }}
-              </span>
-            </p>
+            <!-- 開打之後，比數是最重要的資訊，字級拉到最大 -->
+            <div v-if="showScore" class="text-right">
+              <!--
+                比數旁邊一定要寫出它是「最終」還是「此刻」：一個 6:3 自己
+                說不出比賽打完了沒有。
+              -->
+              <p class="text-fluid-sm font-bold tracking-[0.3em] text-white/60">
+                {{ isLive ? 'LIVE' : 'FINAL' }}
+              </p>
+              <p
+                class="text-fluid-3xl font-black tabular-nums"
+                :aria-label="`比數 ${score.our} 比 ${score.opponent}`"
+              >
+                <span :class="isLive || score.our >= score.opponent ? '' : 'text-white/70'">{{
+                  score.our
+                }}</span>
+                <span class="mx-2 text-white/50">:</span>
+                <span :class="isLive || score.opponent > score.our ? '' : 'text-white/70'">
+                  {{ score.opponent }}
+                </span>
+              </p>
+            </div>
           </div>
 
           <dl class="mt-6 grid gap-4 border-t border-white/20 pt-5 text-fluid-sm sm:grid-cols-3">
@@ -217,10 +245,16 @@ useHead({
         </div>
       </header>
 
-      <!-- ══ 已結束：計分板 + 打線 + 投手 ═══════════════════════ -->
-      <template v-if="isFinished">
+      <!-- ══ 進行中／已結束：計分板 + 打線 + 投手 ═══════════════ -->
+      <template v-if="showScore">
         <section aria-labelledby="scoreboard-heading">
-          <h2 id="scoreboard-heading" class="mb-4 text-fluid-xl font-bold">計分板</h2>
+          <div class="mb-4 flex flex-wrap items-center gap-3">
+            <h2 id="scoreboard-heading" class="text-fluid-xl font-bold">計分板</h2>
+            <!-- 進行中的計分板是「目前為止」，不講清楚會被當成最終比數 -->
+            <span v-if="isLive" class="text-fluid-sm text-content-muted">
+              比賽進行中，逐局得分會隨著登錄更新。
+            </span>
+          </div>
 
           <GameScoreboard
             v-if="hasScoreboard"
@@ -232,7 +266,7 @@ useHead({
           <UiBaseEmpty
             v-else
             title="尚未登錄計分板"
-            description="比賽結果登錄後會顯示在這裡。"
+            :description="isLive ? '逐局得分登錄後會顯示在這裡。' : '比賽結果登錄後會顯示在這裡。'"
             icon="🔢"
           />
         </section>

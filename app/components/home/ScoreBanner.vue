@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import type { Game } from '#shared/schemas/game'
 import type { WeatherMap } from '#shared/schemas/weather'
-import { GAME_STATUS_LABELS, isNotPlayed } from '#shared/schemas/game'
+import { GAME_STATUS_LABELS, isLive, isNotPlayed } from '#shared/schemas/game'
 import { formatGameDate } from '~/utils/format'
 
 /**
- * 首頁主視覺下方的資訊帶：最新比數 ＋ 近期賽事。
+ * 首頁主視覺下方的資訊帶：比數 ＋ 近期賽事。
  *
  * ## 為什麼把這兩件事放在同一條帶子上
  * 球迷與隊員進官網最想知道的就是這兩件事：上一場打成怎樣、下一場什麼時候。
  * 把它們壓在主視覺下緣、用實心色塊撐住，等於在畫面第一屏就回答完 ——
  * 不需要捲動，也不需要點進任何頁面。
+ *
+ * ## 有比賽正在打的時候，這一格換成它
+ * 左邊那一格平常是「最新比數」（上一場的結果），但只要有場次被標記為
+ * 進行中，頁面上最值得佔住這個位置的就是那一場 —— 標題改成 LIVE NOW，
+ * 比數會隨著後台登錄而更新。頁面決定要給哪一場（見 `pages/index.vue`），
+ * 這個元件只負責把拿到的那一場畫對。
  *
  * ## 排列順序跟著主客場走
  * 比分左右兩側的球隊依 `homeAway` 決定：我隊是客場（先攻）就排左邊。
@@ -18,8 +24,11 @@ import { formatGameDate } from '~/utils/format'
  * 兩處若不一致，看得懂棒球的人一眼就會覺得怪。
  */
 const props = defineProps<{
-  /** 最近一場已結束的比賽。沒有比賽紀錄時傳 null。 */
-  lastGame: Game | null
+  /**
+   * 要顯示比數的那一場：正在打的優先，否則是最近一場已結束的。
+   * 兩種都沒有時傳 null。
+   */
+  scoreGame: Game | null
   /** 接下來的場次，最多顯示三場。 */
   upcoming: Game[]
   /** 比賽 id → 天氣。查不到的場次不會有這一筆，小卡就不顯示溫度。 */
@@ -30,7 +39,7 @@ const props = defineProps<{
 
 /** 比分兩側的球隊。客場（先攻）時我隊在左。 */
 const sides = computed(() => {
-  const game = props.lastGame
+  const game = props.scoreGame
   if (!game) return null
 
   const ours = {
@@ -55,11 +64,14 @@ const sides = computed(() => {
  * 這種場次的計分板是空的，總分兩邊都是 0 —— 直接顯示就變成「0 0」，
  * 看起來像打完了而且是和局。必須把狀態寫出來，而不是讓比數代替它說話。
  */
-const notPlayed = computed(() => (props.lastGame ? isNotPlayed(props.lastGame) : false))
+const notPlayed = computed(() => (props.scoreGame ? isNotPlayed(props.scoreGame) : false))
+
+/** 正在打的場次要把標題整個換掉，不能只是多一個標籤。 */
+const live = computed(() => (props.scoreGame ? isLive(props.scoreGame) : false))
 
 /** 延賽是「出事了」，取消則是中性的結束 —— 與後台列表用同一套語彙。 */
 const statusTone = computed(() =>
-  props.lastGame?.status === 'postponed' ? ('warning' as const) : ('neutral' as const),
+  props.scoreGame?.status === 'postponed' ? ('warning' as const) : ('neutral' as const),
 )
 
 const nextGames = computed(() => props.upcoming.slice(0, 3))
@@ -79,7 +91,7 @@ const columnsClass = computed(() => {
 </script>
 
 <template>
-  <section class="bg-ink text-white" aria-label="最新比數與近期賽事">
+  <section class="bg-ink text-white" aria-label="比數與近期賽事">
     <!--
       明確寫出 `grid-cols-1`：沒有指定 grid-template-columns 時，隱含欄位的寬度是
       `auto`，會被內容的 max-content 撐開而溢出容器。Tailwind 的 grid-cols-* 產生的
@@ -87,24 +99,30 @@ const columnsClass = computed(() => {
     -->
     <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <!--
-        ══ 最新比數 ══
+        ══ 比數（正在打的優先，否則是上一場的結果）══
         `min-w-0` 不能省：grid item 的 min-width 預設是 `auto`，內容比軌道寬時
         item 會直接溢出軌道 —— 軌道用 `minmax(0, 1fr)` 只約束軌道自己，管不到 item。
       -->
       <div class="flex min-w-0 flex-col justify-center gap-5 px-5 py-8 md:px-10">
-        <template v-if="lastGame && sides">
+        <template v-if="scoreGame && sides">
           <!--
             手機上「隊徽 比分 標題 比分 隊徽」五個元素排成一行會超出 390px，
             所以標題與日期在小螢幕改放到上方，下面那行只留隊徽與比分。
             桌機維持單行，標題夾在兩個比分中間（與參考版面一致）。
           -->
           <div class="text-center sm:hidden">
-            <p class="text-fluid-sm font-bold tracking-widest">LAST SCORE</p>
-            <p class="text-xs text-white/70">最新比數</p>
+            <!--
+              手機上標題整塊被移到比分上方，桌機那個夾在比分中間的 LIVE 標籤
+              因此不會顯示 —— 直接把它放在這裡，而不是退回一行紅色的字：
+              會動的點才是「此刻」的訊號。
+            -->
+            <GameLiveBadge v-if="live" size="sm" />
+            <p v-else class="text-fluid-sm font-bold tracking-widest">LAST SCORE</p>
+            <p class="text-xs text-white/70">{{ live ? '即時比數' : '最新比數' }}</p>
             <p class="mt-0.5 text-xs tabular-nums text-white/70">
-              {{ formatGameDate(lastGame.date) }}
+              {{ formatGameDate(scoreGame.date) }}
               <span class="ml-1 underline decoration-white/40 underline-offset-4">
-                {{ lastGame.time }}
+                {{ scoreGame.time }}
               </span>
             </p>
           </div>
@@ -151,18 +169,25 @@ const columnsClass = computed(() => {
               -->
               <div class="text-center" :class="notPlayed ? '' : 'hidden sm:block'">
                 <div class="hidden sm:block">
-                  <p class="text-fluid-lg font-bold tracking-widest">LAST SCORE</p>
-                  <p class="text-fluid-sm text-white/70">最新比數</p>
+                  <p
+                    class="text-fluid-lg font-bold tracking-widest"
+                    :class="live ? 'text-danger' : ''"
+                  >
+                    {{ live ? 'LIVE NOW' : 'LAST SCORE' }}
+                  </p>
+                  <p class="text-fluid-sm text-white/70">{{ live ? '即時比數' : '最新比數' }}</p>
                   <p class="mt-1 text-fluid-sm tabular-nums text-white/70">
-                    {{ formatGameDate(lastGame.date) }}
+                    {{ formatGameDate(scoreGame.date) }}
                     <span class="ml-1 underline decoration-white/40 underline-offset-4">
-                      {{ lastGame.time }}
+                      {{ scoreGame.time }}
                     </span>
                   </p>
                 </div>
 
-                <UiBaseBadge v-if="notPlayed" :tone="statusTone" class="sm:mt-2">
-                  {{ GAME_STATUS_LABELS[lastGame.status] }}
+                <!-- 那顆會呼吸的點是「此刻」的訊號，靜止的紅字讀不出來 -->
+                <GameLiveBadge v-if="live" class="mt-1 sm:mt-2" />
+                <UiBaseBadge v-else-if="notPlayed" :tone="statusTone" class="sm:mt-2">
+                  {{ GAME_STATUS_LABELS[scoreGame.status] }}
                 </UiBaseBadge>
               </div>
 
@@ -193,8 +218,9 @@ const columnsClass = computed(() => {
 
           <!-- 按鈕跨滿整個左區：對齊上方的比分區塊，形成一個完整的色塊單位 -->
           <NuxtLink
-            :to="`/games/${lastGame.id}`"
-            class="flex min-h-12 w-full items-center justify-center bg-brand-600 px-6 font-bold tracking-wider transition hover:bg-brand-500"
+            :to="`/games/${scoreGame.id}`"
+            class="flex min-h-12 w-full items-center justify-center px-6 font-bold tracking-wider transition"
+            :class="live ? 'bg-danger hover:brightness-110' : 'bg-brand-600 hover:bg-brand-500'"
           >
             賽事<span class="ml-1 font-normal">詳情</span>
           </NuxtLink>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Scoreboard } from '#shared/schemas/game'
-import { emptyScoreboard, sumInnings } from '#shared/schemas/game'
+import { emptyScoreboard, sumInnings, withSummedRuns } from '#shared/schemas/game'
 import { LOW_CONFIDENCE_THRESHOLD } from '#shared/schemas/ai'
 import { ApiError } from '~/utils/api-error'
 
@@ -17,6 +17,12 @@ import { ApiError } from '~/utils/api-error'
  * ## 空格與 0 的差別
  * 欄位留空代表「該半局沒有進行」（顯示為 X），輸入 0 代表「打了但沒得分」。
  * 這在計分板上是兩件完全不同的事，所以輸入介面也保留這個區別。
+ *
+ * ## R 不能輸入
+ * 總得分一律是逐局加總（`withSummedRuns()`），所以它是一格唯讀的數字而不是
+ * 輸入框。這裡曾經有一顆「用逐局加總填入 R」的按鈕 —— 那等於把「保持一致」
+ * 外包給使用者記得按，沒按的下場是逐局 3:1、R 欄 0:0，而前台的比數、勝敗、
+ * 戰績全部讀 R。H／E 沒有逐局欄位可以加總，所以維持人工輸入。
  */
 const props = defineProps<{
   ourName: string
@@ -35,33 +41,45 @@ const aiConfidence = ref<number | null>(null)
 
 const innings = computed(() => model.value.innings)
 
-const sums = computed(() => sumInnings(model.value))
-const mismatch = computed(
-  () =>
-    sums.value.our !== model.value.totals.our.r ||
-    sums.value.opponent !== model.value.totals.opponent.r,
-)
+/**
+ * 畫面上顯示的 R。
+ *
+ * 直接算逐局加總而不是讀 `model.totals`：載入的資料如果是這條規則之前寫進去的，
+ * 兩者可能對不上，而這一格要顯示的是**現在這張表算出來的數字**。
+ */
+const runs = computed(() => sumInnings(model.value))
+
+/**
+ * 所有改動都經過這裡，順手把 R 對齊逐局。
+ *
+ * 不這麼做的話，`model` 裡的 R 會停在舊值 —— 畫面上的 R 是算出來的（看起來
+ * 沒問題），送出去的卻是舊的那一個。repository 也會再保證一次，但那是為了
+ * AI 與批次匯入等其他入口；表單自己送出的內容本來就該是對的。
+ */
+function update(next: Scoreboard) {
+  model.value = withSummedRuns(next)
+}
 
 function ensureBoard() {
   if (model.value.innings.length === 0) {
-    model.value = emptyScoreboard(7)
+    update(emptyScoreboard(7))
   }
 }
 
 function addInning() {
   if (model.value.innings.length >= 20) return
-  model.value = {
+  update({
     ...model.value,
     innings: [
       ...model.value.innings,
       { inning: model.value.innings.length + 1, our: null, opponent: null },
     ],
-  }
+  })
 }
 
 function removeInning() {
   if (model.value.innings.length <= 1) return
-  model.value = { ...model.value, innings: model.value.innings.slice(0, -1) }
+  update({ ...model.value, innings: model.value.innings.slice(0, -1) })
 }
 
 /** 空字串 → null（該半局沒打）；其餘轉成 0～99 的整數。 */
@@ -71,26 +89,16 @@ function setScore(index: number, side: 'our' | 'opponent', raw: string) {
   const inning = next[index]
   if (!inning) return
   next[index] = { ...inning, [side]: Number.isNaN(value) ? null : value }
-  model.value = { ...model.value, innings: next }
+  update({ ...model.value, innings: next })
 }
 
-function setTotal(side: 'our' | 'opponent', field: 'r' | 'h' | 'e', raw: string) {
+/** 只有 H／E 需要它 —— R 是加總出來的，沒有對應的輸入框。 */
+function setTotal(side: 'our' | 'opponent', field: 'h' | 'e', raw: string) {
   const value = Math.min(Math.max(Math.round(Number(raw) || 0), 0), 999)
-  model.value = {
+  update({
     ...model.value,
     totals: { ...model.value.totals, [side]: { ...model.value.totals[side], [field]: value } },
-  }
-}
-
-/** 把逐局加總寫進 R。手動輸入完之後按一下就好，不必自己加。 */
-function applySums() {
-  model.value = {
-    ...model.value,
-    totals: {
-      our: { ...model.value.totals.our, r: sums.value.our },
-      opponent: { ...model.value.totals.opponent, r: sums.value.opponent },
-    },
-  }
+  })
 }
 
 async function handleFile(event: Event) {
@@ -105,10 +113,14 @@ async function handleFile(event: Event) {
   try {
     const result = await parseScoreboard(file, props.teamNames)
 
-    model.value = {
+    /*
+     * AI 讀到的 R 不採用：R 一律是逐局加總。模型讀錯一格逐局得分時，
+     * 兩者本來就會對不上，而伺服器端已經在 `warnings` 裡把這件事講出來。
+     */
+    update({
       innings: result.innings.length ? result.innings : model.value.innings,
       totals: result.totals,
-    }
+    })
     aiWarnings.value = result.warnings
     aiConfidence.value = result.confidence
     aiMessage.value = result.opponentName
@@ -131,7 +143,7 @@ async function handleFile(event: Event) {
         <div class="min-w-0 flex-1">
           <p class="font-medium">用照片自動填入</p>
           <p class="mt-0.5 text-fluid-sm text-content-muted">
-            上傳計分板照片，系統會讀出逐局得分與 R／H／E 填進下方欄位，儲存前仍可修改。
+            上傳計分板照片，系統會讀出逐局得分與 H／E 填進下方欄位，儲存前仍可修改。
           </p>
         </div>
         <UiBaseButton :loading="aiLoading" @click="fileInput?.click()">
@@ -207,15 +219,13 @@ async function handleFile(event: Event) {
                 />
               </td>
 
-              <td class="border-l border-border px-1 py-1.5">
-                <input
-                  :value="model.totals[side].r"
-                  type="number"
-                  min="0"
-                  :aria-label="`${side === 'our' ? ourName : opponentName} 總得分`"
-                  class="h-10 w-14 rounded-lg border border-border bg-surface text-center font-bold tabular-nums"
-                  @input="setTotal(side, 'r', ($event.target as HTMLInputElement).value)"
-                />
+              <!-- R 是逐局加總，不是輸入框：兩個來源就會有對不上的一天 -->
+              <td class="border-l border-border bg-surface-muted px-1 py-1.5">
+                <span
+                  class="inline-flex h-10 w-14 items-center justify-center font-bold tabular-nums"
+                >
+                  {{ runs[side] }}
+                </span>
               </td>
               <td class="px-1 py-1.5">
                 <input
@@ -245,18 +255,11 @@ async function handleFile(event: Event) {
       <div class="flex flex-wrap items-center gap-2">
         <UiBaseButton variant="secondary" size="sm" @click="addInning">＋ 延長一局</UiBaseButton>
         <UiBaseButton variant="ghost" size="sm" @click="removeInning">－ 減少一局</UiBaseButton>
-        <UiBaseButton variant="ghost" size="sm" @click="applySums">
-          用逐局加總填入 R（{{ sums.our }} : {{ sums.opponent }}）
-        </UiBaseButton>
       </div>
-
-      <p v-if="mismatch" class="rounded-lg bg-warning/15 px-3 py-2 text-fluid-sm text-warning">
-        逐局加總（{{ sums.our }} : {{ sums.opponent }}）與總分 R（{{ model.totals.our.r }} :
-        {{ model.totals.opponent.r }}）不一致。若是因為沒有逐局紀錄可以忽略，否則請修正。
-      </p>
 
       <p class="text-xs text-content-muted">
         提示：欄位留空代表該半局沒有進行（顯示為 X），輸入 0 代表打了但沒有得分。
+        R（總得分）由逐局自動加總，不需要也不能手動填。
       </p>
     </template>
   </div>

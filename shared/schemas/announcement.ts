@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { patchSchemaOf } from './common'
 import { attachmentSchema, MAX_ATTACHMENTS } from './attachment'
 
 /**
@@ -69,7 +70,7 @@ export type AnnouncementInput = z.input<typeof announcementInputSchema>
 /** 表單狀態用（所有欄位都已套用預設值）。理由見 `settings.ts` 的 `SiteSettingsForm`。 */
 export type AnnouncementForm = z.output<typeof announcementInputSchema>
 
-export const announcementPatchSchema = announcementInputSchema.partial()
+export const announcementPatchSchema = patchSchemaOf(announcementInputSchema)
 export type AnnouncementPatch = z.input<typeof announcementPatchSchema>
 
 export const announcementSchema = announcementInputSchema.extend({
