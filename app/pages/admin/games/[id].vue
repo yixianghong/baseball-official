@@ -266,6 +266,10 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         back-label="回到賽事列表"
       >
         <template #actions>
+          <!-- 錄影是在球場邊用手機開的，所以那是一個獨立的、深底大按鈕的頁面 -->
+          <UiBaseButton variant="ghost" @click="navigateTo(`/admin/record/${game.id}`)">
+            📹 錄影
+          </UiBaseButton>
           <UiBaseButton variant="ghost" @click="navigateTo(`/games/${game.id}`)">
             前台預覽
           </UiBaseButton>

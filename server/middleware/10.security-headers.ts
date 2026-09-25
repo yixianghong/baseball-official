@@ -82,8 +82,20 @@ export default defineEventHandler((event) => {
     // 跨站導覽時只送出來源網域，不洩漏完整路徑與 query（可能含敏感參數）
     'Referrer-Policy': 'strict-origin-when-cross-origin',
 
-    // 預設關閉高風險裝置權限。專案若需要相機或定位再逐項開啟。
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+    /*
+     * 裝置權限一律關閉，只放行真的用得到的。
+     *
+     * `camera` 與 `microphone` 開給**自己**（`self`）是為了後台的球賽錄影頁
+     * （`/admin/record/[id]`，見 `docs/game-recording-plan.md`）。
+     *
+     * ⚠️ 這個標頭關著的時候，`getUserMedia()` 會直接失敗，而且**錯誤訊息
+     * 完全不會提到 Permissions-Policy** —— 看起來就像使用者拒絕了權限，
+     * 或是相機壞掉。要改相機相關的功能時，先確認這一行。
+     *
+     * 只給 `self` 而不是 `*`：本站禁止被嵌入 iframe（`frame-ancestors 'none'`），
+     * 所以沒有任何第三方情境需要這兩項權限。
+     */
+    'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()',
 
     // 跨來源隔離：限制其他網站對本站資源的讀取與參照
     'Cross-Origin-Opener-Policy': 'same-origin',

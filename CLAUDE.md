@@ -292,6 +292,47 @@ H／E 沒有逐局欄位可以加總，所以維持人工輸入。
 附件不壓縮（圖片欄位會壓）：使用者附上的那一份就是他要的那一份。
 單檔上限 6MB，對應 `maxUploadBytes` 的 8MB 扣掉 base64 的 33% 膨脹。
 
+### 球賽錄影（階段 1）
+
+規格在 `docs/game-recording-plan.md`。後台 `/admin/record/[id]` 用瀏覽器原生的
+`getUserMedia()` + `MediaRecorder` **每半局錄一段**（攻守交換就是天然的切點），
+目前只存到手機、還不上傳。錄完自動推進到下一個半局（`nextHalf()`）——
+場邊的人兩隻手都在忙，一場要按十四次，不該還要手動選局數。
+
+**⚠️ `Permissions-Policy` 是第一個會擋死相機的東西。**
+`10.security-headers.ts` 現在送的是 `camera=(self), microphone=(self)`。
+關著的時候 `getUserMedia()` 會直接失敗，而且**錯誤訊息完全不會提到這個標頭** ——
+看起來就像使用者拒絕了權限或相機壞掉。`tests/e2e/bff.test.ts` 守著這一行。
+
+**分段而不是一次錄完整場**：手機瀏覽器分頁一進背景 `MediaRecorder` 就會停，
+分段代表最壞只損失半局。`recorder.start(5_000)` 的 timeslice 是同一個理由。
+
+**⚠️ 影片片段存 `top`／`bottom`，計分板存 `our`／`opponent`** —— 看起來矛盾，
+但記的是不同的事實：分數天生屬於某一隊（上下半局由 `homeAway` 推導），
+而「這段拍的是哪半局」是拍攝當下的物理事實。`homeAway` 填錯又改回來時，
+計分板會跟著修正、影片標籤不會 —— 兩個都正確。誰在打擊由
+`battingSide(half, homeAway)` 推導（客隊先攻）。理由寫在 `gameHalfSchema` 上。
+
+**`stop()` 一定要等 `onstop` 才能組 Blob** —— 最後一塊資料是在 `stop()` 回來**之後**
+才透過 `ondataavailable` 送到的，提早組會讓每一局都少掉最後幾秒，而且錄的當下
+完全看不出來。
+
+**mp4 一定要排在 webm 前面**（`app/utils/recording.ts` 的 `MIME_CANDIDATES`）：
+Safari 只錄得出 mp4，Chrome 兩種都行。順序反過來 Android 會錄成 webm，
+而 **webm 在 iPhone 上完全播不動** —— 錄的人看不出異常，一半的家屬打開是黑的。
+
+**檔名要排得出比賽順序**：局數補零（第 10 局不會排在第 2 局前面），
+上下半靠「上」(U+4E0A) 的碼位小於「下」(U+4E0B) —— 換成別的字會壞掉，
+`tests/unit/recording.test.ts` 守著這個巧合。
+
+**`deviceId` 每次重新取得權限都會變**，不能記住上次選的鏡頭；而且要先
+`getUserMedia()` 拿到權限，`enumerateDevices()` 的 `label` 才不是空字串 ——
+沒有 label 就分不出哪顆是超廣角。
+
+判斷邏輯全在 `app/utils/recording.ts`（純函式、測得到），有狀態的那一半在
+`app/composables/useGameRecorder.ts`。**相機本身只能用實機驗證**，
+macOS 的無頭 Chrome 取不到相機。
+
 ### 分享出賽名單（`app/composables/useShareRoster.ts`）
 
 把圖卡畫成 PNG 用 `modern-screenshot`，**點下去才動態 import**（它有二十幾 KB，

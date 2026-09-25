@@ -56,6 +56,39 @@ export const GAME_EXCEPTION_STATUSES = ['postponed', 'canceled'] as const
 export const homeAwaySchema = z.enum(['home', 'away'])
 export type HomeAway = z.infer<typeof homeAwaySchema>
 
+/**
+ * 上半局／下半局。
+ *
+ * ## 為什麼這裡存 `top`／`bottom`，而計分板存 `our`／`opponent`
+ * 看起來矛盾，但兩者記的是不同的事實：
+ *
+ * - 計分板記的是「**我隊**這局得幾分」——「幾分」天生屬於某一隊，
+ *   上下半局是由 `homeAway` 推導出來的呈現方式（見 `scoreboardSchema`）。
+ * - 錄影片段記的是「這段影片拍的是**第幾局的哪半局**」——那是拍攝當下的
+ *   物理事實，和誰在打擊無關。
+ *
+ * 這個差別在 `homeAway` 填錯又改回來的時候才看得出來：存 `our`／`opponent`
+ * 的計分板會跟著修正（正確），而存 `top`／`bottom` 的影片標籤不會跟著變
+ * （也正確 —— 你當時拍的就是上半局）。反過來存的話兩邊都會錯。
+ */
+export const gameHalfSchema = z.enum(['top', 'bottom'])
+export type GameHalf = z.infer<typeof gameHalfSchema>
+
+export const HALF_LABELS: Record<GameHalf, string> = {
+  top: '上',
+  bottom: '下',
+}
+
+/**
+ * 這半局是哪一隊在打擊。**客隊先攻**，所以上半局打擊的是客隊。
+ *
+ * 前台與後台都要講得出「第 3 局上」是誰在攻 —— 在球場邊按錄影按鈕的人
+ * 看的是場上，而不是記得自己是主場還是客場。
+ */
+export function battingSide(half: GameHalf, homeAway: HomeAway): 'our' | 'opponent' {
+  return (half === 'top') === (homeAway === 'away') ? 'our' : 'opponent'
+}
+
 /** 出席狀態。`pending` 是「還沒回覆」，與明確回答「不出席」不同。 */
 export const attendanceStatusSchema = z.enum(['yes', 'no', 'maybe', 'pending'])
 export type AttendanceStatus = z.infer<typeof attendanceStatusSchema>

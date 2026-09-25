@@ -220,6 +220,24 @@ describe('資安標頭', () => {
     expect(csp).toContain("connect-src 'self'")
   })
 
+  /**
+   * 相機權限。
+   *
+   * 後台的球賽錄影頁（`/admin/record/[id]`）要用 `getUserMedia()`，而
+   * `Permissions-Policy` 關著的時候它會直接失敗 —— **錯誤訊息完全不會提到
+   * 這個標頭**，看起來就像使用者拒絕了權限或相機壞掉。這條守著它別被改回去。
+   */
+  it('相機與麥克風只開放給本站自己', async () => {
+    const response = await fetch('/')
+    const policy = response.headers.get('permissions-policy') ?? ''
+
+    expect(policy).toContain('camera=(self)')
+    expect(policy).toContain('microphone=(self)')
+    // 用不到的權限仍然一律關閉
+    expect(policy).toContain('geolocation=()')
+    expect(policy).toContain('payment=()')
+  })
+
   it('不洩漏技術棧資訊', async () => {
     const response = await fetch('/api/health')
     expect(response.headers.get('x-powered-by')).toBeFalsy()
