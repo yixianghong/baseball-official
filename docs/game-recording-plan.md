@@ -108,9 +108,22 @@ export const gameClipSchema = z.object({
 
 ## 7. Nuxt 前端注意事項
 
-- **錄影頁是獨立路由 `app/pages/admin/record/[id].vue`，不是 `[id].vue` 的分頁。**
+- **錄影頁是獨立路由 `app/pages/admin/record/[id].vue`，而且 `layout: false`。**
   這是在球場邊、單手、太陽底下操作的畫面：大按鈕、深色、不要後台側欄。
   放在 `/admin/record/` 底下也避開與 `pages/admin/games/[id].vue` 的路由衝突。
+- **橫向是主要的使用姿勢**（拍球場要最寬的畫面），而且需要**另一套版面**。
+  實測：直向的垂直堆疊總高 855px，橫向的可用高度只有 320px 上下
+  （iPhone 橫向 390 再扣掉 Safari 的上下列）—— 照搬過去的話錄影鈕會在畫面外
+  459px，等於要一邊端著手機對準球場一邊捲頁面。
+  用 Tailwind 的 `landscape:` variant 切成兩欄：預覽靠**高度**撐滿在左邊
+  （橫向不能再用 `w-full`，16:9 會算出比視窗還高的高度），控制項收成右邊一欄，
+  **錄影鈕放在捲動區外面**，永遠看得到。
+- **高度用 `dvh` 不用 `vh`**：`100vh` 含會收起的工具列，橫向只有 320px 還跟著跳。
+- **左右要留 `env(safe-area-inset-left/right)`**：橫向時瀏海吃的是側邊而不是下緣。
+  （`viewport-fit=cover` 已經設在 `nuxt.config.ts`，直向時這兩個值是 0。）
+- **不能用程式鎖定方向**：`screen.orientation.lock()` 要先進全螢幕，而 iPhone 對
+  非 video 元素的 Fullscreen API 長期不支援（Safari 17.2／17.4 才開始出現）。
+  只能用 CSS 回應方向，並在直向時提示「轉成橫的」。全螢幕留作日後的漸進增強。
 - 相機邏輯集中在 `app/composables/useGameRecorder.ts`，頁面只負責畫面。
 - **必須 HTTPS**：`getUserMedia()` 在非安全來源一律失敗。手機連本機 dev server
   要用 tunnel 或 `--https`，`localhost` 不適用（手機連的是區網 IP）。
@@ -120,6 +133,12 @@ export const gameClipSchema = z.object({
   所以這個問題只影響「下載到手機」的階段 1。）
 - **deviceId 每次都會變**，不能存「上次選的鏡頭」，每場都要重挑。
   而且要先 `getUserMedia()` 拿到權限，`enumerateDevices()` 才看得到鏡頭 label。
+- **⚠️ 畫面是橫的，錄出來可能是直的。** 各家瀏覽器對「裝置轉動時 video track
+  的寬高要不要跟著交換」處理並不一致，所以會發生**預覽看起來好好的、存下來卻是
+  1080×1920** 的情況 —— 在球場上完全看不出來，回家打開才發現一整場都是直的。
+  修不了（那是瀏覽器的行為），但偵測得到：`track.getSettings()` 的
+  `width < height` 就是直的，此時在預覽上壓一條紅色警告。注意 `getSettings()`
+  **不是響應式的**，轉動時要自己重讀（見 `useGameRecorder` 的 `settingsVersion`）。
 - Wake Lock API 防螢幕休眠，並在 UI 明確提示「請勿切換 App 或鎖定螢幕」。
 - 前台**預設只渲染縮圖**（`https://i.ytimg.com/vi/<id>/hqdefault.jpg`），
   點擊才換成 iframe —— 七個 iframe 會把手機拖垮。現有的 CSP `img-src` 已含 `https:`。
@@ -163,6 +182,7 @@ apphosting.yaml」時選 **No**（理由見該檔案的註解）。
 - [x] 放寬 `Permissions-Policy`
 - [x] 錄影頁：列鏡頭、選鏡頭、1080p 預覽、上下半局選擇、開始／結束、
       **錄完直接下載到手機**
+- [x] 橫向專屬版面（兩欄、不捲動）、直式影像警告、`dvh` 與左右安全區
 - [ ] 驗收：iPhone 與 Android 各錄一個完整半局（6～8 分），確認畫面範圍、檔案大小、
       格式、**中途沒有換鏡頭**、手機沒有過熱降頻
 

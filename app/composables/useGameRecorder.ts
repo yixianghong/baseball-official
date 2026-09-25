@@ -126,13 +126,43 @@ export function useGameRecorder() {
     }
   }
 
+  /**
+   * 轉動裝置時重新讀一次 track 設定。
+   *
+   * `getSettings()` **不是響應式的**，而手機轉向時影像的寬高可能會交換 ——
+   * 不自己重算的話，畫面上會一直顯示剛開啟鏡頭那一刻的數字。
+   */
+  const settingsVersion = ref(0)
+
+  const videoSettings = computed(() => {
+    void settingsVersion.value
+    return stream.value?.getVideoTracks()[0]?.getSettings() ?? null
+  })
+
   /** 目前實際拿到的解析度。挑完鏡頭要讓使用者看到「真的是 1920×1080 嗎」。 */
   const resolution = computed(() => {
-    const track = stream.value?.getVideoTracks()[0]
-    if (!track) return ''
-    const { width, height } = track.getSettings()
+    const { width, height } = videoSettings.value ?? {}
     return width && height ? `${width}×${height}` : ''
   })
+
+  /**
+   * **錄出來的影像是直的**（寬 < 高）。
+   *
+   * ⚠️ 這和畫面的方向是兩回事。各家瀏覽器對「裝置轉動時 video track 的寬高
+   * 要不要跟著交換」處理並不一致，所以會發生**預覽看起來是橫的、存下來的檔案
+   * 卻是 1080×1920** 的情況 —— 而這件事在球場上完全看不出來，回家打開才發現
+   * 一整場都是直的。
+   *
+   * 修不了它（那是瀏覽器的行為），但偵測得到。偵測到就大聲講。
+   */
+  const portraitVideo = computed(() => {
+    const { width, height } = videoSettings.value ?? {}
+    return Boolean(width && height && width < height)
+  })
+
+  function onOrientationChange() {
+    settingsVersion.value += 1
+  }
 
   function start(): boolean {
     if (recording.value || !stream.value || !mimeType.value) return false
@@ -234,10 +264,17 @@ export function useGameRecorder() {
     }
   }
 
-  onMounted(() => document.addEventListener('visibilitychange', onVisibilityChange))
+  onMounted(() => {
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    // resize 與 orientationchange 都要聽：桌機只有前者，手機兩者的時機不一定同步
+    window.addEventListener('resize', onOrientationChange)
+    window.addEventListener('orientationchange', onOrientationChange)
+  })
 
   onBeforeUnmount(() => {
     document.removeEventListener('visibilitychange', onVisibilityChange)
+    window.removeEventListener('resize', onOrientationChange)
+    window.removeEventListener('orientationchange', onOrientationChange)
     stopTimer()
     // 離開頁面時相機一定要關掉，否則鏡頭旁的指示燈會一直亮著
     closeStream()
@@ -255,6 +292,7 @@ export function useGameRecorder() {
     supported,
     initializing,
     resolution,
+    portraitVideo,
     init,
     openCamera,
     start,

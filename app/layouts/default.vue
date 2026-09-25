@@ -342,6 +342,27 @@ useHead({
         <p class="text-center text-fluid-sm text-white/60">
           © {{ new Date().getFullYear() }} {{ teamName }}
         </p>
+
+        <!--
+          後台入口。
+
+          ⚠️ **這裡刻意不加 `v-if="isLoggedIn"`。** 導覽列那兩個入口都是登入後
+          才出現的，而在 PWA（`display: standalone`）裡沒有網址列可以手動打
+          `/admin` —— 結果是「要先登入才看得到登入的入口」，管理者被鎖在外面。
+          加入主畫面之後唯一的進入方式就是這個連結。
+
+          它對 CDN 快取是安全的：所有訪客拿到的 HTML 完全一樣，不依賴任何
+          個人狀態（見「部署」章節）。權限檢查本來就在 BFF 的 `requireUser()`，
+          畫面上藏一個連結從來就不是防線。
+        -->
+        <p class="mt-3 text-center">
+          <NuxtLink
+            to="/admin"
+            class="text-xs text-white/40 underline underline-offset-4 transition hover:text-white/70"
+          >
+            後台管理
+          </NuxtLink>
+        </p>
       </div>
     </footer>
   </div>

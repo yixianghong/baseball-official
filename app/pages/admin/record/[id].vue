@@ -7,10 +7,28 @@ import { formatGameDateLong } from '~/utils/format'
 /**
  * 球場邊的錄影頁（階段 1，見 `docs/game-recording-plan.md`）。
  *
- * ## 為什麼是獨立路由而不是編輯頁的一個分頁
+ * ## 為什麼是獨立路由、而且連 layout 都不掛
  * 這是在太陽底下、單手、戴著手套的旁邊操作的畫面。它需要的是深底、大按鈕、
  * 一眼看得到的狀態 —— 和後台那個有側欄、有四個分頁、密密麻麻的表單是兩種東西。
+ * `layout: false` 而不是 `blank`：那個 layout 會再包一層淺色的滿版容器，
+ * 對這一頁只是多一層要覆蓋掉的東西。
  * 放在 `/admin/record/` 底下也避開了與 `pages/admin/games/[id].vue` 的路由衝突。
+ *
+ * ## 橫向是主要的使用姿勢
+ * 拍球場要的是最寬的畫面，所以人會把手機轉橫。但橫向的可用高度只有 320px 上下
+ * （iPhone 橫向 390 再扣掉 Safari 的上下列），而直向的版面疊起來有 855px ——
+ * 照搬過去的話錄影鈕會在畫面外 400 多 px，你得一邊端著手機對準球場一邊捲頁面。
+ * 所以橫向是**另一套版面**（`landscape:` variant）：預覽靠高度撐滿在左邊，
+ * 控制項收成右邊一欄，而且錄影鈕永遠不參與捲動。
+ *
+ * 不能用程式鎖定方向：`screen.orientation.lock()` 要先進全螢幕，而 iPhone 對
+ * 非 video 元素的 Fullscreen API 長期不支援。只能用 CSS 回應，並在直向時提示。
+ *
+ * ## 高度用 `dvh`、左右要留安全區
+ * 手機瀏覽器的 `100vh` 含**會收起的**工具列，橫向本來就只有 320px 上下，
+ * 再跟著工具列跳動就沒得用了。而橫向時瀏海吃的是**側邊**而不是下緣，
+ * 所以這一頁留的是 `safe-area-inset-left/right`（`viewport-fit=cover` 已在
+ * `nuxt.config.ts` 設好，直向時這兩個值是 0，不影響）。
  *
  * ## 這一階段刻意不上傳
  * 錄完直接存到手機。先用一場真的比賽回答「超廣角選不選得到、檔案多大、
@@ -21,7 +39,7 @@ import { formatGameDateLong } from '~/utils/format'
  * 常常忽略 `download` 屬性，直接開在新分頁裡；而系統分享選單可以存進
  * 「照片」或「檔案」。所以優先用分享，沒有才退回下載。
  */
-definePageMeta({ layout: 'blank', middleware: 'auth' })
+definePageMeta({ layout: false, middleware: 'auth' })
 
 const route = useRoute()
 const gameId = computed(() => String(route.params.id))
@@ -182,51 +200,47 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
 </script>
 
 <template>
-  <div class="min-h-screen bg-ink-deep text-white">
-    <div class="mx-auto max-w-2xl px-4 py-5">
-      <UiBaseEmpty v-if="loadError" title="找不到這場比賽" icon="🔍">
-        <UiBaseButton variant="secondary" @click="navigateTo('/admin/games')">
-          回到賽事列表
-        </UiBaseButton>
-      </UiBaseEmpty>
+  <div
+    class="min-h-dvh bg-ink-deep text-white"
+    style="padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right)"
+  >
+    <UiBaseEmpty v-if="loadError" title="找不到這場比賽" icon="🔍" class="px-4 py-10">
+      <UiBaseButton variant="secondary" @click="navigateTo('/admin/games')">
+        回到賽事列表
+      </UiBaseButton>
+    </UiBaseEmpty>
 
-      <template v-else-if="game">
-        <!-- ══ 標題列 ══════════════════════════════════════════ -->
-        <div class="mb-4 flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <h1 class="truncate text-fluid-lg font-bold">{{ teamName }} vs {{ game.opponent }}</h1>
-            <p class="text-fluid-sm text-white/60">{{ formatGameDateLong(game.date) }}</p>
-          </div>
-          <NuxtLink
-            :to="`/admin/games/${game.id}`"
-            class="shrink-0 text-fluid-sm text-white/60 underline underline-offset-4"
+    <!--
+      直向：由上往下堆，頁面可以捲。
+      橫向：鎖成一個滿高的兩欄，左邊預覽、右邊控制，整頁不捲。
+    -->
+    <div
+      v-else-if="game"
+      class="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-5 landscape:h-dvh landscape:max-w-none landscape:flex-row landscape:gap-3 landscape:px-3 landscape:py-3"
+    >
+      <!-- ══ 不支援：橫向直向都一樣，佔滿就好 ══════════════════ -->
+      <div
+        v-if="!recorder.supported.value"
+        class="rounded-xl border border-warning/40 bg-warning/10 p-4 text-fluid-sm landscape:flex-1"
+      >
+        <p class="font-semibold">這個裝置不能在瀏覽器裡錄影</p>
+        <p class="mt-1 text-white/70">
+          {{ recorder.error.value || '請改用手機版 Safari 或 Chrome，並確認網址是 https。' }}
+        </p>
+      </div>
+
+      <template v-else>
+        <!-- ══ 左：預覽 ════════════════════════════════════════ -->
+        <div class="flex min-w-0 items-center justify-center landscape:h-full landscape:flex-1">
+          <!--
+            直向靠寬度決定尺寸，橫向靠高度 —— 橫向如果還用 `w-full`，
+            16:9 會算出 360px 高，比整個視窗還高。
+          -->
+          <div
+            class="relative aspect-video w-full overflow-hidden rounded-xl bg-black landscape:h-full landscape:w-auto landscape:max-w-full"
           >
-            離開
-          </NuxtLink>
-        </div>
-
-        <!-- ══ 不支援 ══════════════════════════════════════════ -->
-        <div
-          v-if="!recorder.supported.value"
-          class="rounded-xl border border-warning/40 bg-warning/10 p-4 text-fluid-sm"
-        >
-          <p class="font-semibold">這個裝置不能在瀏覽器裡錄影</p>
-          <p class="mt-1 text-white/70">
-            {{ recorder.error.value || '請改用手機版 Safari 或 Chrome，並確認網址是 https。' }}
-          </p>
-        </div>
-
-        <template v-else>
-          <!-- ══ 預覽 ════════════════════════════════════════ -->
-          <div class="relative overflow-hidden rounded-xl bg-black">
             <!-- muted 不能省：沒有它 autoplay 會被瀏覽器擋下，而且會產生回授嘯叫 -->
-            <video
-              ref="videoRef"
-              class="aspect-video w-full object-cover"
-              autoplay
-              muted
-              playsinline
-            />
+            <video ref="videoRef" class="size-full object-cover" autoplay muted playsinline />
 
             <!--
               權限對話框開著的時候 getUserMedia 會一直 pending，這一塊沒有的話
@@ -250,20 +264,62 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
               <span class="tabular-nums">{{ formatDuration(recorder.elapsedSeconds.value) }}</span>
             </div>
 
+            <!--
+              ⚠️ 錄出來是直的。
+
+              這和畫面方向是兩回事 —— 預覽可能看起來好好的，但存下來的檔案是
+              1080×1920。在球場上完全看不出來，回家打開才發現一整場都是直的，
+              所以這個警告要壓在畫面上、用紅底，不能只是一行小字。
+            -->
             <p
-              v-if="recorder.resolution.value"
+              v-if="recorder.portraitVideo.value"
+              class="absolute inset-x-3 bottom-3 rounded-lg bg-danger px-3 py-2 text-center text-fluid-sm font-bold"
+            >
+              影像是直的（{{ recorder.resolution.value }}）<br />
+              <span class="font-normal">把手機轉成橫的，或重新選一次鏡頭</span>
+            </p>
+            <p
+              v-else-if="recorder.resolution.value"
               class="absolute right-3 bottom-3 rounded bg-black/60 px-2 py-0.5 text-xs tabular-nums"
             >
               {{ recorder.resolution.value }}
             </p>
           </div>
+        </div>
 
-          <p v-if="recorder.error.value" class="mt-3 text-fluid-sm text-warning">
-            {{ recorder.error.value }}
-          </p>
+        <!-- ══ 右：控制項 ══════════════════════════════════════ -->
+        <div class="flex flex-col gap-3 landscape:h-full landscape:w-72 landscape:shrink-0">
+          <!--
+            控制項可以捲，但錄影鈕在捲動區外面 —— 端著手機對準球場的人
+            不可能一邊捲頁面一邊找按鈕。
+          -->
+          <div class="min-h-0 flex-1 space-y-3 landscape:overflow-y-auto">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h1 class="truncate text-fluid-lg font-bold">
+                  {{ teamName }} vs {{ game.opponent }}
+                </h1>
+                <p class="text-fluid-sm text-white/60 landscape:hidden">
+                  {{ formatGameDateLong(game.date) }}
+                </p>
+              </div>
+              <NuxtLink
+                :to="`/admin/games/${game.id}`"
+                class="shrink-0 text-fluid-sm text-white/60 underline underline-offset-4"
+              >
+                離開
+              </NuxtLink>
+            </div>
 
-          <!-- ══ 鏡頭與局數 ══════════════════════════════════ -->
-          <div class="mt-4 space-y-3">
+            <!-- 直向時提示轉橫。用 CSS 判斷而不是 JS —— 不會有 hydration 問題 -->
+            <p class="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70 landscape:hidden">
+              📱 把手機轉成橫的，拍到的畫面最廣。
+            </p>
+
+            <p v-if="recorder.error.value" class="text-fluid-sm text-warning">
+              {{ recorder.error.value }}
+            </p>
+
             <div>
               <label for="camera" class="mb-1 block text-fluid-sm text-white/70">鏡頭</label>
               <select
@@ -283,7 +339,9 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                 </option>
               </select>
               <!-- deviceId 每次都會變，所以不能記住上次的選擇，要講清楚 -->
-              <p class="mt-1 text-xs text-white/50">每次開啟都要重新挑一次，系統不會記住。</p>
+              <p class="mt-1 text-xs text-white/50 landscape:hidden">
+                每次開啟都要重新挑一次，系統不會記住。
+              </p>
             </div>
 
             <div>
@@ -294,7 +352,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                   :key="n"
                   type="button"
                   :disabled="recorder.recording.value"
-                  class="min-h-11 min-w-11 rounded-xl border px-3 font-bold tabular-nums transition disabled:opacity-40"
+                  class="min-h-11 min-w-11 flex-1 rounded-xl border px-3 font-bold tabular-nums transition disabled:opacity-40"
                   :class="
                     inning === n
                       ? 'border-accent-400 bg-accent-500 text-ink-deep'
@@ -340,10 +398,32 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                 {{ halfLabel }}：{{ batting }} 進攻
               </p>
             </div>
+
+            <!-- ══ 已錄片段 ════════════════════════════════════ -->
+            <div v-if="savedClips.length" class="landscape:hidden">
+              <h2 class="mb-2 text-fluid-sm font-semibold text-white/70">這一輪已錄</h2>
+              <ul class="space-y-1.5">
+                <li
+                  v-for="clip in savedClips"
+                  :key="`${clip.inning}-${clip.half}-${clip.filename}`"
+                  class="flex items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-fluid-sm"
+                >
+                  <span class="font-bold">
+                    第 {{ clip.inning }} 局{{ HALF_LABELS[clip.half] }}
+                  </span>
+                  <span class="tabular-nums text-white/70">
+                    {{ formatDuration(clip.seconds) }} · {{ formatBytes(clip.bytes) }}
+                  </span>
+                </li>
+              </ul>
+              <p class="mt-2 text-xs text-white/50">
+                影片已存到這台裝置。這份清單只在本頁有效，離開後不會保留。
+              </p>
+            </div>
           </div>
 
-          <!-- ══ 錄影按鈕 ════════════════════════════════════ -->
-          <div class="mt-5">
+          <!-- ══ 錄影鈕：永遠看得到，不參與捲動 ══════════════════ -->
+          <div class="shrink-0 space-y-2">
             <UiBaseButton
               v-if="!recorder.recording.value"
               class="min-h-14 w-full text-fluid-lg"
@@ -362,33 +442,21 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
               結束並儲存
             </UiBaseButton>
 
-            <p v-if="recorder.recording.value" class="mt-3 text-center text-fluid-sm text-warning">
-              ⚠️ 請勿切換 App 或鎖定螢幕，否則錄影會中斷。
+            <p v-if="recorder.recording.value" class="text-center text-fluid-sm text-warning">
+              ⚠️ 請勿切換 App 或鎖定螢幕
             </p>
-          </div>
 
-          <p v-if="saveMessage" class="mt-3 text-center text-fluid-sm">{{ saveMessage }}</p>
-
-          <!-- ══ 已錄片段 ════════════════════════════════════ -->
-          <div v-if="savedClips.length" class="mt-6">
-            <h2 class="mb-2 text-fluid-sm font-semibold text-white/70">這一輪已錄</h2>
-            <ul class="space-y-1.5">
-              <li
-                v-for="clip in savedClips"
-                :key="`${clip.inning}-${clip.filename}`"
-                class="flex items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-fluid-sm"
-              >
-                <span class="font-bold">第 {{ clip.inning }} 局{{ HALF_LABELS[clip.half] }}</span>
-                <span class="tabular-nums text-white/70">
-                  {{ formatDuration(clip.seconds) }} · {{ formatBytes(clip.bytes) }}
-                </span>
-              </li>
-            </ul>
-            <p class="mt-2 text-xs text-white/50">
-              影片已存到這台裝置。這份清單只在本頁有效，離開後不會保留。
+            <!-- 橫向沒空間列完整清單，收成一個數字就夠 -->
+            <p
+              v-else-if="savedClips.length"
+              class="hidden text-center text-xs text-white/50 landscape:block"
+            >
+              這一輪已錄 {{ savedClips.length }} 段
             </p>
+
+            <p v-if="saveMessage" class="truncate text-center text-fluid-sm">{{ saveMessage }}</p>
           </div>
-        </template>
+        </div>
       </template>
     </div>
   </div>

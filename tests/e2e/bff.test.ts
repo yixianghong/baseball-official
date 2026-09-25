@@ -721,6 +721,23 @@ describe('SSR', () => {
     expect(benchSection).not.toContain('許書豪')
   })
 
+  /**
+   * 迴歸測試：頁尾的後台入口對「還沒登入的人」也要看得到。
+   *
+   * 導覽列那兩個入口都是 `v-if="isLoggedIn"`，而在 PWA（`display: standalone`）
+   * 裡沒有網址列可以手動打 `/admin` —— 把這個連結也加上登入條件的話，
+   * 就變成「要先登入才看得到登入的入口」，管理者被鎖在自己的網站外面。
+   *
+   * 檢查的是 **SSR 輸出**：它必須無條件包含這個連結，而不是等瀏覽器
+   * 問完 `/api/auth/me` 才長出來。
+   */
+  it('頁尾的後台入口不需要登入就看得到', async () => {
+    const markup = renderedMarkup(await $fetch<string>('/'))
+
+    expect(markup).toContain('href="/admin"')
+    expect(markup).toContain('後台管理')
+  })
+
   it('不存在的比賽回傳 404 狀態碼（SEO 需要正確的狀態碼）', async () => {
     const response = await fetch('/api/games/nope')
     expect(response.status).toBe(404)
