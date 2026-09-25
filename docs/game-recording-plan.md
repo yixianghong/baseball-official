@@ -127,7 +127,7 @@ export const gameClipSchema = z.object({
   （`viewport-fit=cover` 已經設在 `nuxt.config.ts`，直向時這兩個值是 0。）
 - **不能用程式鎖定方向**：`screen.orientation.lock()` 要先進全螢幕，而 iPhone 對
   非 video 元素的 Fullscreen API 長期不支援（Safari 17.2／17.4 才開始出現）。
-  只能用 CSS 回應方向，並在直向時提示「轉成橫的」。全螢幕留作日後的漸進增強。
+  只能用 CSS 回應方向。全螢幕留作日後的漸進增強。
 - 相機邏輯集中在 `app/composables/useGameRecorder.ts`，頁面只負責畫面。
 - **必須 HTTPS**：`getUserMedia()` 在非安全來源一律失敗。手機連本機 dev server
   要用 tunnel 或 `--https`，`localhost` 不適用（手機連的是區網 IP）。
@@ -137,12 +137,13 @@ export const gameClipSchema = z.object({
   所以這個問題只影響「下載到手機」的階段 1。）
 - **deviceId 每次都會變**，不能存「上次選的鏡頭」，每場都要重挑。
   而且要先 `getUserMedia()` 拿到權限，`enumerateDevices()` 才看得到鏡頭 label。
-- **⚠️ 畫面是橫的，錄出來可能是直的。** 各家瀏覽器對「裝置轉動時 video track
-  的寬高要不要跟著交換」處理並不一致，所以會發生**預覽看起來好好的、存下來卻是
-  1080×1920** 的情況 —— 在球場上完全看不出來，回家打開才發現一整場都是直的。
-  修不了（那是瀏覽器的行為），但偵測得到：`track.getSettings()` 的
-  `width < height` 就是直的，此時在預覽上壓一條紅色警告。注意 `getSettings()`
-  **不是響應式的**，轉動時要自己重讀（見 `useGameRecorder` 的 `settingsVersion`）。
+- **⚠️ 轉動手機不會讓已經取得的 track 跟著轉。** 在直向開啟頁面拿到的串流就是
+  直的（1080×1920），轉成橫的之後它還是直的 —— 預覽因為 `object-cover` 會裁切
+  看起來完全正常，錄出來卻是直式影片。解法是**重新 `getUserMedia()`**
+  （`onOrientationChange`，延遲 400ms），錄影中不重開。
+  畫面上**刻意沒有方向的提示或警告**：方向會自己修正，再跳警告只會讓人困惑。
+  預覽右下角只留解析度數字供核對。`getSettings()` 不是響應式的，轉動時要自己
+  重讀（見 `useGameRecorder` 的 `settingsVersion`）。
 - Wake Lock API 防螢幕休眠，並在 UI 明確提示「請勿切換 App 或鎖定螢幕」。
 - 前台**預設只渲染縮圖**（`https://i.ytimg.com/vi/<id>/hqdefault.jpg`），
   點擊才換成 iframe —— 七個 iframe 會把手機拖垮。現有的 CSP `img-src` 已含 `https:`。
@@ -197,7 +198,7 @@ apphosting.yaml」時選 **No**（理由見該檔案的註解）。
 - [x] 放寬 `Permissions-Policy`
 - [x] 錄影頁：列鏡頭、選鏡頭、1080p 預覽、上下半局選擇、開始／結束、
       **錄完直接下載到手機**
-- [x] 橫向專屬版面（兩欄、不捲動）、直式影像警告、`dvh` 與左右安全區
+- [x] 橫向專屬版面（上下排列、不捲動）、轉向自動重新取得串流、`dvh` 與左右安全區
 - [ ] 驗收：iPhone 與 Android 各錄一個完整半局（6～8 分），確認畫面範圍、檔案大小、
       格式、**中途沒有換鏡頭**、手機沒有過熱降頻
 

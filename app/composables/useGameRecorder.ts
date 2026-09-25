@@ -146,33 +146,17 @@ export function useGameRecorder() {
   })
 
   /**
-   * **錄出來的影像是直的**（寬 < 高）。
-   *
-   * ⚠️ 這和畫面的方向是兩回事。各家瀏覽器對「裝置轉動時 video track 的寬高
-   * 要不要跟著交換」處理並不一致，所以會發生**預覽看起來是橫的、存下來的檔案
-   * 卻是 1080×1920** 的情況 —— 而這件事在球場上完全看不出來，回家打開才發現
-   * 一整場都是直的。
-   *
-   * 修不了它（那是瀏覽器的行為），但偵測得到。偵測到就大聲講。
-   */
-  const portraitVideo = computed(() => {
-    const { width, height } = videoSettings.value ?? {}
-    return Boolean(width && height && width < height)
-  })
-
-  /**
    * 轉動裝置。
    *
    * ## ⚠️ 只是重新讀一次設定是不夠的
    * **轉動手機不會讓已經取得的 track 跟著轉。** 在直向開啟頁面拿到的串流
    * 就是直的（1080×1920），轉成橫的之後它**還是直的** —— 而預覽因為
    * `object-cover` 會裁切，看起來完全正常，錄出來卻是直式影片。
-   * 症狀就是「我明明轉成橫的，它還說影像是直的」：它沒說錯。
-   *
-   * 所以這裡要**重新取得串流**，讓 track 以新的方向重新協商。
+   * 所以這裡要**重新取得串流**，讓 track 以新的方向重新協商 ——
+   * 這也是為什麼畫面上不再需要「影像是直的」那種警告：方向會自己修正。
    *
    * 錄影中不能動：重開鏡頭會讓 `MediaRecorder` 的來源消失，那一段就毀了。
-   * 轉到一半的人自己會看到警告，停下來再轉就好。
+   * 所以錄到一半才轉向的話，那一段仍然是原本的方向 —— 要換方向請先結束這一段。
    */
   let rotateTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -321,7 +305,6 @@ export function useGameRecorder() {
     supported,
     initializing,
     resolution,
-    portraitVideo,
     init,
     openCamera,
     start,

@@ -38,7 +38,7 @@ import { describeCountdown, daysUntil, formatGameDateLong } from '~/utils/format
 const route = useRoute()
 const gameId = computed(() => String(route.params.id))
 
-const { data: game, error } = await useGame(gameId)
+const { data: game, error, refresh } = await useGame(gameId)
 const { data: settings } = await useSiteSettings()
 const today = useToday()
 
@@ -70,6 +70,43 @@ const score = computed(() => ({
   our: game.value?.scoreboard.totals.our.r ?? 0,
   opponent: game.value?.scoreboard.totals.opponent.r ?? 0,
 }))
+
+/*
+ * ── 比賽進行中自動更新 ──────────────────────────────────────────
+ *
+ * 計分板、比數與影片片段在比賽進行中是後台隨時在改的，而這一頁的 HTML 走
+ * CDN 快取（`s-maxage=60`）—— 沒有輪詢的話，開著頁面等比數的人要自己
+ * 重新整理才看得到變化，而那正是最不會想動手的時候。
+ *
+ * ## 三個「不要浪費請求」的條件
+ * - **只有進行中才輪詢**：已結束或還沒開打的比賽不會再變。
+ *   狀態在輪詢中翻成 `finished` 時，那一次請求會抓到最終結果，然後自己停掉。
+ * - **分頁在背景就暫停**：對著看不見的畫面發請求沒有意義，手機還會耗電。
+ * - 間隔可用 `NUXT_PUBLIC_GAME_POLL_MS` 調整，設 0 就整個關掉。
+ *
+ * ## 為什麼是輪詢 `/api/games/[id]` 而不是加 CDN 快取
+ * 後台讀的是同一支端點，替它加上共用快取會讓「我明明存檔了」變成客訴
+ * （見「部署」章節）。以這個站的觀看規模，120 秒一次的原站請求微不足道。
+ */
+const pollMs = Number(useRuntimeConfig().public.gamePollMs) || 0
+const documentVisibility = useDocumentVisibility()
+
+const { pause: pausePolling, resume: resumePolling } = useIntervalFn(
+  () => refresh(),
+  // `useIntervalFn` 不收 0，關閉輪詢是靠下面的 `shouldPoll` 永遠為 false
+  pollMs || 60_000,
+  { immediate: false },
+)
+
+/*
+ * ⚠️ `watchEffect` 會立刻執行一次，所以它必須放在用到的 `const` **之後**
+ * （見 CLAUDE.md 的坑）。這裡用到 `isLive`、`pollMs` 與上面兩個控制函式。
+ */
+watchEffect(() => {
+  const shouldPoll = pollMs > 0 && isLive.value && documentVisibility.value === 'visible'
+  if (shouldPoll) resumePolling()
+  else pausePolling()
+})
 
 /**
  * 候補：確定出席、但不在先發打線上的人。

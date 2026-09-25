@@ -286,28 +286,12 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
               所以這個警告要壓在畫面上、用紅底，不能只是一行小字。
             -->
             <!--
-              轉動裝置時會自動重開鏡頭讓 track 重新協商方向（見
-              `useGameRecorder` 的 `onOrientationChange`），但**錄影中不能重開**
-              —— 那會讓 MediaRecorder 的來源消失。所以錄影中轉向的人會看到
-              這個警告，而且要停下來才解得掉，按鈕就是為了這個。
+              解析度留著（不是警告，是給人核對「真的拿到 1920×1080 嗎」）。
+              方向本身不再提示 —— 轉動裝置會自動重新取得串流並修正方向，
+              見 `useGameRecorder` 的 `onOrientationChange`。
             -->
-            <div
-              v-if="recorder.portraitVideo.value"
-              class="absolute inset-x-3 bottom-3 rounded-lg bg-danger px-3 py-2 text-center text-fluid-sm"
-            >
-              <p class="font-bold">影像是直的（{{ recorder.resolution.value }}）</p>
-              <p class="text-xs">錄出來會是直式影片。把手機轉成橫的；已經是橫的就按下面重試。</p>
-              <button
-                type="button"
-                :disabled="recorder.recording.value"
-                class="mt-1.5 min-h-9 rounded-lg bg-white px-3 text-xs font-bold text-danger disabled:opacity-50"
-                @click="recorder.openCamera(recorder.selectedCameraId.value)"
-              >
-                {{ recorder.recording.value ? '請先結束這一段' : '重新取得鏡頭' }}
-              </button>
-            </div>
             <p
-              v-else-if="recorder.resolution.value"
+              v-if="recorder.resolution.value"
               class="absolute right-3 bottom-3 rounded bg-black/60 px-2 py-0.5 text-xs tabular-nums"
             >
               {{ recorder.resolution.value }}
@@ -338,11 +322,6 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                 離開
               </NuxtLink>
             </div>
-
-            <!-- 直向時提示轉橫。用 CSS 判斷而不是 JS —— 不會有 hydration 問題 -->
-            <p class="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70 field-mode:hidden">
-              📱 把手機轉成橫的，拍到的畫面最廣。
-            </p>
 
             <p v-if="recorder.error.value" class="text-fluid-sm text-warning">
               {{ recorder.error.value }}
