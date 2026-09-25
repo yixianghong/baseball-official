@@ -11,6 +11,7 @@ import {
   gameClipSchema,
   gameResult,
   hasScore,
+  parseYouTubeVideoId,
   isFinished,
   isLive,
   isNotPlayed,
@@ -310,6 +311,44 @@ describe('visibleClips', () => {
 
   it('全部都是私人時回空陣列（整個區塊不出現）', () => {
     expect(visibleClips([clip(1, 'top', 'private')])).toEqual([])
+  })
+})
+
+/**
+ * 自動上傳失敗時，人會自己把影片傳上 YouTube 再回後台補登 ——
+ * 而他手上拿到的網址有好幾種形式。
+ */
+describe('parseYouTubeVideoId', () => {
+  const ID = 'dQw4w9WgXcQ'
+
+  it.each([
+    ['直接貼 ID', ID],
+    ['手機分享的短網址', `https://youtu.be/${ID}`],
+    ['瀏覽器網址列', `https://www.youtube.com/watch?v=${ID}`],
+    ['帶其他參數', `https://www.youtube.com/watch?v=${ID}&t=42s`],
+    ['直播網址', `https://www.youtube.com/live/${ID}`],
+    ['嵌入網址', `https://www.youtube-nocookie.com/embed/${ID}`],
+    ['Studio 的編輯頁', `https://studio.youtube.com/video/${ID}/edit`],
+    ['手機版', `https://m.youtube.com/watch?v=${ID}`],
+    ['前後有空白', `  https://youtu.be/${ID}  `],
+  ])('認得 %s', (_label, input) => {
+    expect(parseYouTubeVideoId(input)).toBe(ID)
+  })
+
+  /**
+   * 取出來的 ID 會變成前台 iframe 的網址。認不出來就要說認不出來 ——
+   * 從別的網站的網址裡湊出 11 個字元然後靜靜接受，比直接拒絕糟得多。
+   */
+  it.each([
+    ['空字串', ''],
+    ['只有空白', '   '],
+    ['不是網址也不是 ID', '第三局上'],
+    ['別的影音網站', `https://vimeo.com/${ID}`],
+    ['網域很像但不是', `https://youtube.com.evil.test/watch?v=${ID}`],
+    ['長度不對', 'https://youtu.be/abc'],
+    ['YouTube 但沒有影片 ID', 'https://www.youtube.com/feed/subscriptions'],
+  ])('拒絕 %s', (_label, input) => {
+    expect(parseYouTubeVideoId(input)).toBe('')
   })
 })
 

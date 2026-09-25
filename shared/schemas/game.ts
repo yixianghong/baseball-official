@@ -79,6 +79,9 @@ export const HALF_LABELS: Record<GameHalf, string> = {
   bottom: '下',
 }
 
+/** 依比賽順序。要把一局展開成兩個半局時用它，不要各處自己寫陣列。 */
+export const GAME_HALVES = ['top', 'bottom'] as const
+
 /**
  * 這半局是哪一隊在打擊。**客隊先攻**，所以上半局打擊的是客隊。
  *
@@ -179,6 +182,63 @@ export function visibleClips(clips: GameClip[]): GameClip[] {
 /** YouTube 的嵌入網址。用 nocookie 網域：訪客還沒點播放就不該被種追蹤 cookie。 */
 export function clipEmbedUrl(videoId: string): string {
   return `https://www.youtube-nocookie.com/embed/${videoId}`
+}
+
+/**
+ * 從使用者貼上的東西裡取出 YouTube 影片 ID。
+ *
+ * ## 為什麼需要它
+ * 自動上傳失敗時（額度用完、網路斷了），人會自己把影片傳上 YouTube，
+ * 再回後台補登。而他手上拿到的是一個網址 —— 而且是哪一種網址不一定：
+ * 手機分享給的是 `youtu.be`、瀏覽器網址列是 `watch?v=`、
+ * 從 Studio 複製的是 `studio.youtube.com/video/<id>/edit`。
+ *
+ * 認不出來時回空字串，由呼叫端決定要怎麼講 —— 這裡不丟例外，
+ * 因為「貼錯東西」是使用者每天都會做的事，不是異常。
+ *
+ * ## 網域要驗
+ * 取出來的 ID 會變成前台 iframe 的網址。只靠「像不像 11 碼」判斷的話，
+ * 貼一個 Vimeo 連結也可能剛好湊出 11 個字元而被靜靜接受 ——
+ * 那比直接說「認不出來」糟糕得多。
+ */
+const YOUTUBE_HOSTS = [
+  'youtu.be',
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'music.youtube.com',
+  'studio.youtube.com',
+  'www.youtube-nocookie.com',
+]
+
+const VIDEO_ID_PATTERN = /^[\w-]{11}$/
+
+export function parseYouTubeVideoId(input: string): string {
+  const value = input.trim()
+  if (!value) return ''
+
+  // 直接貼 ID 也要收 —— 從我們自己的後台複製出來的就是 ID
+  if (VIDEO_ID_PATTERN.test(value)) return value
+
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return ''
+  }
+
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return ''
+  if (!YOUTUBE_HOSTS.includes(url.hostname)) return ''
+
+  // `watch?v=` 與 `shorts` 之外，其餘形式的 ID 都在路徑的某一段上
+  const fromQuery = url.searchParams.get('v')
+  if (fromQuery && VIDEO_ID_PATTERN.test(fromQuery)) return fromQuery
+
+  const segments = url.pathname.split('/').filter(Boolean)
+  // `youtu.be/<id>`、`/live/<id>`、`/embed/<id>`、`/shorts/<id>`、
+  // `studio.youtube.com/video/<id>/edit` —— 取第一段符合格式的
+  const fromPath = segments.find((segment) => VIDEO_ID_PATTERN.test(segment))
+  return fromPath ?? ''
 }
 
 /** 影片縮圖。前台預設只載縮圖，點了才換成 iframe。 */

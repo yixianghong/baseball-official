@@ -472,7 +472,15 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                   </div>
                 </li>
               </ul>
-              <p class="mt-2 text-xs text-white/50">
+              <!-- 撞到當天額度是「整批停下」，要一次講清楚而不是每段各喊一次 -->
+              <p
+                v-if="uploads.limitReached.value"
+                class="mt-2 rounded-lg bg-warning/15 px-3 py-2 text-xs text-warning"
+              >
+                已達 YouTube 今日的上傳數量上限，剩下的片段暫停上傳。影片都還在這台裝置上 ——
+                明天再按重試，或自己傳上 YouTube 後到後台的「賽事錄影」貼網址補登。
+              </p>
+              <p v-else class="mt-2 text-xs text-white/50">
                 每一段都已經存到這台裝置，上傳失敗也不會弄丟 —— 事後手動傳就好。
               </p>
             </div>

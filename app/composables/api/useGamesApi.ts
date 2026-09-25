@@ -1,5 +1,12 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { Game, GameClip, GameInput, GamePatch, GameQuery } from '#shared/schemas/game'
+import type {
+  Game,
+  GameClip,
+  GameHalf,
+  GameInput,
+  GamePatch,
+  GameQuery,
+} from '#shared/schemas/game'
 
 /**
  * 「比賽」這個功能領域的所有 API 呼叫。
@@ -15,6 +22,7 @@ const ENDPOINTS = {
   create: '/admin/games',
   batch: '/admin/games/batch',
   update: (id: string) => `/admin/games/${encodeURIComponent(id)}`,
+  clips: (id: string) => `/admin/games/${encodeURIComponent(id)}/clips`,
   clipsRefresh: (id: string) => `/admin/games/${encodeURIComponent(id)}/clips/refresh`,
   clip: (id: string, videoId: string) =>
     `/admin/games/${encodeURIComponent(id)}/clips/${encodeURIComponent(videoId)}`,
@@ -102,6 +110,15 @@ export function useGameActions() {
      * 前台才知道哪幾段可以顯示（見 `docs/game-recording-plan.md`）。
      */
     refreshClips: (id: string) => post<{ clips: GameClip[] }>(ENDPOINTS.clipsRefresh(id), {}),
+
+    /**
+     * 補登一段影片。
+     *
+     * 自動上傳與人工補登走的是**同一支端點** —— 片段的身分是
+     * 「第幾局的哪半局」，不是 videoId，所以資料層分不出來源，也不需要分。
+     */
+    addClip: (id: string, clip: { inning: number; half: GameHalf; videoId: string }) =>
+      post<{ clips: GameClip[] }>(ENDPOINTS.clips(id), clip),
 
     /** 只移除本站的紀錄，不刪 YouTube 上的影片。 */
     removeClip: (id: string, videoId: string) =>

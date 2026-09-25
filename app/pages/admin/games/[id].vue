@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   AttendanceEntry,
+  GameHalf,
   GameStatus,
   LineupEntry,
   PitcherEntry,
@@ -13,7 +14,9 @@ import {
   GAME_RESULT_LABELS,
   GAME_STATUS_LABELS,
   gameResult,
+  GAME_HALVES,
   HALF_LABELS,
+  parseYouTubeVideoId,
   isGoogleMapsUrl,
   withSummedRuns,
 } from '#shared/schemas/game'
@@ -48,7 +51,7 @@ const gameId = computed(() => String(route.params.id))
 const { data: game, error } = await useGame(gameId)
 const { data: players } = await usePlayers()
 const { data: settings } = await useSiteSettings()
-const { updateGame, refreshClips, removeClip } = useGameActions()
+const { updateGame, refreshClips, removeClip, addClip } = useGameActions()
 
 const teamName = computed(() => settings.value?.teamName ?? '我隊')
 const teamNames = computed(() => (settings.value ? teamNameCandidates(settings.value) : []))
@@ -258,6 +261,61 @@ const clipsMessage = ref('')
 const privateClipCount = computed(
   () => clips.value.filter((clip) => clip.privacy === 'private').length,
 )
+
+/**
+ * 這一場所有的半局，以及各自有沒有影片。
+ *
+ * **缺口是推導的，不存欄位** —— 一場有幾個半局由計分板的局數決定
+ * （乙組七局，延長賽會更多）。上傳失敗時不必在資料庫記一筆「這段沒上去」，
+ * 那個寫入本身也可能失敗；列出全部、沒有影片的那幾格自然就是缺口。
+ *
+ * 這也是自動上傳與人工補登**共用同一條路**的地方：片段的身分是
+ * 「第幾局的哪半局」，不是 videoId。兩者都是同一支 `POST /clips`。
+ */
+const halfInnings = computed(() => {
+  const total = Math.max(game.value?.scoreboard.innings.length ?? 7, 7)
+  return Array.from({ length: total }, (_, i) => i + 1).flatMap((inning) =>
+    GAME_HALVES.map((half) => ({
+      key: `${inning}-${half}`,
+      inning,
+      half,
+      clip: clips.value.find((item) => item.inning === inning && item.half === half),
+    })),
+  )
+})
+
+const missingClipCount = computed(() => halfInnings.value.filter((item) => !item.clip).length)
+
+/** 每一格缺口各自的輸入框內容。鍵是「局-上下」。 */
+const clipUrlInput = reactive<Record<string, string>>({})
+const clipUrlError = reactive<Record<string, string>>({})
+
+/**
+ * 人工補登一段影片。
+ *
+ * 走的是和自動上傳**完全相同**的端點 —— 所以不需要 `source: auto | manual`
+ * 這種欄位，資料層根本分不出來，也不需要分。
+ */
+async function attachClip(key: string, inning: number, half: GameHalf) {
+  const videoId = parseYouTubeVideoId(clipUrlInput[key] ?? '')
+  if (!videoId) {
+    clipUrlError[key] = '認不出 YouTube 網址，請貼影片頁的網址或 11 碼影片 ID'
+    return
+  }
+
+  clipUrlError[key] = ''
+  clipsBusy.value = true
+  try {
+    const result = await addClip(gameId.value, { inning, half, videoId })
+    clips.value = result.clips
+    clipUrlInput[key] = ''
+    clipsMessage.value = `已補上第 ${inning} 局${HALF_LABELS[half]}`
+  } catch {
+    clipUrlError[key] = '補登失敗，請稍後再試'
+  } finally {
+    clipsBusy.value = false
+  }
+}
 
 async function syncClipPrivacy() {
   clipsBusy.value = true
@@ -579,44 +637,92 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             改成公開或不公開，再按上面的「更新影片狀態」。
           </p>
 
-          <ul v-if="clips.length" class="space-y-2">
+          <!--
+            列出**所有**半局而不是只列已有的片段。
+            缺口是推導的（計分板局數 × 2），不必在上傳失敗時往資料庫寫狀態 ——
+            那個寫入本身也可能失敗。沒有影片的那幾格自然就是待補的。
+          -->
+          <p v-if="missingClipCount" class="text-fluid-sm text-content-muted">
+            還有 {{ missingClipCount }} 個半局沒有影片。自動上傳失敗時，把影片自己傳上
+            YouTube，再把網址貼到對應的那一格。
+          </p>
+
+          <ul class="space-y-2">
             <li
-              v-for="clip in clips"
-              :key="clip.videoId"
-              class="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-fluid-sm"
+              v-for="item in halfInnings"
+              :key="item.key"
+              class="rounded-xl border border-border bg-surface px-4 py-3 text-fluid-sm"
+              :class="item.clip ? '' : 'border-dashed'"
             >
-              <span class="font-bold">第 {{ clip.inning }} 局{{ HALF_LABELS[clip.half] }}</span>
+              <div class="flex flex-wrap items-center gap-3">
+                <span class="font-bold" :class="item.clip ? '' : 'text-content-muted'">
+                  第 {{ item.inning }} 局{{ HALF_LABELS[item.half] }}
+                </span>
 
-              <UiBaseBadge :tone="clip.privacy === 'private' ? 'warning' : 'success'" size="sm">
-                {{
-                  clip.privacy === 'private'
-                    ? '私人'
-                    : clip.privacy === 'public'
-                      ? '公開'
-                      : '不公開'
-                }}
-              </UiBaseBadge>
+                <template v-if="item.clip">
+                  <UiBaseBadge
+                    :tone="item.clip.privacy === 'private' ? 'warning' : 'success'"
+                    size="sm"
+                  >
+                    {{
+                      item.clip.privacy === 'private'
+                        ? '私人'
+                        : item.clip.privacy === 'public'
+                          ? '公開'
+                          : '不公開'
+                    }}
+                  </UiBaseBadge>
 
-              <a
-                :href="`https://studio.youtube.com/video/${clip.videoId}/edit`"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-content-muted underline underline-offset-4 hover:text-brand-600"
-              >
-                在 YouTube Studio 開啟
-              </a>
+                  <a
+                    :href="`https://studio.youtube.com/video/${item.clip.videoId}/edit`"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-content-muted underline underline-offset-4 hover:text-brand-600"
+                  >
+                    在 YouTube Studio 開啟
+                  </a>
 
-              <!-- 只移除本站的紀錄，不刪 YouTube 上的影片 -->
-              <AdminDeleteButton
-                class="ml-auto"
-                :loading="clipsBusy"
-                @confirm="deleteClip(clip.videoId)"
-              />
+                  <!-- 只移除本站的紀錄，不刪 YouTube 上的影片 -->
+                  <AdminDeleteButton
+                    class="ml-auto"
+                    :loading="clipsBusy"
+                    @confirm="deleteClip(item.clip.videoId)"
+                  />
+                </template>
+
+                <!--
+                  缺口：貼上網址就能補登。走的是和自動上傳同一支端點，
+                  所以補上去之後和自動傳的完全沒有差別。
+                -->
+                <form
+                  v-else
+                  class="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+                  @submit.prevent="attachClip(item.key, item.inning, item.half)"
+                >
+                  <input
+                    v-model="clipUrlInput[item.key]"
+                    type="text"
+                    inputmode="url"
+                    placeholder="貼上 YouTube 網址"
+                    :aria-label="`第 ${item.inning} 局${HALF_LABELS[item.half]} 的 YouTube 網址`"
+                    class="min-h-10 min-w-0 flex-1 rounded-lg border border-border bg-surface-muted px-3 text-fluid-sm"
+                  />
+                  <UiBaseButton
+                    type="submit"
+                    variant="secondary"
+                    size="sm"
+                    :disabled="!clipUrlInput[item.key] || clipsBusy"
+                  >
+                    補登
+                  </UiBaseButton>
+                </form>
+              </div>
+
+              <p v-if="clipUrlError[item.key]" class="mt-1.5 text-xs text-danger">
+                {{ clipUrlError[item.key] }}
+              </p>
             </li>
           </ul>
-          <p v-else class="text-fluid-sm text-content-muted">
-            還沒有錄影片段。剛上傳完的話，按「更新影片狀態」把它抓回來。
-          </p>
 
           <p v-if="clipsMessage" class="text-fluid-sm">{{ clipsMessage }}</p>
         </div>

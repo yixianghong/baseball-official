@@ -37,12 +37,25 @@ export interface ClipUpload {
   videoId: string
 }
 
+/**
+ * YouTube 頻道每天可以上傳幾支影片是有上限的，而且**和 API 的配額是兩回事**。
+ * Google 沒有公布確切數字，會依頻道的歷史與帳號信譽浮動（實務上約 15～50），
+ * 觸頂後要等 24 小時。一場七局十四段很容易在一天之內撞到。
+ */
+class UploadLimitError extends Error {}
+
+const UPLOAD_LIMIT_MESSAGE =
+  '已達 YouTube 今日的上傳數量上限。影片都還在這台裝置上，24 小時後再按重試，或自己上傳後到後台補登。'
+
 export function useClipUpload(options: {
   gameId: () => string
   title: (inning: number, half: GameHalf) => string
 }) {
   const queue = ref<ClipUpload[]>([])
   const { post } = useApi()
+
+  /** 撞到當天的上傳額度。整批停下，而不是讓每一段各撞一次。 */
+  const limitReached = ref(false)
 
   /** 還沒傳完的段數。離開頁面前要用它攔一下。 */
   const pending = computed(
@@ -94,7 +107,15 @@ export function useClipUpload(options: {
       for (;;) {
         const next = queue.value.find((item) => item.state === 'waiting')
         if (!next) break
+
         await upload(next)
+
+        /*
+         * 撞到當天的上傳額度就整批停下 —— 後面每一段都會撞同一面牆，
+         * 繼續試只是讓七段各自失敗一次，訊息還互相蓋掉。
+         * 剩下的維持 `waiting`，明天（或手動）再按重試就會接著跑。
+         */
+        if (limitReached.value) break
       }
     } finally {
       running = false
@@ -149,6 +170,11 @@ export function useClipUpload(options: {
        */
       blobs.delete(item.id)
     } catch (err) {
+      if (err instanceof UploadLimitError) {
+        limitReached.value = true
+        patch(item.id, { state: 'failed', error: UPLOAD_LIMIT_MESSAGE })
+        return
+      }
       patch(item.id, {
         state: 'failed',
         error: err instanceof Error ? err.message : '上傳失敗',
@@ -185,7 +211,17 @@ export function useClipUpload(options: {
        * 權杖沒有上傳範圍、還是頻道沒驗證。這幾種的處理方式完全不同，
        * 而這是唯一會告訴你的地方。
        */
-      throw new Error(`YouTube 拒絕上傳（${response.status}）：${await describeError(response)}`)
+      const { reason, message } = await describeError(response)
+
+      /*
+       * YouTube 頻道有「每天可以上傳幾支」的額度，和 API 的配額是兩回事。
+       * 撞到之後**當天剩下的每一段都會撞同一面牆** —— 所以要標記出來讓佇列
+       * 停下，而不是讓七段各自失敗七次、跳七個看不懂的英文訊息。
+       */
+      if (reason === 'uploadLimitExceeded') {
+        throw new UploadLimitError()
+      }
+      throw new Error(`YouTube 拒絕上傳（${response.status}）：${message}`)
     }
     if (!location) {
       throw new Error('YouTube 沒有回傳上傳位址')
@@ -193,18 +229,21 @@ export function useClipUpload(options: {
     return location
   }
 
-  /** 從 Google 的錯誤回應裡撈出可讀的訊息。 */
-  async function describeError(response: Response): Promise<string> {
+  /**
+   * 從 Google 的錯誤回應裡撈出原因與可讀訊息。
+   *
+   * `reason` 是機器判讀用的（例如 `uploadLimitExceeded`、`quotaExceeded`），
+   * `message` 是給人看的。只回其中一個都不夠：前者沒法顯示，後者沒法分支。
+   */
+  async function describeError(response: Response): Promise<{ reason: string; message: string }> {
     try {
       const body = await response.json()
-      return (
-        body?.error?.message ??
-        body?.error?.errors?.[0]?.reason ??
-        body?.error_description ??
-        '沒有說明'
-      )
+      return {
+        reason: body?.error?.errors?.[0]?.reason ?? '',
+        message: body?.error?.message ?? body?.error_description ?? '沒有說明',
+      }
     } catch {
-      return '沒有說明'
+      return { reason: '', message: '沒有說明' }
     }
   }
 
@@ -256,6 +295,8 @@ export function useClipUpload(options: {
 
   /** 重試某一段。失敗多半是球場的網路，重按一次通常就過了。 */
   function retry(id: string) {
+    // 手動重試代表「我認為現在可以了」—— 把額度旗標放掉，讓佇列重新跑
+    limitReached.value = false
     if (!blobs.has(id)) {
       // 理論上不會發生（失敗的 Blob 都留著），但如果真的發生了，
       // 要講出「請手動上傳」而不是讓按鈕按下去毫無反應
@@ -275,5 +316,5 @@ export function useClipUpload(options: {
    */
   onBeforeUnmount(() => blobs.clear())
 
-  return { queue, pending, failed, enqueue, retry }
+  return { queue, pending, failed, limitReached, enqueue, retry }
 }
