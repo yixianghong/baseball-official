@@ -18,8 +18,10 @@ import { formatGameDateLong } from '~/utils/format'
  * 拍球場要的是最寬的畫面，所以人會把手機轉橫。但橫向的可用高度只有 320px 上下
  * （iPhone 橫向 390 再扣掉 Safari 的上下列），而直向的版面疊起來有 855px ——
  * 照搬過去的話錄影鈕會在畫面外 400 多 px，你得一邊端著手機對準球場一邊捲頁面。
- * 所以橫向是**另一套版面**（`field-mode:` variant）：預覽靠高度撐滿在左邊，
- * 控制項收成右邊一欄，而且錄影鈕永遠不參與捲動。
+ * 所以橫向是**另一套版面**（`field-mode:` variant）：預覽與控制項仍然是上下
+ * 排列（和直向一致，不左右並排），但預覽改用 `42dvh` 的高度上限收斂 ——
+ * 橫向若讓它吃滿寬度，16:9 會算出比整個視窗還高的高度。
+ * 剩下的高度給控制項，而**錄影鈕永遠不參與捲動**。
  *
  * 不能用程式鎖定方向：`screen.orientation.lock()` 要先進全螢幕，而 iPhone 對
  * 非 video 元素的 Fullscreen API 長期不支援。只能用 CSS 回應，並在直向時提示。
@@ -228,7 +230,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
     -->
     <div
       v-else-if="game"
-      class="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-5 field-mode:h-dvh field-mode:max-w-none field-mode:flex-row field-mode:gap-3 field-mode:px-3 field-mode:py-3"
+      class="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-5 field-mode:h-dvh field-mode:gap-2 field-mode:px-3 field-mode:py-2"
     >
       <!-- ══ 不支援：橫向直向都一樣，佔滿就好 ══════════════════ -->
       <div
@@ -243,13 +245,13 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
 
       <template v-else>
         <!-- ══ 左：預覽 ════════════════════════════════════════ -->
-        <div class="flex min-w-0 items-center justify-center field-mode:h-full field-mode:flex-1">
+        <div class="flex min-w-0 shrink-0 items-center justify-center">
           <!--
             直向靠寬度決定尺寸，橫向靠高度 —— 橫向如果還用 `w-full`，
             16:9 會算出 360px 高，比整個視窗還高。
           -->
           <div
-            class="relative aspect-video w-full overflow-hidden rounded-xl bg-black field-mode:h-full field-mode:w-auto field-mode:max-w-full"
+            class="relative aspect-video w-full overflow-hidden rounded-xl bg-black field-mode:h-[34dvh] field-mode:w-auto field-mode:max-w-full"
           >
             <!-- muted 不能省：沒有它 autoplay 會被瀏覽器擋下，而且會產生回授嘯叫 -->
             <video ref="videoRef" class="size-full object-cover" autoplay muted playsinline />
@@ -314,7 +316,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
         </div>
 
         <!-- ══ 右：控制項 ══════════════════════════════════════ -->
-        <div class="flex flex-col gap-3 field-mode:h-full field-mode:w-72 field-mode:shrink-0">
+        <div class="flex min-h-0 flex-col gap-3 field-mode:flex-1 field-mode:gap-2">
           <!--
             控制項可以捲，但錄影鈕在捲動區外面 —— 端著手機對準球場的人
             不可能一邊捲頁面一邊找按鈕。
@@ -322,7 +324,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
           <div class="min-h-0 flex-1 space-y-3 field-mode:overflow-y-auto">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
-                <h1 class="truncate text-fluid-lg font-bold">
+                <h1 class="truncate text-fluid-lg font-bold field-mode:text-fluid-sm">
                   {{ teamName }} vs {{ game.opponent }}
                 </h1>
                 <p class="text-fluid-sm text-white/60 field-mode:hidden">
@@ -347,12 +349,14 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             </p>
 
             <div>
-              <label for="camera" class="mb-1 block text-fluid-sm text-white/70">鏡頭</label>
+              <label for="camera" class="mb-1 block text-fluid-sm text-white/70 field-mode:hidden"
+                >鏡頭</label
+              >
               <select
                 id="camera"
                 :value="recorder.selectedCameraId.value"
                 :disabled="recorder.recording.value"
-                class="min-h-12 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-white disabled:opacity-50"
+                class="min-h-12 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-white disabled:opacity-50 field-mode:min-h-10 field-mode:text-fluid-sm"
                 @change="onCameraChange(($event.target as HTMLSelectElement).value)"
               >
                 <option
@@ -370,59 +374,72 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
               </p>
             </div>
 
-            <div>
-              <span class="mb-1 block text-fluid-sm text-white/70">這一段是第幾局</span>
-              <div class="flex flex-wrap gap-2">
-                <button
-                  v-for="n in totalInnings"
-                  :key="n"
-                  type="button"
-                  :disabled="recorder.recording.value"
-                  class="min-h-11 min-w-11 flex-1 rounded-xl border px-3 font-bold tabular-nums transition disabled:opacity-40"
-                  :class="
-                    inning === n
-                      ? 'border-accent-400 bg-accent-500 text-ink-deep'
-                      : completedInnings.has(n)
-                        ? 'border-white/20 bg-white/15 text-white/60'
-                        : 'border-white/20 text-white'
-                  "
-                  @click="inning = n"
+            <!--
+              球場模式把局數與上下半併成一行。
+              橫向有的是寬度、缺的是高度 —— 分成兩排的話上下半會被擠出畫面，
+              而那正是每半局都要確認一次的東西。
+            -->
+            <div
+              class="space-y-3 field-mode:flex field-mode:items-start field-mode:gap-2 field-mode:space-y-0"
+            >
+              <div class="field-mode:min-w-0 field-mode:flex-1">
+                <span class="mb-1 block text-fluid-sm text-white/70 field-mode:hidden"
+                  >這一段是第幾局</span
                 >
-                  {{ n }}
-                </button>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="n in totalInnings"
+                    :key="n"
+                    type="button"
+                    :disabled="recorder.recording.value"
+                    class="min-h-11 min-w-11 flex-1 rounded-xl border px-3 font-bold tabular-nums transition disabled:opacity-40 field-mode:min-h-9 field-mode:min-w-9 field-mode:px-2"
+                    :class="
+                      inning === n
+                        ? 'border-accent-400 bg-accent-500 text-ink-deep'
+                        : completedInnings.has(n)
+                          ? 'border-white/20 bg-white/15 text-white/60'
+                          : 'border-white/20 text-white'
+                    "
+                    @click="inning = n"
+                  >
+                    {{ n }}
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <div>
-              <span class="mb-1 block text-fluid-sm text-white/70">上半還是下半</span>
-              <div class="grid grid-cols-2 gap-2">
-                <!--
-                  只有兩個選項，所以做成兩顆大按鈕而不是下拉 —— 這是戴著手套、
-                  單手、在太陽底下要按的東西。錄完會自動跳到下一半局，
-                  正常情況下整場都不必碰它。
-                -->
-                <button
-                  v-for="option in ['top', 'bottom'] as const"
-                  :key="option"
-                  type="button"
-                  :disabled="recorder.recording.value"
-                  class="min-h-12 rounded-xl border font-bold transition disabled:opacity-40"
-                  :class="
-                    half === option
-                      ? 'border-accent-400 bg-accent-500 text-ink-deep'
-                      : recordedHalves.has(`${inning}-${option}`)
-                        ? 'border-white/20 bg-white/15 text-white/60'
-                        : 'border-white/20 text-white'
-                  "
-                  @click="half = option"
+              <div class="field-mode:min-w-0 field-mode:flex-1">
+                <span class="mb-1 block text-fluid-sm text-white/70 field-mode:hidden"
+                  >上半還是下半</span
                 >
-                  {{ HALF_LABELS[option] }}半局
-                </button>
+                <div class="grid grid-cols-2 gap-2">
+                  <!--
+                    只有兩個選項，所以做成兩顆大按鈕而不是下拉 —— 這是戴著手套、
+                    單手、在太陽底下要按的東西。錄完會自動跳到下一半局，
+                    正常情況下整場都不必碰它。
+                  -->
+                  <button
+                    v-for="option in ['top', 'bottom'] as const"
+                    :key="option"
+                    type="button"
+                    :disabled="recorder.recording.value"
+                    class="min-h-12 rounded-xl border font-bold transition disabled:opacity-40 field-mode:min-h-9 field-mode:text-fluid-sm"
+                    :class="
+                      half === option
+                        ? 'border-accent-400 bg-accent-500 text-ink-deep'
+                        : recordedHalves.has(`${inning}-${option}`)
+                          ? 'border-white/20 bg-white/15 text-white/60'
+                          : 'border-white/20 text-white'
+                    "
+                    @click="half = option"
+                  >
+                    {{ HALF_LABELS[option] }}半局
+                  </button>
+                </div>
+                <!-- 客隊先攻，所以上半局是客隊打擊。場邊的人看的是場上不是設定 -->
+                <p v-if="batting" class="mt-1 text-xs text-white/50">
+                  {{ halfLabel }}：{{ batting }} 進攻
+                </p>
               </div>
-              <!-- 客隊先攻，所以上半局是客隊打擊。場邊的人看的是場上不是設定 -->
-              <p v-if="batting" class="mt-1 text-xs text-white/50">
-                {{ halfLabel }}：{{ batting }} 進攻
-              </p>
             </div>
 
             <!-- ══ 已錄片段與上傳狀態 ══════════════════════════ -->
@@ -481,7 +498,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
           <div class="shrink-0 space-y-2">
             <UiBaseButton
               v-if="!recorder.recording.value"
-              class="min-h-14 w-full text-fluid-lg"
+              class="min-h-14 w-full text-fluid-lg field-mode:min-h-12"
               :disabled="!recorder.stream.value || saving || recorder.initializing.value"
               @click="recorder.start()"
             >
@@ -490,7 +507,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             <UiBaseButton
               v-else
               variant="secondary"
-              class="min-h-14 w-full text-fluid-lg"
+              class="min-h-14 w-full text-fluid-lg field-mode:min-h-12"
               :loading="saving"
               @click="finish"
             >
