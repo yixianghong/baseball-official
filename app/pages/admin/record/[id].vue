@@ -18,7 +18,7 @@ import { formatGameDateLong } from '~/utils/format'
  * 拍球場要的是最寬的畫面，所以人會把手機轉橫。但橫向的可用高度只有 320px 上下
  * （iPhone 橫向 390 再扣掉 Safari 的上下列），而直向的版面疊起來有 855px ——
  * 照搬過去的話錄影鈕會在畫面外 400 多 px，你得一邊端著手機對準球場一邊捲頁面。
- * 所以橫向是**另一套版面**（`landscape:` variant）：預覽靠高度撐滿在左邊，
+ * 所以橫向是**另一套版面**（`field-mode:` variant）：預覽靠高度撐滿在左邊，
  * 控制項收成右邊一欄，而且錄影鈕永遠不參與捲動。
  *
  * 不能用程式鎖定方向：`screen.orientation.lock()` 要先進全螢幕，而 iPhone 對
@@ -30,9 +30,13 @@ import { formatGameDateLong } from '~/utils/format'
  * 所以這一頁三邊都要留（`viewport-fit=cover` 已在 `nuxt.config.ts` 設好）：
  * 直向時 top 有值、左右是 0，橫向時剛好相反。
  *
- * ## 這一階段刻意不上傳
- * 錄完直接存到手機。先用一場真的比賽回答「超廣角選不選得到、檔案多大、
- * 手機撐不撐得住」這三個問題，再決定上傳那一段要怎麼做。
+ * ## 存檔與上傳是兩件事，而且順序不能反
+ * 錄完**先存到裝置**，再丟進上傳佇列。反過來做的話，上傳失敗就等於那一段
+ * 影片沒了 —— 而在球場的行動網路上，上傳失敗是常態而不是例外。
+ * 先存檔之後，失敗的最壞情況只是「這一段還沒上去，事後手動傳」。
+ *
+ * 上傳是背景進行的（見 `useClipUpload`）：一段要傳 2～4 分鐘，而下一個
+ * 半局馬上就要開始錄，不能讓人站在原地等。
  *
  * ## 存檔為什麼有兩條路
  * 和出賽名單圖卡同一個理由（見 `useShareRoster`）：iOS Safari 對大的 blob
@@ -52,6 +56,12 @@ const teamName = computed(() => settings.value?.teamName ?? '我隊')
 const recorder = useGameRecorder()
 const videoRef = ref<HTMLVideoElement | null>(null)
 
+const uploads = useClipUpload({
+  gameId: () => gameId.value,
+  title: (n, h) =>
+    `${game.value?.date ?? ''} ${teamName.value} vs ${game.value?.opponent ?? ''} 第${n}局${HALF_LABELS[h]}`,
+})
+
 /** 這一場預計幾局。乙組是七局，但延長賽會多打 —— 以計分板的實際局數為準。 */
 const totalInnings = computed(() => Math.max(game.value?.scoreboard.innings.length ?? 7, 7))
 
@@ -67,22 +77,6 @@ const batting = computed(() => {
 })
 
 const halfLabel = computed(() => `第 ${inning.value} 局${HALF_LABELS[half.value]}`)
-
-/**
- * 這一輪錄了哪幾段。
- *
- * ⚠️ **只留中繼資料，不留 Blob。** 一局 1080p 約 170～280 MB，七局就是 1～2 GB，
- * 全部掛在記憶體裡手機會被系統殺掉。存檔是在 `finish()` 當下就做完的，
- * 這份清單只是給人看「哪幾局已經錄過了」。
- */
-type SavedClip = {
-  inning: number
-  half: GameHalf
-  seconds: number
-  bytes: number
-  filename: string
-}
-const savedClips = ref<SavedClip[]>([])
 
 const saveMessage = ref('')
 const saving = ref(false)
@@ -117,23 +111,26 @@ async function finish() {
     mimeType: recorder.mimeType.value,
   })
 
-  savedClips.value = [
-    ...savedClips.value,
-    {
-      inning: inning.value,
-      half: half.value,
-      seconds: recorder.elapsedSeconds.value,
-      bytes: blob.size,
-      filename,
-    },
-  ]
-
+  // ⚠️ 順序不能反：先存到裝置，再排進上傳佇列。
+  // 反過來的話，上傳失敗就等於這一段沒了 —— 而球場的網路本來就不可靠。
   await save(blob, filename)
+  uploads.enqueue({ inning: inning.value, half: half.value, blob })
 
   const next = nextHalf({ inning: inning.value, half: half.value }, totalInnings.value)
   inning.value = next.inning
   half.value = next.half
 }
+
+/**
+ * 還有片段沒傳完就離開頁面 —— 攔一下。
+ *
+ * 影片本身已經存到裝置了，所以最壞情況不是「弄丟」而是「還沒上去」，
+ * 但那仍然是使用者會想知道的事。
+ */
+onBeforeRouteLeave(() => {
+  if (uploads.pending.value === 0) return true
+  return confirm(`還有 ${uploads.pending.value} 段影片正在上傳，離開會中斷。確定要離開嗎？`)
+})
 
 /** 優先走系統分享（iOS 才存得進「照片」），沒有才退回下載。 */
 async function save(blob: Blob, filename: string) {
@@ -181,9 +178,20 @@ function download(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
-/** 已經錄過的半局，鍵是「局-上下」。局數按鈕靠它標示哪幾局錄過了。 */
+/**
+ * 已經錄過的半局，鍵是「局-上下」。局數與上下半按鈕靠它標示錄過了沒。
+ *
+ * 直接從上傳佇列推導，不另外維護一份清單 —— 每一段錄完都一定會進佇列
+ * （上傳失敗的也在裡面，狀態是 `failed`），所以它就是「這一輪錄了什麼」的
+ * 完整紀錄。兩份平行的清單遲早會對不上。
+ */
+/** 最近一則上傳失敗的原因。球場模式只擺得下一行，那就擺最要緊的那一行。 */
+const firstUploadError = computed(
+  () => uploads.queue.value.find((item) => item.state === 'failed')?.error ?? '',
+)
+
 const recordedHalves = computed(
-  () => new Set(savedClips.value.map((clip) => `${clip.inning}-${clip.half}`)),
+  () => new Set(uploads.queue.value.map((item) => `${item.inning}-${item.half}`)),
 )
 
 /** 兩個半局都錄完的局，整顆按鈕才算「完成」。 */
@@ -220,12 +228,12 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
     -->
     <div
       v-else-if="game"
-      class="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-5 landscape:h-dvh landscape:max-w-none landscape:flex-row landscape:gap-3 landscape:px-3 landscape:py-3"
+      class="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-5 field-mode:h-dvh field-mode:max-w-none field-mode:flex-row field-mode:gap-3 field-mode:px-3 field-mode:py-3"
     >
       <!-- ══ 不支援：橫向直向都一樣，佔滿就好 ══════════════════ -->
       <div
         v-if="!recorder.supported.value"
-        class="rounded-xl border border-warning/40 bg-warning/10 p-4 text-fluid-sm landscape:flex-1"
+        class="rounded-xl border border-warning/40 bg-warning/10 p-4 text-fluid-sm field-mode:flex-1"
       >
         <p class="font-semibold">這個裝置不能在瀏覽器裡錄影</p>
         <p class="mt-1 text-white/70">
@@ -235,13 +243,13 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
 
       <template v-else>
         <!-- ══ 左：預覽 ════════════════════════════════════════ -->
-        <div class="flex min-w-0 items-center justify-center landscape:h-full landscape:flex-1">
+        <div class="flex min-w-0 items-center justify-center field-mode:h-full field-mode:flex-1">
           <!--
             直向靠寬度決定尺寸，橫向靠高度 —— 橫向如果還用 `w-full`，
             16:9 會算出 360px 高，比整個視窗還高。
           -->
           <div
-            class="relative aspect-video w-full overflow-hidden rounded-xl bg-black landscape:h-full landscape:w-auto landscape:max-w-full"
+            class="relative aspect-video w-full overflow-hidden rounded-xl bg-black field-mode:h-full field-mode:w-auto field-mode:max-w-full"
           >
             <!-- muted 不能省：沒有它 autoplay 會被瀏覽器擋下，而且會產生回授嘯叫 -->
             <video ref="videoRef" class="size-full object-cover" autoplay muted playsinline />
@@ -292,18 +300,18 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
         </div>
 
         <!-- ══ 右：控制項 ══════════════════════════════════════ -->
-        <div class="flex flex-col gap-3 landscape:h-full landscape:w-72 landscape:shrink-0">
+        <div class="flex flex-col gap-3 field-mode:h-full field-mode:w-72 field-mode:shrink-0">
           <!--
             控制項可以捲，但錄影鈕在捲動區外面 —— 端著手機對準球場的人
             不可能一邊捲頁面一邊找按鈕。
           -->
-          <div class="min-h-0 flex-1 space-y-3 landscape:overflow-y-auto">
+          <div class="min-h-0 flex-1 space-y-3 field-mode:overflow-y-auto">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <h1 class="truncate text-fluid-lg font-bold">
                   {{ teamName }} vs {{ game.opponent }}
                 </h1>
-                <p class="text-fluid-sm text-white/60 landscape:hidden">
+                <p class="text-fluid-sm text-white/60 field-mode:hidden">
                   {{ formatGameDateLong(game.date) }}
                 </p>
               </div>
@@ -316,7 +324,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             </div>
 
             <!-- 直向時提示轉橫。用 CSS 判斷而不是 JS —— 不會有 hydration 問題 -->
-            <p class="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70 landscape:hidden">
+            <p class="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70 field-mode:hidden">
               📱 把手機轉成橫的，拍到的畫面最廣。
             </p>
 
@@ -343,7 +351,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                 </option>
               </select>
               <!-- deviceId 每次都會變，所以不能記住上次的選擇，要講清楚 -->
-              <p class="mt-1 text-xs text-white/50 landscape:hidden">
+              <p class="mt-1 text-xs text-white/50 field-mode:hidden">
                 每次開啟都要重新挑一次，系統不會記住。
               </p>
             </div>
@@ -403,25 +411,54 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
               </p>
             </div>
 
-            <!-- ══ 已錄片段 ════════════════════════════════════ -->
-            <div v-if="savedClips.length" class="landscape:hidden">
+            <!-- ══ 已錄片段與上傳狀態 ══════════════════════════ -->
+            <div v-if="uploads.queue.value.length" class="field-mode:hidden">
               <h2 class="mb-2 text-fluid-sm font-semibold text-white/70">這一輪已錄</h2>
               <ul class="space-y-1.5">
                 <li
-                  v-for="clip in savedClips"
-                  :key="`${clip.inning}-${clip.half}-${clip.filename}`"
-                  class="flex items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-fluid-sm"
+                  v-for="item in uploads.queue.value"
+                  :key="item.id"
+                  class="rounded-lg bg-white/10 px-3 py-2 text-fluid-sm"
                 >
-                  <span class="font-bold">
-                    第 {{ clip.inning }} 局{{ HALF_LABELS[clip.half] }}
-                  </span>
-                  <span class="tabular-nums text-white/70">
-                    {{ formatDuration(clip.seconds) }} · {{ formatBytes(clip.bytes) }}
-                  </span>
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="font-bold">
+                      第 {{ item.inning }} 局{{ HALF_LABELS[item.half] }}
+                    </span>
+                    <span class="tabular-nums text-white/70">{{ formatBytes(item.bytes) }}</span>
+                  </div>
+
+                  <div class="mt-1 flex items-center justify-between gap-3 text-xs">
+                    <span v-if="item.state === 'done'" class="text-success">✓ 已上傳</span>
+                    <span v-else-if="item.state === 'uploading'" class="text-white/70">
+                      上傳中 {{ item.progress }}%
+                    </span>
+                    <span v-else-if="item.state === 'waiting'" class="text-white/50">等待上傳</span>
+                    <span v-else class="text-warning">{{ item.error }}</span>
+
+                    <button
+                      v-if="item.state === 'failed'"
+                      type="button"
+                      class="shrink-0 underline underline-offset-4"
+                      @click="uploads.retry(item.id)"
+                    >
+                      重試
+                    </button>
+                  </div>
+
+                  <!-- 進度條。傳一段要好幾分鐘，沒有它會以為卡住了 -->
+                  <div
+                    v-if="item.state === 'uploading'"
+                    class="mt-1.5 h-1 overflow-hidden rounded-full bg-white/15"
+                  >
+                    <div
+                      class="h-full bg-brand-500 transition-all"
+                      :style="{ width: `${item.progress}%` }"
+                    />
+                  </div>
                 </li>
               </ul>
               <p class="mt-2 text-xs text-white/50">
-                影片已存到這台裝置。這份清單只在本頁有效，離開後不會保留。
+                每一段都已經存到這台裝置，上傳失敗也不會弄丟 —— 事後手動傳就好。
               </p>
             </div>
           </div>
@@ -450,13 +487,24 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
               ⚠️ 請勿切換 App 或鎖定螢幕
             </p>
 
-            <!-- 橫向沒空間列完整清單，收成一個數字就夠 -->
-            <p
-              v-else-if="savedClips.length"
-              class="hidden text-center text-xs text-white/50 landscape:block"
-            >
-              這一輪已錄 {{ savedClips.length }} 段
-            </p>
+            <!-- 球場模式沒空間列完整清單，收成一兩行 -->
+            <div v-else-if="uploads.queue.value.length" class="hidden text-center field-mode:block">
+              <p class="text-xs" :class="uploads.failed.value ? 'text-warning' : 'text-white/50'">
+                已錄 {{ uploads.queue.value.length }} 段<template v-if="uploads.pending.value">
+                  ・上傳中 {{ uploads.pending.value }}</template
+                ><template v-if="uploads.failed.value"
+                  >・{{ uploads.failed.value }} 段失敗</template
+                >
+              </p>
+              <!--
+                失敗時把原因也帶出來。只有計數的話，人在球場上會知道
+                「壞了」卻不知道是網路斷了還是設定沒做 —— 而這兩件事
+                一個當下重試就好、一個再試幾次也沒用。
+              -->
+              <p v-if="firstUploadError" class="truncate text-xs text-warning">
+                {{ firstUploadError }}
+              </p>
+            </div>
 
             <p v-if="saveMessage" class="truncate text-center text-fluid-sm">{{ saveMessage }}</p>
           </div>

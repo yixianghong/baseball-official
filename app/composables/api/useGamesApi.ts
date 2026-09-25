@@ -1,5 +1,5 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { Game, GameInput, GamePatch, GameQuery } from '#shared/schemas/game'
+import type { Game, GameClip, GameInput, GamePatch, GameQuery } from '#shared/schemas/game'
 
 /**
  * 「比賽」這個功能領域的所有 API 呼叫。
@@ -15,6 +15,9 @@ const ENDPOINTS = {
   create: '/admin/games',
   batch: '/admin/games/batch',
   update: (id: string) => `/admin/games/${encodeURIComponent(id)}`,
+  clipsRefresh: (id: string) => `/admin/games/${encodeURIComponent(id)}/clips/refresh`,
+  clip: (id: string, videoId: string) =>
+    `/admin/games/${encodeURIComponent(id)}/clips/${encodeURIComponent(videoId)}`,
 } as const
 
 /**
@@ -91,5 +94,17 @@ export function useGameActions() {
     updateGame: (id: string, payload: GamePatch) => patch<Game>(ENDPOINTS.update(id), payload),
 
     removeGame: (id: string) => del<{ deleted: boolean }>(ENDPOINTS.update(id)),
+
+    /**
+     * 把 YouTube 上的可見度同步回來。
+     *
+     * API 上傳的影片一律是私人的，管理者手動改成公開之後要按一下這個，
+     * 前台才知道哪幾段可以顯示（見 `docs/game-recording-plan.md`）。
+     */
+    refreshClips: (id: string) => post<{ clips: GameClip[] }>(ENDPOINTS.clipsRefresh(id), {}),
+
+    /** 只移除本站的紀錄，不刪 YouTube 上的影片。 */
+    removeClip: (id: string, videoId: string) =>
+      del<{ clips: GameClip[] }>(ENDPOINTS.clip(id, videoId)),
   }
 }

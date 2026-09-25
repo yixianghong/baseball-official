@@ -13,6 +13,7 @@ import {
   GAME_RESULT_LABELS,
   GAME_STATUS_LABELS,
   gameResult,
+  HALF_LABELS,
   isGoogleMapsUrl,
   withSummedRuns,
 } from '#shared/schemas/game'
@@ -47,7 +48,7 @@ const gameId = computed(() => String(route.params.id))
 const { data: game, error } = await useGame(gameId)
 const { data: players } = await usePlayers()
 const { data: settings } = await useSiteSettings()
-const { updateGame } = useGameActions()
+const { updateGame, refreshClips, removeClip } = useGameActions()
 
 const teamName = computed(() => settings.value?.teamName ?? '我隊')
 const teamNames = computed(() => (settings.value ? teamNameCandidates(settings.value) : []))
@@ -240,6 +241,51 @@ const startingPitcherId = computed<string>({
     ]
   },
 })
+
+/*
+ * ── 賽事錄影 ──────────────────────────────────────────────────
+ *
+ * 片段是錄影頁上傳的，這裡只做兩件事：看有哪些、以及把可見度同步回來。
+ * 不放在自動儲存的 `formState` 裡 —— `clips` 刻意不在 `gameInputSchema`
+ * 中（理由見 `gameSchema`），它有自己的端點。
+ */
+const clips = ref([...(game.value?.clips ?? [])])
+watch(game, () => (clips.value = [...(game.value?.clips ?? [])]))
+
+const clipsBusy = ref(false)
+const clipsMessage = ref('')
+
+const privateClipCount = computed(
+  () => clips.value.filter((clip) => clip.privacy === 'private').length,
+)
+
+async function syncClipPrivacy() {
+  clipsBusy.value = true
+  clipsMessage.value = ''
+  try {
+    const result = await refreshClips(gameId.value)
+    clips.value = result.clips
+    const remaining = result.clips.filter((clip) => clip.privacy === 'private').length
+    clipsMessage.value = remaining
+      ? `已更新，還有 ${remaining} 段是私人的`
+      : '已更新，所有片段都公開了'
+  } catch {
+    clipsMessage.value = '更新失敗，請稍後再試'
+  } finally {
+    clipsBusy.value = false
+  }
+}
+
+async function deleteClip(videoId: string) {
+  clipsBusy.value = true
+  try {
+    const result = await removeClip(gameId.value, videoId)
+    clips.value = result.clips
+    clipsMessage.value = '已從本站移除（YouTube 上的影片還在）'
+  } finally {
+    clipsBusy.value = false
+  }
+}
 
 const pitcherOptions = computed(() => [
   { value: '', label: '（自行輸入）' },
@@ -474,6 +520,90 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             :opponent-name="game.opponent"
             :team-names="teamNames"
           />
+        </div>
+
+        <hr class="border-border" />
+
+        <!-- ── 賽事錄影 ──────────────────────────────────────── -->
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="text-fluid-lg font-bold">賽事錄影</h2>
+              <p class="text-fluid-sm text-content-muted">
+                片段在
+                <NuxtLink
+                  :to="`/admin/record/${game.id}`"
+                  class="text-brand-600 underline underline-offset-4 dark:text-brand-300"
+                >
+                  錄影頁
+                </NuxtLink>
+                錄製並自動上傳。
+              </p>
+            </div>
+            <UiBaseButton
+              v-if="clips.length"
+              variant="secondary"
+              size="sm"
+              :loading="clipsBusy"
+              @click="syncClipPrivacy"
+            >
+              更新影片狀態
+            </UiBaseButton>
+          </div>
+
+          <!--
+            ⚠️ 這段說明不能省。
+
+            透過 API 上傳的影片一律是私人的（未通過 YouTube 合規稽核的專案
+            強制如此），而**私人的片段前台不會顯示**。不講的話，管理者會
+            以為上傳成功就完事了，然後納悶為什麼官網上什麼都沒有。
+          -->
+          <p
+            v-if="privateClipCount"
+            class="rounded-lg bg-warning/15 px-3 py-2 text-fluid-sm text-warning"
+          >
+            有 {{ privateClipCount }} 段還是「私人」，前台不會顯示。請到 YouTube Studio
+            改成公開或不公開，再按上面的「更新影片狀態」。
+          </p>
+
+          <ul v-if="clips.length" class="space-y-2">
+            <li
+              v-for="clip in clips"
+              :key="clip.videoId"
+              class="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-fluid-sm"
+            >
+              <span class="font-bold">第 {{ clip.inning }} 局{{ HALF_LABELS[clip.half] }}</span>
+
+              <UiBaseBadge :tone="clip.privacy === 'private' ? 'warning' : 'success'" size="sm">
+                {{
+                  clip.privacy === 'private'
+                    ? '私人'
+                    : clip.privacy === 'public'
+                      ? '公開'
+                      : '不公開'
+                }}
+              </UiBaseBadge>
+
+              <a
+                :href="`https://studio.youtube.com/video/${clip.videoId}/edit`"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-content-muted underline underline-offset-4 hover:text-brand-600"
+              >
+                在 YouTube Studio 開啟
+              </a>
+
+              <!-- 只移除本站的紀錄，不刪 YouTube 上的影片 -->
+              <AdminDeleteButton
+                class="ml-auto"
+                :loading="clipsBusy"
+                @confirm="deleteClip(clip.videoId)"
+              />
+            </li>
+          </ul>
+          <p v-else class="text-fluid-sm text-content-muted">還沒有錄影片段。</p>
+
+          <p v-if="clipsMessage" class="text-fluid-sm">{{ clipsMessage }}</p>
         </div>
 
         <hr class="border-border" />

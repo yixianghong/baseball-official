@@ -150,6 +150,22 @@ export default defineNuxtConfig({
      */
     cronSecret: '',
 
+    /**
+     * YouTube 上傳（賽事錄影，見 `docs/game-recording-plan.md`）。
+     *
+     * 手上只有一個 refresh token，用它換短效的 access token 給瀏覽器直傳。
+     * **三項缺任何一項就整個關閉上傳**（錄影與下載仍然可用）—— 比照 VAPID
+     * 與天氣，功能自己消失，不要半開著等執行期才炸。
+     *
+     * refresh token 用 `pnpm youtube:auth` 取得。⚠️ OAuth 同意畫面的發布狀態
+     * 必須是「正式版」，停在「測試中」的話 token 7 天就過期。
+     */
+    youtube: {
+      clientId: '',
+      clientSecret: '',
+      refreshToken: '',
+    },
+
     // --- 外部呼叫共用 ---
     /** 呼叫外部服務（Gemini、Identity Toolkit）的預設逾時毫秒數。 */
     upstreamTimeoutMs: 10_000,

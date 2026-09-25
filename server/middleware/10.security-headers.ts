@@ -39,8 +39,17 @@ function buildCsp(): string {
     'font-src': ["'self'", 'data:'],
     'style-src': ["'self'", "'unsafe-inline'"],
     'script-src': ["'self'", "'unsafe-inline'"],
-    // 前端只允許連回自己（也就是只能打 BFF），不能直接連外部 API
-    'connect-src': ["'self'"],
+    /*
+     * 前端原則上只能打自己的 BFF，這裡只開一個例外：
+     * 賽事錄影的片段由瀏覽器**直傳** YouTube（見 `server/utils/youtube.ts`）。
+     *
+     * 為什麼不讓檔案走 BFF：一段 1080p 有 85～140 MB，經過 Cloud Run 就要
+     * 吃記憶體與請求逾時，而且同一份資料要走兩趟網路。
+     *
+     * 只開 `googleapis.com`，不是整個 `https:` —— 這條規則的價值就在於
+     * 「前端不能把資料送去任意地方」，開太寬等於沒開。
+     */
+    'connect-src': ["'self'", 'https://www.googleapis.com'],
     /*
      * 只開一個來源：YouTube 的嵌入播放器（賽事錄影，見
      * `docs/game-recording-plan.md`）。

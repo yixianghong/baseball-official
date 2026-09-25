@@ -110,6 +110,22 @@ export default defineNitroPlugin(() => {
       )
     }
 
+    // 同一個道理：只設一半的症狀是「上傳按鈕消失」，看起來像功能沒做
+    const youtubeParts = [
+      config.youtube?.clientId,
+      config.youtube?.clientSecret,
+      config.youtube?.refreshToken,
+    ]
+    const youtubeSet = youtubeParts.filter(Boolean).length
+    if (youtubeSet === 0) {
+      logger.info('未設定 YouTube 憑證，賽事錄影只能存到裝置，不會自動上傳')
+    } else if (youtubeSet < youtubeParts.length) {
+      logger.warn(
+        'YouTube 憑證只設定了一部分，自動上傳會維持關閉。' +
+          '需要 NUXT_YOUTUBE_CLIENT_ID、NUXT_YOUTUBE_CLIENT_SECRET、NUXT_YOUTUBE_REFRESH_TOKEN 三項齊全。',
+      )
+    }
+
     logger.info('configuration validated')
     return
   }

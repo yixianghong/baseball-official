@@ -13,6 +13,7 @@
     "preview": "nuxt preview",
     "start": "node .output/server/index.mjs",
     "seed": "node --env-file=.env scripts/seed-firestore.mjs",
+    "youtube:auth": "node scripts/youtube-auth.mjs",
     "postinstall": "nuxt prepare",
     "typecheck": "nuxt typecheck",
     "lint": "eslint .",

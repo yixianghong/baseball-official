@@ -70,16 +70,20 @@
 
 ## 5. BFF API
 
-| 方法   | 路由                                  | 說明                  | 權限            |
-| ------ | ------------------------------------- | --------------------- | --------------- |
-| POST   | `/api/admin/youtube/upload-token`     | 回傳短效 access token | `requireUser()` |
-| POST   | `/api/admin/games/:id/clips`          | 登錄一支片段          | `requireUser()` |
-| DELETE | `/api/admin/games/:id/clips/:videoId` | 移除誤傳的片段        | `requireUser()` |
+| 方法   | 路由                                  | 說明                    | 權限            |
+| ------ | ------------------------------------- | ----------------------- | --------------- |
+| POST   | `/api/admin/youtube/upload-token`     | 回傳短效 access token   | `requireUser()` |
+| POST   | `/api/admin/games/:id/clips`          | 登錄一支片段            | `requireUser()` |
+| POST   | `/api/admin/games/:id/clips/refresh`  | 同步 YouTube 上的可見度 | `requireUser()` |
+| DELETE | `/api/admin/games/:id/clips/:videoId` | 移除誤傳的片段          | `requireUser()` |
 
 - `upload-token` 只回傳 token 與到期時間，不回傳 refresh token。
 - `clips` 端點走 repository 新增的 `addGameClip()`，比照現有的 `markReminderSent()`：
   只動這一個欄位，不會蓋掉管理者同時在別處編輯的內容。
 - 刪除只移除本站的紀錄，不刪 YouTube 上的影片（避免誤按造成不可逆的損失）。
+- `clips/refresh` 用 `videos.list?part=status` 一次問完這一場所有片段的可見度
+  （配額 1 單位）。**這是 B 方案的關鍵一步**：管理者在 YouTube Studio 批次改成
+  公開之後，回後台按一下，前台才知道哪幾段可以顯示。
 
 ## 6. 資料模型
 
@@ -166,6 +170,17 @@ NUXT_YOUTUBE_CLIENT_SECRET=     # Secret Manager
 NUXT_YOUTUBE_REFRESH_TOKEN=     # Secret Manager，一次性 OAuth 取得
 ```
 
+refresh token 用 `pnpm youtube:auth` 取得（`scripts/youtube-auth.mjs`）。
+授權時要用**放影片的那個帳號**登入 —— Client ID 代表「哪一個應用程式」，
+refresh token 代表「代表哪一個帳號」，兩者屬於不同的 Google 帳號是正常的。
+
+⚠️ **OAuth 同意畫面的發布狀態必須是「正式版」。** 停在「測試中」的話
+refresh token **7 天就過期**，功能每週壞一次。未通過驗證沒關係（授權時
+點「進階」→「前往…」略過警告即可），但發布狀態一定要切過去。
+
+要的範圍是 `youtube.upload` + `youtube.readonly`。第二個是為了把影片的
+可見度讀回來 —— 見下一節。刻意不要整個 `youtube` 範圍（那還包含修改與刪除）。
+
 三項缺任何一項就關閉上傳功能（錄影與下載仍可用），比照現有的 VAPID 與天氣。
 `apphosting.yaml` 的機密一律用 `NUXT_` 開頭的變數名，CLI 問「要不要加進
 apphosting.yaml」時選 **No**（理由見該檔案的註解）。
@@ -192,11 +207,16 @@ apphosting.yaml」時選 **No**（理由見該檔案的註解）。
 
 **階段 2：自動上傳與前台**
 
-- [ ] YouTube OAuth 一次性設定，refresh token 進 Secret Manager
-- [ ] `upload-token` 與 `clips` 兩支端點、`gameClipSchema`
-- [ ] 上傳佇列（錄下一局的同時傳上一局）
-- [ ] 前台「本場影片」區塊
-- 驗收：實際跑一場七局，確認片段在一局之後陸續出現在前台
+- [x] YouTube OAuth 一次性設定（`pnpm youtube:auth`），refresh token 進 Secret Manager
+- [x] `gameClipSchema`、四支端點（`upload-token` / `clips` / `clips/refresh` / 刪除）
+- [x] 上傳佇列（錄下一個半局的同時傳上一段，含進度與重試）
+- [x] 前台「本場影片」區塊（只渲染非私人的片段，預設只載縮圖）
+- [x] 後台的片段清單與「更新影片狀態」
+- [ ] 驗收：實際跑一場七局，確認片段在一個半局之後陸續出現在前台
+
+  ⚠️ 上傳這條路**只能用真憑證實測** —— e2e 一律把 `NUXT_YOUTUBE_*` 清空，
+  所以測到的是「沒設定時不會爆」，而不是「真的傳得上去」。第一次務必先用
+  一兩段短片試，確認影片有進到對的頻道、標題格式正確。
 
 **階段 3：視實際使用情況**
 

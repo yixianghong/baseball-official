@@ -38,6 +38,21 @@ process.env.NUXT_GEMINI_API_KEY = ''
 // 氣象署也要清掉：`.env` 有授權碼的話，e2e 會真的去打中央氣象署的 API ——
 // 測試不該依賴外部服務的可用性，也不該替別人消耗人家的流量配額
 process.env.NUXT_CWA_API_KEY = ''
+// YouTube 同理：有憑證的話，e2e 會真的去換 access token、真的去問影片狀態
+process.env.NUXT_YOUTUBE_CLIENT_ID = ''
+process.env.NUXT_YOUTUBE_CLIENT_SECRET = ''
+process.env.NUXT_YOUTUBE_REFRESH_TOKEN = ''
+
+/*
+ * 限流額度也要用環境變數設，不能只寫在下面的 `nuxtConfig` 裡。
+ *
+ * ⚠️ **環境變數的優先權比 `nuxtConfig` 高**，所以本機 `.env` 的
+ * `NUXT_RATE_LIMIT_MAX=100` 會直接蓋掉那裡寫的值 —— 症狀是整份測試跑到
+ * 後半段開始零星出現 429，而且失敗的位置每次都不一樣（看誰先跑到上限）。
+ * 這份測試不是在測限流（那是 `rate-limit.test.ts` 的事），所以開大一點。
+ */
+process.env.NUXT_RATE_LIMIT_MAX = '500'
+process.env.NUXT_RATE_LIMIT_WINDOW_MS = '60000'
 // 排程密鑰同理：`.env` 有值的話，上面那組「沒設定密鑰就擋下」的測試會失去意義，
 // 而且測試環境不該有任何一條能觸發真實推播的路
 process.env.NUXT_CRON_SECRET = ''
@@ -57,14 +72,11 @@ await setup({
       /*
        * 放寬限制，避免測試之間互相觸發限流。
        *
-       * ⚠️ 環境變數的優先權比這裡高 —— 本機 `.env` 若有 `NUXT_RATE_LIMIT_MAX`
-       * 就會蓋掉這個值，所以本機與 CI 跑起來的額度可能不一樣。
-       * 「本機過、CI 掛」的時候記得先看這個。
-       *
-       * 整套測試目前用掉約 65 次用戶端請求。頁面渲染不算在內
-       * （SSR 的內部呼叫已被 `30.rate-limit.ts` 排除）。
+       * ⚠️ **這裡寫的值會被環境變數蓋掉**，所以真正生效的是檔案開頭的
+       * `process.env.NUXT_RATE_LIMIT_MAX`。這兩行留著只是為了讓沒有
+       * 環境變數的情況也有一個合理的值 —— 要調額度請改開頭那一處。
        */
-      rateLimitMax: 200,
+      rateLimitMax: 500,
       rateLimitWindowMs: 60_000,
       /*
        * 假的 VAPID 金鑰。
@@ -284,6 +296,7 @@ describe('資安標頭', () => {
 describe('後台權限：所有寫入都需要登入', () => {
   it.each([
     ['POST', '/api/admin/games'],
+    ['POST', '/api/admin/youtube/upload-token'],
     ['POST', '/api/admin/players'],
     ['POST', '/api/admin/announcements'],
     ['PUT', '/api/admin/settings'],
@@ -517,6 +530,122 @@ describe('資料寫入與讀取', () => {
    * 這支端點曾經收一個 `result` 欄位讓後台手動覆寫。拿掉之後 schema 是最後
    * 一道防線：只要它還收，一次手動的 PATCH 就能把「1:4 獲勝」寫進資料庫。
    */
+  /**
+   * 賽事錄影的片段。
+   *
+   * 影片本體在 YouTube（瀏覽器直傳），BFF 只記 `videoId`。這一組守的是
+   * 「記到對的地方」與「私人的不會外洩到前台」。
+   */
+  describe('賽事錄影片段', () => {
+    const clip = (inning: number, half: 'top' | 'bottom', videoId: string) => ({
+      inning,
+      half,
+      videoId,
+    })
+
+    /*
+     * 整組共用一次登入。
+     *
+     * 每條測試各自 `login()` 的話，這一組就多打六次 `/api/auth/login`，
+     * 而整份 e2e 加起來會逼近限流額度。
+     *
+     * ⚠️ 不能用 `beforeAll` —— 它會跑在 `setup()` 建立測試 context 之前，
+     * 錯誤是 `No context is available`。改成第一次用到時才登入並快取，
+     * 那時已經在測試內部，context 一定就緒。
+     */
+    let auth: Promise<{ cookie: string; csrfToken: string }> | null = null
+    const headersFor = async () => {
+      auth ??= login()
+      const { cookie, csrfToken } = await auth
+      return { cookie, 'x-csrf-token': csrfToken }
+    }
+
+    it('登錄片段、同一個半局重錄會取代而不是疊加', async () => {
+      const headers = await headersFor()
+      const created = await $fetch<{ data: { id: string } }>('/api/admin/games', {
+        method: 'POST',
+        headers,
+        body: { date: '2027-08-01', opponent: '錄影隊' },
+      })
+      const id = created.data.id
+      const post = (body: Record<string, unknown>) =>
+        $fetch<{ data: { clips: Array<{ inning: number; videoId: string }> } }>(
+          `/api/admin/games/${id}/clips`,
+          { method: 'POST', headers, body },
+        )
+
+      await post(clip(1, 'top', 'aaaaaaaaaaa'))
+      const second = await post(clip(1, 'bottom', 'bbbbbbbbbbb'))
+      expect(second.data.clips).toHaveLength(2)
+
+      // 重錄同一個半局：取代，否則前台會出現兩段一樣的
+      const again = await post(clip(1, 'top', 'ccccccccccc'))
+      expect(again.data.clips).toHaveLength(2)
+      expect(again.data.clips.some((c) => c.videoId === 'aaaaaaaaaaa')).toBe(false)
+      expect(again.data.clips.some((c) => c.videoId === 'ccccccccccc')).toBe(true)
+    })
+
+    /** videoId 會變成前台 iframe 的網址，schema 是最後一道防線。 */
+    it.each([
+      ['整個網址', 'https://youtu.be/abcdefghijk'],
+      ['含斜線', 'abcdefgh/jk'],
+      ['長度不對', 'abc'],
+    ])('拒絕 %s 的 videoId', async (_label, videoId) => {
+      const headers = await headersFor()
+      const response = await fetch('/api/admin/games/g1/clips', {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(clip(1, 'top', videoId)),
+      })
+
+      expect(response.status).toBe(400)
+    })
+
+    it('移除片段只動本站的紀錄', async () => {
+      const headers = await headersFor()
+      const created = await $fetch<{ data: { id: string } }>('/api/admin/games', {
+        method: 'POST',
+        headers,
+        body: { date: '2027-08-02', opponent: '刪除隊' },
+      })
+      const id = created.data.id
+
+      await $fetch(`/api/admin/games/${id}/clips`, {
+        method: 'POST',
+        headers,
+        body: clip(2, 'top', 'ddddddddddd'),
+      })
+      const after = await $fetch<{ data: { clips: unknown[] } }>(
+        `/api/admin/games/${id}/clips/ddddddddddd`,
+        { method: 'DELETE', headers },
+      )
+
+      expect(after.data.clips).toHaveLength(0)
+    })
+
+    /**
+     * 沒設定 YouTube 憑證時（e2e 一律清空），同步不該炸 —— 它只是沒東西可同步。
+     */
+    it('未設定 YouTube 時同步可見度不會失敗', async () => {
+      const headers = await headersFor()
+      const response = await fetch('/api/admin/games/g1/clips/refresh', { method: 'POST', headers })
+
+      expect(response.status).toBe(200)
+    })
+
+    it('未設定 YouTube 時上傳權杖回報「還沒開」而不是錯誤', async () => {
+      const headers = await headersFor()
+      const body = await $fetch<{ data: { configured: boolean; accessToken?: string } }>(
+        '/api/admin/youtube/upload-token',
+        { method: 'POST', headers },
+      )
+
+      expect(body.data.configured).toBe(false)
+      // 沒設定就不該有權杖外流
+      expect(body.data.accessToken).toBeUndefined()
+    })
+  })
+
   it('比賽結果由計分板推導，送上來的 result 一律被忽略', async () => {
     const { cookie, csrfToken } = await login()
 
