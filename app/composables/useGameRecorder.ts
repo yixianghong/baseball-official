@@ -160,8 +160,36 @@ export function useGameRecorder() {
     return Boolean(width && height && width < height)
   })
 
+  /**
+   * 轉動裝置。
+   *
+   * ## ⚠️ 只是重新讀一次設定是不夠的
+   * **轉動手機不會讓已經取得的 track 跟著轉。** 在直向開啟頁面拿到的串流
+   * 就是直的（1080×1920），轉成橫的之後它**還是直的** —— 而預覽因為
+   * `object-cover` 會裁切，看起來完全正常，錄出來卻是直式影片。
+   * 症狀就是「我明明轉成橫的，它還說影像是直的」：它沒說錯。
+   *
+   * 所以這裡要**重新取得串流**，讓 track 以新的方向重新協商。
+   *
+   * 錄影中不能動：重開鏡頭會讓 `MediaRecorder` 的來源消失，那一段就毀了。
+   * 轉到一半的人自己會看到警告，停下來再轉就好。
+   */
+  let rotateTimer: ReturnType<typeof setTimeout> | null = null
+
   function onOrientationChange() {
     settingsVersion.value += 1
+    if (recording.value || !selectedCameraId.value) return
+
+    /*
+     * 等版面穩定再重開。
+     *
+     * `orientationchange` 會在瀏覽器完成旋轉**之前**就觸發，緊接著還有好幾個
+     * `resize`。太早重開會拿到轉到一半的尺寸，而且連開好幾次相機。
+     */
+    if (rotateTimer) clearTimeout(rotateTimer)
+    rotateTimer = setTimeout(() => {
+      if (!recording.value) void openCamera(selectedCameraId.value)
+    }, 400)
   }
 
   function start(): boolean {
@@ -272,6 +300,7 @@ export function useGameRecorder() {
   })
 
   onBeforeUnmount(() => {
+    if (rotateTimer) clearTimeout(rotateTimer)
     document.removeEventListener('visibilitychange', onVisibilityChange)
     window.removeEventListener('resize', onOrientationChange)
     window.removeEventListener('orientationchange', onOrientationChange)
