@@ -27,8 +27,8 @@ import { formatGameDateLong } from '~/utils/format'
  * ## 高度用 `dvh`、左右要留安全區
  * 手機瀏覽器的 `100vh` 含**會收起的**工具列，橫向本來就只有 320px 上下，
  * 再跟著工具列跳動就沒得用了。而橫向時瀏海吃的是**側邊**而不是下緣，
- * 所以這一頁留的是 `safe-area-inset-left/right`（`viewport-fit=cover` 已在
- * `nuxt.config.ts` 設好，直向時這兩個值是 0，不影響）。
+ * 所以這一頁三邊都要留（`viewport-fit=cover` 已在 `nuxt.config.ts` 設好）：
+ * 直向時 top 有值、左右是 0，橫向時剛好相反。
  *
  * ## 這一階段刻意不上傳
  * 錄完直接存到手機。先用一場真的比賽回答「超廣角選不選得到、檔案多大、
@@ -202,7 +202,11 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
 <template>
   <div
     class="min-h-dvh bg-ink-deep text-white"
-    style="padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right)"
+    style="
+      padding-top: env(safe-area-inset-top);
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    "
   >
     <UiBaseEmpty v-if="loadError" title="找不到這場比賽" icon="🔍" class="px-4 py-10">
       <UiBaseButton variant="secondary" @click="navigateTo('/admin/games')">

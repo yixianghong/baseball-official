@@ -152,6 +152,12 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
 - **Nuxt plugin 裡不能只掛 `window.addEventListener('load')`** — plugin 在 hydration
   階段執行，那時 `load` 常常已經發生過了，監聽器永遠不會被呼叫。要先檢查
   `document.readyState`。`app/plugins/pwa.client.ts` 就是因為這個而安靜地沒註冊 SW。
+- **黏在頂端的 header 一定要 `pt-[env(safe-area-inset-top)]`。** head 裡設了
+  `apple-mobile-web-app-status-bar-style: black-translucent`，加到主畫面之後
+  內容會延伸到狀態列底下（那是刻意的，導覽列要鋪到最頂端才好看）。少了這個內距，
+  選單鈕就會被瀏海／動態島壓住 —— 而這**只在加到主畫面之後才看得到**，
+  一般瀏覽分頁完全正常。前台修好之後後台又踩了一次，現在 e2e 兩邊都守著。
+  橫向時瀏海吃的是**側邊**，所以錄影頁留的是 left/right（見「球賽錄影」）。
 - **公開頁面的 SSR 輸出不能因人而異** — 它們會被 CDN 快取送給所有訪客。加 cookie、
   依 cookie 改渲染、把登入狀態畫進 HTML，都會默默破壞快取或把狀態送給別人，
   而且畫面上完全看不出來。詳見「部署」章節。
@@ -333,6 +339,17 @@ Safari 只錄得出 mp4，Chrome 兩種都行。順序反過來 Android 會錄�
 的寬高要不要交換」處理不一致，會出現預覽正常、檔案卻是 1080×1920 的情況，
 而且在球場上看不出來。`portraitVideo` 偵測到就在預覽上壓紅色警告。
 `getSettings()` 不是響應式的，轉動時要自己重讀。
+
+**⚠️ API 上傳的影片一律是私人的，而且和我們送什麼無關。** 未通過 YouTube
+合規稽核的專案（2020/07/28 之後建立的都算）強制如此。管理者要到 YouTube Studio
+手動改成公開 —— 所以 `gameClipSchema` 有一個 `privacy` 欄位，而前台的
+`visibleClips()` **只渲染非 private 的片段**：私人影片嵌進去只會顯示「無法播放」，
+而那是訪客看到的畫面。寧可少一段，也不要一個壞掉的播放器。
+
+**前台預設只載縮圖**（`i.ytimg.com`），點了才換成 iframe —— 一場最多十四段，
+十四個 YouTube 播放器會把手機直接拖垮。CSP 的 `frame-src` 只開
+`youtube-nocookie.com` 一個來源，沒有這一條會 fallback 到 `default-src 'self'`
+而整個被擋，症狀只有 console 一行 `Refused to frame`。
 
 **檔名要排得出比賽順序**：局數補零（第 10 局不會排在第 2 局前面），
 上下半靠「上」(U+4E0A) 的碼位小於「下」(U+4E0B) —— 換成別的字會壞掉，

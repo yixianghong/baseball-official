@@ -4,6 +4,7 @@ import {
   taipeiDateKey,
   withSummedRuns,
   type Game,
+  type GameClip,
   type GameInput,
   type GamePatch,
   type GameQueryOptions,
@@ -72,14 +73,14 @@ export async function createGame(input: GameInput): Promise<Game> {
   const timestamps = { createdAt: nowIso(), updatedAt: nowIso() }
 
   if (!isFirebaseConfigured()) {
-    const game: Game = { ...data, ...timestamps, remindersSent: [], id: memoryId('g') }
+    const game: Game = { ...data, ...timestamps, remindersSent: [], clips: [], id: memoryId('g') }
     getMemoryStore().games.set(game.id, game)
     return game
   }
 
   const db = await getDb()
   const ref = await db.collection(COLLECTION).add({ ...data, ...timestamps })
-  return { ...data, ...timestamps, remindersSent: [], id: ref.id }
+  return { ...data, ...timestamps, remindersSent: [], clips: [], id: ref.id }
 }
 
 export async function updateGame(id: string, patch: GamePatch): Promise<Game> {
@@ -120,6 +121,59 @@ export async function markReminderSent(id: string, kind: string): Promise<void> 
 
   const db = await getDb()
   await db.collection(COLLECTION).doc(id).set({ remindersSent }, { merge: true })
+}
+
+/**
+ * 加一段錄影，或覆蓋同一個半局既有的那一段（重錄）。
+ *
+ * 不走 `updateGame()`：理由和 `markReminderSent()` 相同 —— 只動這一個欄位，
+ * 不會把管理者同時在後台編輯的內容蓋掉。錄影頁和編輯頁很可能同時開著。
+ */
+export async function addGameClip(id: string, clip: GameClip): Promise<GameClip[]> {
+  const existing = await getGame(id)
+  if (!existing) throw notFound('比賽')
+
+  // 同一個半局重錄時取代舊的，而不是疊上去 —— 否則前台會出現兩段一樣的
+  const clips = [
+    ...existing.clips.filter((item) => !(item.inning === clip.inning && item.half === clip.half)),
+    clip,
+  ]
+  await saveClips(id, existing, clips)
+  return clips
+}
+
+export async function removeGameClip(id: string, videoId: string): Promise<GameClip[]> {
+  const existing = await getGame(id)
+  if (!existing) throw notFound('比賽')
+
+  const clips = existing.clips.filter((item) => item.videoId !== videoId)
+  await saveClips(id, existing, clips)
+  return clips
+}
+
+/** 更新片段的可見度（管理者在 YouTube Studio 改完之後同步回來）。 */
+export async function setClipPrivacy(
+  id: string,
+  privacyByVideoId: Record<string, GameClip['privacy']>,
+): Promise<GameClip[]> {
+  const existing = await getGame(id)
+  if (!existing) throw notFound('比賽')
+
+  const clips = existing.clips.map((clip) =>
+    privacyByVideoId[clip.videoId] ? { ...clip, privacy: privacyByVideoId[clip.videoId]! } : clip,
+  )
+  await saveClips(id, existing, clips)
+  return clips
+}
+
+async function saveClips(id: string, existing: Game, clips: GameClip[]): Promise<void> {
+  if (!isFirebaseConfigured()) {
+    getMemoryStore().games.set(id, { ...existing, clips })
+    return
+  }
+
+  const db = await getDb()
+  await db.collection(COLLECTION).doc(id).set({ clips }, { merge: true })
 }
 
 export async function deleteGame(id: string): Promise<void> {

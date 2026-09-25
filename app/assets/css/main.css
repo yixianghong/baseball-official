@@ -454,11 +454,21 @@
     margin-top: 0.75em;
   }
 
-  .markdown :where(h3, h4, h5, h6) {
+  .markdown :where(h2, h3, h4, h5, h6) {
     margin-top: 1.4em;
     color: var(--color-content);
     font-weight: 700;
     line-height: 1.4;
+  }
+
+  /*
+   * `renderMarkdown()` 把標題往下偏移兩級（`#` → `h3`），所以公告的內容
+   * 不會出現 `h2`。這裡仍然要有樣式 —— 手寫的 `.markdown` 區塊（例如
+   * `pages/privacy.vue`）是從 `h2` 開始的，少了這條它會比底下的 `h3` 還小，
+   * 標題層級看起來整個反過來。
+   */
+  .markdown :where(h2) {
+    font-size: 1.35em;
   }
 
   .markdown :where(h3) {

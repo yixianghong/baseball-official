@@ -276,6 +276,7 @@ export default defineNuxtConfig({
       '/schedule': { headers: { 'cache-control': PUBLIC_CACHE } },
       '/results': { headers: { 'cache-control': PUBLIC_CACHE } },
       '/news': { headers: { 'cache-control': PUBLIC_CACHE } },
+      '/privacy': { headers: { 'cache-control': PUBLIC_CACHE } },
       '/players': { headers: { 'cache-control': PUBLIC_CACHE } },
       '/players/**': { headers: { 'cache-control': PUBLIC_CACHE } },
       '/games/**': { headers: { 'cache-control': PUBLIC_CACHE } },

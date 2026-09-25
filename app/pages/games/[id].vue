@@ -245,6 +245,13 @@ useHead({
         </div>
       </header>
 
+      <!--
+        ══ 本場影片 ══
+        放在計分板之前：比數在上面的主視覺已經看得到了，點進比賽頁的人
+        接下來最想要的是畫面。私人的片段不會出現，見 `GameClips`。
+      -->
+      <GameClips :clips="game.clips" :finished="isFinished" />
+
       <!-- ══ 進行中／已結束：計分板 + 打線 + 投手 ═══════════════ -->
       <template v-if="showScore">
         <section aria-labelledby="scoreboard-heading">

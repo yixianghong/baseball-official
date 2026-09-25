@@ -42,6 +42,18 @@ function buildCsp(): string {
     // 前端只允許連回自己（也就是只能打 BFF），不能直接連外部 API
     'connect-src': ["'self'"],
     /*
+     * 只開一個來源：YouTube 的嵌入播放器（賽事錄影，見
+     * `docs/game-recording-plan.md`）。
+     *
+     * 沒有這一條的話會 fallback 到 `default-src 'self'`，iframe 直接被擋 ——
+     * 而症狀只有 console 裡一行 `Refused to frame`，畫面上是一塊空白。
+     *
+     * 用 `youtube-nocookie.com` 而不是 `youtube.com`：訪客還沒按播放
+     * 就不該被種追蹤 cookie。刻意不比照 `img-src` 開整個 `https:` ——
+     * iframe 能做的事比 `<img>` 多得多。
+     */
+    'frame-src': ["'self'", 'https://www.youtube-nocookie.com'],
+    /*
      * Service Worker 只能從本站載入。
      *
      * 不寫這一條也會退回 `default-src 'self'`，結果相同 —— 明確列出是因為

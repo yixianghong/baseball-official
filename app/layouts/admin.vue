@@ -43,9 +43,21 @@ function isActive(link: (typeof links)[number]): boolean {
 <template>
   <div class="min-h-screen bg-surface-muted text-content">
     <div class="mx-auto flex max-w-[100rem] flex-col md:flex-row">
-      <!-- ── 側邊導覽 ─────────────────────────────────────────── -->
+      <!--
+        ── 側邊導覽 ───────────────────────────────────────────
+
+        `pt-[env(safe-area-inset-top)]` 不能省 —— 和前台的 header 是同一個理由
+        （見 `layouts/default.vue`）：head 裡設了
+        `apple-mobile-web-app-status-bar-style: black-translucent`，加到主畫面
+        之後網頁內容會**延伸到狀態列底下**。少了這個內距，手機版的隊名與選單鈕
+        就會被瀏海／動態島直接壓住。
+
+        `box-sizing: border-box`（Tailwind preflight）讓這個內距算在
+        `md:h-screen` 之內，所以桌機的側欄不會被撐高。
+        瀏覽器分頁裡這個值是 0，一般瀏覽不受影響。
+      -->
       <header
-        class="sticky top-0 z-40 border-b border-border bg-surface md:h-screen md:w-60 md:shrink-0 md:border-b-0 md:border-r"
+        class="sticky top-0 z-40 border-b border-border bg-surface pt-[env(safe-area-inset-top)] md:h-screen md:w-60 md:shrink-0 md:border-b-0 md:border-r"
       >
         <div
           class="flex items-center justify-between gap-2 px-4 py-3 md:flex-col md:items-stretch md:gap-4 md:px-4 md:py-5"

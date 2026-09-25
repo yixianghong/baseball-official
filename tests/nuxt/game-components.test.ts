@@ -7,6 +7,7 @@ import { emptyScoreboard } from '../../shared/schemas/game'
 import GameCard from '../../app/components/game/GameCard.vue'
 import HomeScoreBanner from '../../app/components/home/ScoreBanner.vue'
 import GameCalendar from '../../app/components/game/GameCalendar.vue'
+import GameClips from '../../app/components/game/GameClips.vue'
 import GameLineupCard from '../../app/components/game/GameLineupCard.vue'
 import GameAttendance from '../../app/components/game/GameAttendance.vue'
 import GameWeather from '../../app/components/game/GameWeather.vue'
@@ -114,6 +115,7 @@ describe('GameCard 的狀態色條', () => {
     coverImageUrl: '',
     opponentLogoUrl: '',
     remindersSent: [],
+    clips: [],
     attendance: [],
     lineup: [],
     pitchers: [],
@@ -456,6 +458,7 @@ describe('ScoreBanner 的最新比數', () => {
     coverImageUrl: '',
     opponentLogoUrl: '',
     remindersSent: [],
+    clips: [],
     attendance: [],
     lineup: [],
     pitchers: [],
@@ -536,6 +539,69 @@ describe('ScoreBanner 的最新比數', () => {
  * **有比賽的日子要一眼看得出來、而且點得進去** —— 這兩件事壞了，月曆就只是
  * 一張佔版面的表格。
  */
+/**
+ * 賽事錄影片段。
+ *
+ * 這一組守的是兩件事：**私人的片段不能畫出來**（嵌進去只會是「無法播放」），
+ * 以及**預設只載縮圖** —— 十四個 YouTube iframe 會把手機直接拖垮。
+ */
+describe('GameClips', () => {
+  const clip = (
+    inning: number,
+    half: 'top' | 'bottom',
+    privacy: 'private' | 'unlisted' | 'public' = 'public',
+  ) => ({
+    inning,
+    half,
+    videoId: `vid${inning}${half[0]}${'x'.repeat(7)}`,
+    privacy,
+    createdAt: '',
+  })
+
+  const mount = (clips: ReturnType<typeof clip>[]) =>
+    mountSuspended(GameClips, { props: { clips } })
+
+  it('預設只畫縮圖，不放 iframe', async () => {
+    const component = await mount([clip(1, 'top')])
+
+    expect(component.findAll('iframe')).toHaveLength(0)
+    expect(component.find('img').attributes('src')).toContain('i.ytimg.com')
+    expect(component.text()).toContain('第 1 局上')
+  })
+
+  it('點了才換成播放器，而且用 nocookie 網域', async () => {
+    const component = await mount([clip(1, 'top')])
+
+    await component.find('button').trigger('click')
+
+    const iframe = component.find('iframe')
+    expect(iframe.exists()).toBe(true)
+    expect(iframe.attributes('src')).toContain('youtube-nocookie.com/embed/')
+  })
+
+  it('私人的片段不會出現', async () => {
+    const component = await mount([clip(1, 'top', 'private'), clip(1, 'bottom')])
+
+    expect(component.findAll('li')).toHaveLength(1)
+    expect(component.text()).toContain('第 1 局下')
+    expect(component.text()).not.toContain('第 1 局上')
+  })
+
+  it('全部都是私人時整個區塊不出現', async () => {
+    const component = await mount([clip(1, 'top', 'private')])
+
+    expect(component.find('section').exists()).toBe(false)
+  })
+
+  it('已結束的比賽標題改成「賽事回放」', async () => {
+    const component = await mountSuspended(GameClips, {
+      props: { clips: [clip(1, 'top')], finished: true },
+    })
+
+    expect(component.text()).toContain('賽事回放')
+  })
+})
+
 describe('GameCalendar', () => {
   const game = (id: string, date: string, extra: Record<string, unknown> = {}) => ({
     id,
@@ -552,6 +618,7 @@ describe('GameCalendar', () => {
     coverImageUrl: '',
     opponentLogoUrl: '',
     remindersSent: [],
+    clips: [],
     attendance: [],
     lineup: [],
     pitchers: [],

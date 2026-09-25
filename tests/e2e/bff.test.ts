@@ -238,6 +238,43 @@ describe('資安標頭', () => {
     expect(policy).toContain('payment=()')
   })
 
+  /**
+   * 迴歸測試：黏在頂端的 header 要避開瀏海／動態島。
+   *
+   * head 裡設了 `apple-mobile-web-app-status-bar-style: black-translucent`，
+   * 加到主畫面之後內容會延伸到狀態列底下（那是刻意的）。少了
+   * `pt-[env(safe-area-inset-top)]`，手機版的選單鈕就會被動態島壓住 ——
+   * 而這件事**只在加到主畫面之後才看得到**，一般瀏覽分頁完全正常，
+   * 所以前台修好之後後台又踩了一次。
+   */
+  it('前台黏頂的 header 有留狀態列的安全區', async () => {
+    const html = await $fetch<string>('/')
+
+    expect(html).toContain('pt-[env(safe-area-inset-top)]')
+  })
+
+  it('後台的側邊導覽也有留（前台修好之後這裡又踩了一次）', async () => {
+    const { cookie } = await login()
+    const html = await fetch('/admin/games', { headers: { cookie } }).then((r) => r.text())
+
+    expect(html).toContain('pt-[env(safe-area-inset-top)]')
+  })
+
+  /**
+   * CSP 的 `frame-src`。
+   *
+   * 沒有這一條會 fallback 到 `default-src 'self'`，賽事錄影的 YouTube 播放器
+   * 直接被擋 —— 而症狀只有 console 裡一行 `Refused to frame`，畫面上是空白。
+   */
+  it('CSP 只開放 YouTube 的 nocookie 網域嵌入', async () => {
+    const response = await fetch('/')
+    const csp = response.headers.get('content-security-policy') ?? ''
+
+    expect(csp).toContain("frame-src 'self' https://www.youtube-nocookie.com")
+    // 不比照 img-src 開整個 https: —— iframe 能做的事比 <img> 多得多
+    expect(csp).not.toContain('frame-src https:')
+  })
+
   it('不洩漏技術棧資訊', async () => {
     const response = await fetch('/api/health')
     expect(response.headers.get('x-powered-by')).toBeFalsy()
@@ -738,6 +775,25 @@ describe('SSR', () => {
     expect(markup).toContain('後台管理')
   })
 
+  /**
+   * 隱私權政策。
+   *
+   * Google 的 OAuth 同意畫面要切到「正式版」時，必須提供一個**公開可存取**的
+   * 隱私權政策網址。這一條守的就是那個前提：不需要登入、SSR 就有內容。
+   */
+  it('隱私權政策頁不需要登入就看得到，而且頁尾連得過去', async () => {
+    const response = await fetch('/privacy')
+    expect(response.status).toBe(200)
+
+    const markup = renderedMarkup(await response.text())
+    expect(markup).toContain('隱私權政策')
+    // 內容要真的渲染出來，不能只有頁面標題
+    expect(markup).toContain('推播通知')
+
+    const home = renderedMarkup(await $fetch<string>('/'))
+    expect(home).toContain('href="/privacy"')
+  })
+
   it('不存在的比賽回傳 404 狀態碼（SEO 需要正確的狀態碼）', async () => {
     const response = await fetch('/api/games/nope')
     expect(response.status).toBe(404)
@@ -755,7 +811,7 @@ describe('SSR', () => {
    * 看不出來。這幾條測試就是守在這裡。
    */
   describe('CDN 快取', () => {
-    const publicPaths = ['/', '/schedule', '/results', '/news', '/players']
+    const publicPaths = ['/', '/schedule', '/results', '/news', '/players', '/privacy']
 
     it.each(publicPaths)('%s 帶著可被 CDN 快取的 cache-control', async (path) => {
       const response = await fetch(path)

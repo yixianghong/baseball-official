@@ -136,6 +136,56 @@ export const lineupEntrySchema = z.object({
 
 export type LineupEntry = z.infer<typeof lineupEntrySchema>
 
+/**
+ * 一段賽事錄影（見 `docs/game-recording-plan.md`）。
+ *
+ * 影片本體在 YouTube，這裡只存 11 碼的 videoId —— 不存網址：網址有
+ * `watch?v=`、`youtu.be/`、`/live/` 好幾種寫法，存進去就得在每個用到的地方
+ * 各解析一次。存 ID，要什麼形式就組什麼形式。
+ */
+export const clipPrivacySchema = z.enum(['private', 'unlisted', 'public'])
+export type ClipPrivacy = z.infer<typeof clipPrivacySchema>
+
+export const gameClipSchema = z.object({
+  inning: z.number().int().min(1).max(20),
+  half: gameHalfSchema,
+  /** 會變成前台 iframe 的網址，所以驗格式而不是照單全收。 */
+  videoId: z.string().regex(/^[\w-]{11}$/, '不是有效的 YouTube 影片 ID'),
+  /**
+   * YouTube 上的可見度。
+   *
+   * ⚠️ **透過 API 上傳的影片一律是 `private`**，而且和我們送什麼無關 ——
+   * 未通過 YouTube 合規稽核的專案（2020/07/28 之後建立的都算）強制如此。
+   * 管理者要到 YouTube Studio 手動改成公開，改完再按後台的「更新影片狀態」。
+   *
+   * 前台**只渲染非 private 的片段**：私人影片嵌進去只會顯示「無法播放」，
+   * 而那是訪客看到的畫面。
+   */
+  privacy: clipPrivacySchema.default('private'),
+  createdAt: z.string(),
+})
+
+export type GameClip = z.infer<typeof gameClipSchema>
+
+/** 前台看得到的片段：已經公開，而且依比賽順序排好。 */
+export function visibleClips(clips: GameClip[]): GameClip[] {
+  return clips
+    .filter((clip) => clip.privacy !== 'private')
+    .sort(
+      (a, b) => a.inning - b.inning || (a.half === 'top' ? -1 : 1) - (b.half === 'top' ? -1 : 1),
+    )
+}
+
+/** YouTube 的嵌入網址。用 nocookie 網域：訪客還沒點播放就不該被種追蹤 cookie。 */
+export function clipEmbedUrl(videoId: string): string {
+  return `https://www.youtube-nocookie.com/embed/${videoId}`
+}
+
+/** 影片縮圖。前台預設只載縮圖，點了才換成 iframe。 */
+export function clipThumbnailUrl(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+}
+
 /** 投手紀錄。 */
 export const pitcherEntrySchema = z.object({
   playerId: z.string().default(''),
@@ -414,6 +464,14 @@ export const gameSchema = gameInputSchema.extend({
    * 必須和比賽本身是同一次讀取，後台也才看得到哪一場已經提醒過。
    */
   remindersSent: z.array(z.string()).default([]),
+  /**
+   * 賽事錄影的片段。
+   *
+   * 和 `remindersSent` 一樣**刻意不放進 `gameInputSchema`** —— 它是系統寫的
+   * 狀態，不是人填的欄位。放進去的話後台編輯表單每次存檔都會連帶送出，
+   * 漏帶一次就等於把整場的影片清空。
+   */
+  clips: z.array(gameClipSchema).max(40).default([]),
 })
 
 export type Game = z.infer<typeof gameSchema>

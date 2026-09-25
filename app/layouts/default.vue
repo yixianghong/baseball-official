@@ -355,7 +355,13 @@ useHead({
           個人狀態（見「部署」章節）。權限檢查本來就在 BFF 的 `requireUser()`，
           畫面上藏一個連結從來就不是防線。
         -->
-        <p class="mt-3 text-center">
+        <p class="mt-3 flex items-center justify-center gap-4 text-center">
+          <NuxtLink
+            to="/privacy"
+            class="text-xs text-white/40 underline underline-offset-4 transition hover:text-white/70"
+          >
+            隱私權政策
+          </NuxtLink>
           <NuxtLink
             to="/admin"
             class="text-xs text-white/40 underline underline-offset-4 transition hover:text-white/70"

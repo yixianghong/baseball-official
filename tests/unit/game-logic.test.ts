@@ -8,6 +8,7 @@ import {
   gameInputSchema,
   gamePatchSchema,
   gameQuerySchema,
+  gameClipSchema,
   gameResult,
   hasScore,
   isFinished,
@@ -17,6 +18,7 @@ import {
   needsResultUpdate,
   sumInnings,
   tallyRecord,
+  visibleClips,
   withSummedRuns,
   toDateKey,
 } from '../../shared/schemas/game'
@@ -276,6 +278,63 @@ describe('emptyScoreboard', () => {
  *
  * `updateGame()` 的 `{ ...existing, ...patch }` 完全依賴「沒送的鍵不存在」。
  */
+/**
+ * 賽事錄影片段。
+ *
+ * ⚠️ **透過 API 上傳的影片一律是私人的**（未通過 YouTube 合規稽核的專案強制
+ * 如此），管理者要手動改成公開。私人影片嵌進前台只會顯示「無法播放」——
+ * 而那是訪客看到的畫面，所以寧可少一段也不要一個壞掉的播放器。
+ */
+describe('visibleClips', () => {
+  const clip = (
+    inning: number,
+    half: 'top' | 'bottom',
+    privacy: 'private' | 'unlisted' | 'public' = 'public',
+  ) => ({ inning, half, videoId: `v${inning}${half[0]}${'x'.repeat(8)}`, privacy, createdAt: '' })
+
+  it('濾掉還沒公開的片段', () => {
+    const result = visibleClips([clip(1, 'top'), clip(1, 'bottom', 'private'), clip(2, 'top')])
+
+    expect(result.map((c) => c.inning)).toEqual([1, 2])
+  })
+
+  it('unlisted 算公開 —— 有連結就看得到，嵌得進去', () => {
+    expect(visibleClips([clip(1, 'top', 'unlisted')])).toHaveLength(1)
+  })
+
+  it('依比賽順序排列，不管存進來的順序', () => {
+    const result = visibleClips([clip(2, 'top'), clip(1, 'bottom'), clip(1, 'top')])
+
+    expect(result.map((c) => `${c.inning}${c.half}`)).toEqual(['1top', '1bottom', '2top'])
+  })
+
+  it('全部都是私人時回空陣列（整個區塊不出現）', () => {
+    expect(visibleClips([clip(1, 'top', 'private')])).toEqual([])
+  })
+})
+
+describe('gameClipSchema', () => {
+  const base = { inning: 1, half: 'top' as const, createdAt: '2026-10-02T00:00:00Z' }
+
+  it('預設可見度是私人 —— API 上傳的事實就是如此', () => {
+    expect(gameClipSchema.parse({ ...base, videoId: 'abcdefghijk' }).privacy).toBe('private')
+  })
+
+  /** videoId 會變成前台 iframe 的網址，所以驗格式而不是照單全收。 */
+  it.each([
+    ['太短', 'abc'],
+    ['太長', 'abcdefghijkl'],
+    ['含斜線（可能跳出 embed 路徑）', 'abcdefgh/jk'],
+    ['整個網址', 'https://youtu.be/abcdefghijk'],
+  ])('拒絕 %s 的 videoId', (_label, videoId) => {
+    expect(() => gameClipSchema.parse({ ...base, videoId })).toThrow()
+  })
+
+  it('接受合法的 11 碼 ID（含底線與連字號）', () => {
+    expect(gameClipSchema.parse({ ...base, videoId: 'a_b-cdefghi' }).videoId).toBe('a_b-cdefghi')
+  })
+})
+
 describe('gamePatchSchema', () => {
   it('只送一個欄位時，其他欄位不會被預設值填回來', () => {
     const patch = gamePatchSchema.parse({ status: 'finished' }) as Record<string, unknown>
