@@ -156,6 +156,50 @@ env:
     availability:
       - RUNTIME
 
+  # ── YouTube 上傳（賽事錄影）─────────────────────────────────────
+  #
+  # 後台錄影頁把片段直傳 YouTube。BFF 只用 refresh token 換短效的 access
+  # token 給瀏覽器，檔案本身不經過我們（見 `server/utils/youtube.ts`）。
+  #
+  # refresh token 用 `pnpm youtube:auth` 取得。授權時要用**放影片的那個帳號**
+  # 登入 —— Client ID 代表「哪一個應用程式」，refresh token 代表「代表哪一個
+  # 帳號」，兩者屬於不同的 Google 帳號是正常的。
+  #
+  # ⚠️ OAuth 同意畫面的發布狀態必須是「正式版」。停在「測試中」的話
+  # refresh token **7 天就過期**，功能會每週壞一次而且不會有任何警告。
+  #
+  # ⚠️ **光把機密放進 Secret Manager 是不夠的** —— 沒有在這裡宣告對應的變數，
+  # Cloud Run 根本收不到，症狀是線上說「尚未設定」而你明明已經建好機密了。
+  #
+  #   echo -n "<client id>" | firebase apphosting:secrets:set youtube-client-id --project hg-baseball --data-file -
+  #   echo -n "<client secret>" | firebase apphosting:secrets:set youtube-client-secret --project hg-baseball --data-file -
+  #   echo -n "<refresh token>" | firebase apphosting:secrets:set youtube-refresh-token --project hg-baseball --data-file -
+  #
+  #   firebase apphosting:secrets:grantaccess youtube-client-id --project hg-baseball --backend baseball-official --location asia-east1
+  #   firebase apphosting:secrets:grantaccess youtube-client-secret --project hg-baseball --backend baseball-official --location asia-east1
+  #   firebase apphosting:secrets:grantaccess youtube-refresh-token --project hg-baseball --backend baseball-official --location asia-east1
+  #
+  # ⚠️ CLI 問「要不要加進 apphosting.yaml」時選 No（理由見上面的說明）。
+  # 授權有沒有生效要另外驗，不能只看指令沒報錯：
+  #
+  #   gcloud secrets get-iam-policy youtube-refresh-token --project hg-baseball
+  #
+  # 三項缺任何一項就關閉自動上傳（錄影與下載仍可用），不影響網站其他功能。
+  - variable: NUXT_YOUTUBE_CLIENT_ID
+    secret: youtube-client-id
+    availability:
+      - RUNTIME
+
+  - variable: NUXT_YOUTUBE_CLIENT_SECRET
+    secret: youtube-client-secret
+    availability:
+      - RUNTIME
+
+  - variable: NUXT_YOUTUBE_REFRESH_TOKEN
+    secret: youtube-refresh-token
+    availability:
+      - RUNTIME
+
   # ── 執行環境 ────────────────────────────────────────────────────
   - variable: LOG_LEVEL
     value: info

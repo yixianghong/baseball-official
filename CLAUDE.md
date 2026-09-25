@@ -472,6 +472,11 @@ GitHub Actions 只負責品質把關，兩者並行，所以正式流程是
 apphosting.yaml」時**選 No** —— 它推導出的變數名沒有 `NUXT_` 前綴，Nuxt 讀不到；
 而 `FIREBASE_` 開頭還會撞上 App Hosting 的保留前綴。
 
+⚠️ **選 No 之後一定要自己回 `apphosting.yaml` 宣告那個變數。** 只把機密建到
+Secret Manager 是不夠的 —— 沒有宣告，Cloud Run 根本收不到，而症狀是線上說
+「尚未設定」，你卻明明看得到機密就在那裡。新增任何機密時，記得三件事都要做：
+建立、`grantaccess`、**寫進 `apphosting.yaml`**。
+
 `firestore.rules` 全部拒絕、`storage.rules` 只開放讀取：所有存取都走 BFF 的 service
 account（不受規則限制），規則擋的是「瀏覽器直接連資料庫」那條路。
 
