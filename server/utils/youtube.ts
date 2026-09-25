@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { ClipPrivacy } from '../../shared/schemas/game'
 import { createExternalClient } from './external'
 import { AppError, ERROR_CODE } from './errors'
+import { logger } from './logger'
 
 /**
  * YouTube Data API —— 賽事錄影用（見 `docs/game-recording-plan.md`）。
@@ -71,30 +72,33 @@ export async function getAccessToken(event: H3Event): Promise<{
 
   const { clientId, clientSecret, refreshToken } = useRuntimeConfig(event).youtube
 
-  const raw = await oauthClient(event, '/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-    }).toString(),
-  })
+  /*
+   * ⚠️ **一定要自己接住 Google 的錯誤。**
+   *
+   * `createExternalClient` 失敗時丟的 `AppError` 帶著**上游的 HTTP 狀態**，
+   * 而 `codeFromStatus()` 會把那個狀態當成我們自己 API 的狀態重新解讀：
+   * Google 回 400（`invalid_grant`）→ 變成「請求格式不正確」、
+   * 回 401 → 變成「**請先登入**」。兩個都把人指向完全錯誤的方向，
+   * 而真正的原因（refresh token 失效）一個字都沒出現。這個坑踩過一次。
+   */
+  let raw: unknown
+  try {
+    raw = await oauthClient(event, '/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }).toString(),
+    })
+  } catch (err) {
+    throw authFailed(event, err)
+  }
 
   const parsed = tokenResponseSchema.safeParse(raw)
-  if (!parsed.success) {
-    /*
-     * 最常見的原因是 refresh token 失效了，而它失效的原因幾乎都是同一個：
-     * OAuth 同意畫面停在「測試中」，token 7 天就過期。訊息要講出來 ——
-     * 否則這裡只會是一個無從查起的「外部服務錯誤」。
-     */
-    throw new AppError(
-      ERROR_CODE.SERVICE_UNAVAILABLE,
-      'YouTube 授權失效，請重新執行 pnpm youtube:auth 取得 refresh token（並確認 OAuth 同意畫面已發布為正式版）',
-      { expose: true },
-    )
-  }
+  if (!parsed.success) throw authFailed(event, raw)
 
   const token = {
     accessToken: parsed.data.access_token,
@@ -102,6 +106,58 @@ export async function getAccessToken(event: H3Event): Promise<{
   }
   await storage.setItem(CACHE_KEY, token)
   return token
+}
+
+/**
+ * 授權失敗時對外講的話。
+ *
+ * 前台只會看到這一句，所以它必須是**可行動的** —— 而不是「外部服務錯誤」。
+ * 最常見的兩個原因都寫進去了：token 失效（多半是 OAuth 同意畫面還停在
+ * 「測試中」，refresh token 7 天就過期），以及值本身有問題（複製時被截斷）。
+ *
+ * Google 真正回了什麼記在伺服器日誌，用 `requestId` 就查得到 ——
+ * 那是診斷的關鍵，但不該送到瀏覽器（它可能帶著設定的細節）。
+ */
+function authFailed(event: H3Event, detail: unknown): AppError {
+  const log = event.context.logger ?? logger
+  log.error(
+    { external: 'google-oauth', ...describeUpstream(detail) },
+    'YouTube token exchange failed',
+  )
+
+  return new AppError(
+    ERROR_CODE.SERVICE_UNAVAILABLE,
+    'YouTube 授權失效，無法上傳。請確認 OAuth 同意畫面已發布為「正式版」，' +
+      '並重新執行 pnpm youtube:auth 取得 refresh token（注意複製時不要漏字）。',
+    { expose: true },
+  )
+}
+
+/**
+ * 從上游錯誤裡挖出 Google 真正說了什麼。
+ *
+ * `createExternalClient` 會依**上游的 HTTP 狀態**丟出我們自己的錯誤碼
+ * （400 → `BAD_REQUEST`、401 → `UNAUTHORIZED`），原始的 ofetch 錯誤放在
+ * `cause` 裡。所以只記 `err.message` 只會拿到被改寫過的那一句 ——
+ * 真正有用的 `invalid_grant` / `invalid_client` 在 `cause.data` 中。
+ */
+function describeUpstream(detail: unknown): Record<string, unknown> {
+  if (!(detail instanceof Error)) return { detail }
+
+  const cause = (detail as { cause?: unknown }).cause
+  const raw = (cause ?? detail) as {
+    status?: number
+    statusCode?: number
+    data?: { error?: string; error_description?: string }
+  }
+
+  return {
+    upstreamStatus: raw.status ?? raw.statusCode,
+    // 這兩個欄位就是診斷的全部：invalid_grant 代表 token 失效或被截斷，
+    // invalid_client 代表 client id/secret 不對
+    googleError: raw.data?.error,
+    googleErrorDescription: raw.data?.error_description,
+  }
 }
 
 const videoListSchema = z.object({
@@ -136,10 +192,16 @@ export async function fetchClipPrivacy(
 
   const { accessToken } = await getAccessToken(event)
 
-  const raw = await youtubeClient(event, '/videos', {
-    query: { part: 'status', id: videoIds.join(','), maxResults: String(videoIds.length) },
-    headers: { authorization: `Bearer ${accessToken}` },
-  })
+  let raw: unknown
+  try {
+    raw = await youtubeClient(event, '/videos', {
+      query: { part: 'status', id: videoIds.join(','), maxResults: String(videoIds.length) },
+      headers: { authorization: `Bearer ${accessToken}` },
+    })
+  } catch (err) {
+    // 同一個理由：不接住的話，YouTube 的 4xx 會變成我們 API 的 4xx
+    throw authFailed(event, err)
+  }
 
   const parsed = videoListSchema.safeParse(raw)
   if (!parsed.success) return {}
