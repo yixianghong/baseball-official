@@ -23,6 +23,13 @@ export default defineApiHandler(async (event) => {
   const game = await getGame(id)
   if (!game) throw notFound('比賽')
 
+  /*
+   * 沒片段就直接回傳。
+   *
+   * 注意這裡看的是**伺服器上**的 `game.clips` —— 後台畫面上那一份可能是
+   * 上傳之前載入的、已經過期。所以端點本身不能因為「前端說沒有」就不做事，
+   * 那正是第一次上傳後需要按這顆按鈕的情況。
+   */
   if (!isYouTubeConfigured(event) || game.clips.length === 0) {
     return { clips: game.clips }
   }

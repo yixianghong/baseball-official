@@ -230,7 +230,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
     -->
     <div
       v-else-if="game"
-      class="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-5 field-mode:h-dvh field-mode:gap-2 field-mode:px-3 field-mode:py-2"
+      class="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-5 field-mode:h-dvh field-mode:max-w-none field-mode:gap-2 field-mode:px-3 field-mode:py-2"
     >
       <!-- ══ 不支援：橫向直向都一樣，佔滿就好 ══════════════════ -->
       <div
@@ -244,14 +244,19 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
       </div>
 
       <template v-else>
-        <!-- ══ 左：預覽 ════════════════════════════════════════ -->
-        <div class="flex min-w-0 shrink-0 items-center justify-center">
+        <!-- ══ 預覽 ════════════════════════════════════════════ -->
+        <!--
+          滿版：用負 margin 抵銷容器的左右內距，讓畫面貼齊螢幕兩側。
+          取景的時候看得越大越準，而這一頁上沒有別的東西需要跟它對齊。
+        -->
+        <div class="-mx-4 shrink-0 field-mode:-mx-3">
           <!--
-            直向靠寬度決定尺寸，橫向靠高度 —— 橫向如果還用 `w-full`，
-            16:9 會算出 360px 高，比整個視窗還高。
+            直向靠 16:9 決定高度；橫向改成固定高度 —— 844px 寬的 16:9 會算出
+            475px 高，比整個視窗還高。`object-cover` 會把超出的部分裁掉，
+            所以橫向看到的範圍比實際錄到的窄一點。
           -->
           <div
-            class="relative aspect-video w-full overflow-hidden rounded-xl bg-black field-mode:h-[34dvh] field-mode:w-auto field-mode:max-w-full"
+            class="relative aspect-video w-full overflow-hidden bg-black field-mode:aspect-auto field-mode:h-[38dvh]"
           >
             <!-- muted 不能省：沒有它 autoplay 會被瀏覽器擋下，而且會產生回授嘯叫 -->
             <video ref="videoRef" class="size-full object-cover" autoplay muted playsinline />

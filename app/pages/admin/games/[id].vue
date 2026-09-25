@@ -459,12 +459,20 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             與即時比數，「比賽結束」會顯示 FINAL 與勝敗。
           </p>
 
-          <div class="flex flex-wrap items-center gap-2" role="group" aria-label="賽事狀態">
+          <!--
+            手機上五顆要塞進一排，所以內距與字級都先縮小，`sm:` 才放大。
+            仍然保留 `flex-wrap` 當安全網 —— 更窄的螢幕寧可換行，也不要橫向溢出。
+          -->
+          <div
+            class="flex flex-wrap items-center gap-1 sm:gap-2"
+            role="group"
+            aria-label="賽事狀態"
+          >
             <button
               v-for="status in GAME_FLOW_STATUSES"
               :key="status"
               type="button"
-              class="min-h-11 rounded-full border px-5 text-fluid-sm font-semibold transition"
+              class="min-h-11 rounded-full border px-2.5 text-xs font-semibold whitespace-nowrap transition sm:px-5 sm:text-fluid-sm"
               :class="statusButtonClass(status)"
               :aria-pressed="basic.status === status"
               @click="basic.status = status"
@@ -482,7 +490,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
               v-for="status in GAME_EXCEPTION_STATUSES"
               :key="status"
               type="button"
-              class="min-h-11 rounded-full border px-4 text-fluid-sm font-medium transition"
+              class="min-h-11 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap transition sm:px-4 sm:text-fluid-sm"
               :class="statusButtonClass(status)"
               :aria-pressed="basic.status === status"
               @click="basic.status = status"
@@ -540,8 +548,13 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
                 錄製並自動上傳。
               </p>
             </div>
+            <!--
+              ⚠️ **這顆按鈕不能依 `clips.length` 顯示。**
+              第一次上傳時，這一頁是在還沒有任何片段的時候載入的 —— 用長度
+              判斷的話按鈕不會出現，而它正是唯一能把剛上傳的片段抓回來的路。
+              「我們以為沒有片段」本來就可能是過期的資訊，要問過 YouTube 才算數。
+            -->
             <UiBaseButton
-              v-if="clips.length"
               variant="secondary"
               size="sm"
               :loading="clipsBusy"
@@ -601,7 +614,9 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
               />
             </li>
           </ul>
-          <p v-else class="text-fluid-sm text-content-muted">還沒有錄影片段。</p>
+          <p v-else class="text-fluid-sm text-content-muted">
+            還沒有錄影片段。剛上傳完的話，按「更新影片狀態」把它抓回來。
+          </p>
 
           <p v-if="clipsMessage" class="text-fluid-sm">{{ clipsMessage }}</p>
         </div>

@@ -59,8 +59,17 @@ function isActive(link: (typeof links)[number]): boolean {
       <header
         class="sticky top-0 z-40 border-b border-border bg-surface pt-[env(safe-area-inset-top)] md:h-screen md:w-60 md:shrink-0 md:border-b-0 md:border-r"
       >
+        <!--
+          ⚠️ 手機版要 `flex-wrap`。
+
+          這個容器在手機上是一橫列（隊名 ｜ 漢堡鈕），而 `<nav>` 是它的
+          **第三個 flex item** —— 沒有 wrap 的話，選單一展開就會被
+          `justify-between` 推到右邊，變成三個東西並排。桌機因為
+          `md:flex-col` 是直排所以看不出問題。
+          配合 `<nav>` 上的 `w-full`，展開時它會自己換到下一整行。
+        -->
         <div
-          class="flex items-center justify-between gap-2 px-4 py-3 md:flex-col md:items-stretch md:gap-4 md:px-4 md:py-5"
+          class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 md:flex-col md:flex-nowrap md:items-stretch md:gap-4 md:px-4 md:py-5"
         >
           <NuxtLink to="/admin" class="flex items-center gap-2">
             <span
@@ -108,7 +117,7 @@ function isActive(link: (typeof links)[number]): boolean {
 
           <nav
             id="admin-menu"
-            class="flex-col gap-1 md:flex"
+            class="w-full flex-col gap-1 md:flex md:w-auto"
             :class="mobileMenuOpen ? 'flex' : 'hidden'"
             aria-label="後台導覽"
           >
