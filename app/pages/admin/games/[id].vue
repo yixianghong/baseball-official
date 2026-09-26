@@ -463,14 +463,11 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         </template>
       </AdminHeader>
 
-      <!-- 自動儲存的狀態一定要看得見：最危險的是「以為存好了，其實沒有」 -->
-      <div class="mb-4 min-h-6">
-        <AdminAutosaveStatus
-          :status="autosave.status.value"
-          :error="autosave.error.value"
-          @retry="autosave.retry"
-        />
-      </div>
+      <!--
+        這一頁是自動儲存的，沒有儲存按鈕。儲存的結果走畫面右下角的 toast
+        （`UiToastHost`，由 `useAutosave` 自己送出）—— 這一頁很長，
+        釘在這裡的一行字在使用者捲到計分板時完全看不到。
+      -->
 
       <!-- 分頁 -->
       <div class="mb-6 flex flex-wrap gap-1 border-b border-border" role="tablist">
@@ -579,15 +576,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           />
         </div>
 
-        <AdminLineupEditor v-model="lineup" :players="roster" :attendance="attendance">
-          <template #actions>
-            <AdminAutosaveStatus
-              :status="autosave.status.value"
-              :error="autosave.error.value"
-              @retry="autosave.retry"
-            />
-          </template>
-        </AdminLineupEditor>
+        <AdminLineupEditor v-model="lineup" :players="roster" :attendance="attendance" />
       </section>
 
       <!-- ══ 賽事管理 ══════════════════════════════════════════ -->

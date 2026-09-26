@@ -175,5 +175,12 @@ function isActive(link: (typeof links)[number]): boolean {
         <slot />
       </main>
     </div>
+
+    <!--
+      浮動提示（自動儲存的結果走這裡）。掛在版面最外層而不是 `<main>` 裡面：
+      它是 `position: fixed`，放進會捲動的內容區只會多一層無意義的祖先。
+      前台目前不需要，所以只掛在後台。
+    -->
+    <UiToastHost />
   </div>
 </template>

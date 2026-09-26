@@ -399,11 +399,6 @@ function fillFromRoster() {
       <span v-if="model.length" class="text-fluid-sm text-content-muted tabular-nums">
         共 {{ model.length }} 棒
       </span>
-
-      <!-- 儲存按鈕由使用這個元件的頁面提供 —— 它才知道要存到哪裡、存了要做什麼 -->
-      <div class="ml-auto">
-        <slot name="actions" />
-      </div>
     </div>
   </div>
 </template>

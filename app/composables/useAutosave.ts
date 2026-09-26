@@ -16,9 +16,25 @@ import { ApiError } from '~/utils/api-error'
  * debounce 期間離開頁面，那段變更就消失了 —— 而且使用者完全不會知道。
  * 元件卸載與換頁時會先 flush，瀏覽器關閉／重新整理則用 `beforeunload` 提醒。
  *
- * ### 3. 失敗要看得見
- * 自動儲存最危險的地方是「以為存好了，其實沒有」。失敗時 `status` 會變成
- * `error` 並保留錯誤內容，畫面必須把它顯示出來（見 `AutosaveStatus.vue`）。
+ * ### 3. 狀態要看得見
+ * 自動儲存最危險的地方是「以為存好了，其實沒有」。所以狀態變化會**自己送出
+ * toast**（`useToast`），使用這個 composable 的頁面不必、也不該再做一次：
+ *
+ * | 狀態 | 提示 |
+ * | --- | --- |
+ * | `saved` | 「已自動儲存」，2.5 秒後自己消失 |
+ * | `error` | 「儲存失敗：…」，**不會自己消失**，附一顆「重試」 |
+ * | `pending`／`saving` | 不提示 |
+ *
+ * 用 toast 而不是釘在表單上方的一行字：後台的編輯頁很長，使用者捲到計分板
+ * 的時候看不到頁首那一行，而那正是最想確認「到底存進去了沒有」的時候。
+ *
+ * `pending` 與 `saving` 通常只持續幾百毫秒，替它們發提示的結果是每次打字
+ * 停頓畫面都閃一下。「還沒存完就離開」不靠使用者看到提示來擋，
+ * 而是 `flush()` 與 `beforeunload`（見下面兩點）。
+ *
+ * 所有提示共用同一個 key，所以連續儲存是**同一則訊息就地更新**，
+ * 不會從畫面下方長出一串一模一樣的「已自動儲存」。
  *
  * ### 4. 載入當下不會寫入
  * 只有「載入之後」的變更才算數，否則光是打開頁面就會寫一次資料庫。
@@ -33,6 +49,9 @@ import { ApiError } from '~/utils/api-error'
  */
 export type AutosaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error'
 
+/** 全站的自動儲存共用同一則提示（見上面的說明）。 */
+const TOAST_KEY = 'autosave'
+
 export function useAutosave<T>(
   source: () => T,
   save: (value: T) => Promise<unknown>,
@@ -45,6 +64,7 @@ export function useAutosave<T>(
 ) {
   const { delay = 900, enabled } = options
 
+  const toast = useToast()
   const status = ref<AutosaveStatus>('idle')
   const error = ref<ApiError | null>(null)
   /** 最後一次成功寫入的內容，用來判斷有沒有真的變過。 */
@@ -107,6 +127,34 @@ export function useAutosave<T>(
   async function retry(): Promise<void> {
     await persist()
   }
+
+  /**
+   * 狀態變化 → 提示。
+   *
+   * 寫在 composable 裡而不是交給頁面：自動儲存的呈現方式全站一致，
+   * 而且「新增一個自動儲存的畫面時忘記把狀態顯示出來」是這個功能最貴的
+   * 漏接 —— 症狀是使用者以為存好了。
+   *
+   * `markAsSaved()` 把狀態設成 `idle` 而不是 `saved`，所以光是打開頁面
+   * 不會冒出一則「已自動儲存」。
+   */
+  watch(status, (next) => {
+    if (next === 'saved') {
+      toast.show({ key: TOAST_KEY, tone: 'success', message: '已自動儲存' })
+      return
+    }
+
+    if (next === 'error') {
+      toast.show({
+        key: TOAST_KEY,
+        tone: 'error',
+        message: `儲存失敗${error.value ? `：${error.value.message}` : ''}`,
+        // 重試的等待狀態由 `ToastHost` 自己處理（按鈕會停用），
+        // 所以這裡不必再管一個 loading 旗標
+        action: { label: '重試', handler: retry },
+      })
+    }
+  })
 
   watch(
     source,
