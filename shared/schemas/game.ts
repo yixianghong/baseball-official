@@ -662,32 +662,44 @@ export function hasScore(game: Pick<Game, 'status'>): boolean {
 }
 
 /**
- * 候補名單 —— 確定出席、但不在先發打線上的人。
+ * 候補名單 —— 確定出席、但**今天沒有上場**的人。
  *
  * ## 為什麼是推導出來的，不另外存一份
- * 候補完全由「出席」與「打線」兩份既有資料決定，多存一份就多一份會不同步的
- * 東西：把人排進打線卻忘了從候補移除，畫面上就會出現同一個人既先發又候補。
- * 推導不可能對不上，也不需要任何資料遷移。
+ * 候補完全由「出席」「打線」「投手」三份既有資料決定，多存一份就多一份會
+ * 不同步的東西：把人排進打線卻忘了從候補移除，畫面上就會出現同一個人既先發
+ * 又候補。推導不可能對不上，也不需要任何資料遷移。
+ *
+ * ## ⚠️ 「沒上場」不等於「不在打線上」
+ * **DH 制下先發投手不打擊，所以他根本不會出現在打線裡** —— 只看打線的話，
+ * 出賽名單圖卡上就會同時出現「先發投手 #28」和「候補 #28」，同一個人被說成
+ * 今天最先發的和坐板凳的。實際發生過，見這個函式的測試。
+ *
+ * 所以要排除的是**打線 ∪ 投手紀錄**。投手紀錄裡的中繼與終結是賽後才登錄的，
+ * 賽前不影響；賽後把他們排除也是對的 —— 他們上場投球了，不是板凳上的人。
  *
  * ## 比對方式
- * 以 `playerId` 為主，姓名為輔。打線允許 `playerId` 為空（臨時來支援的球友
- * 不在名單裡，但打線上要寫得出他），而且後台可以直接手打名字而不從清單挑 ——
- * 少了姓名比對，這種情況下已經上場的人會被誤判成還坐在板凳上。
+ * 以 `playerId` 為主，姓名為輔。打線與投手紀錄都允許 `playerId` 為空
+ * （臨時來支援的球友不在名單裡，但名單上要寫得出他），而且後台可以直接
+ * 手打名字而不從清單挑 —— 少了姓名比對，這種情況下已經上場的人會被誤判成
+ * 還坐在板凳上。
  *
  * 前台兩種狀態都用得到，只是意思不同：
  * - 未開打：這些人有空，是換人時的選項
- * - 已結束：這些人當天有到，但沒有排進先發
+ * - 已結束：這些人當天有到，但沒有上場
  */
-export function deriveBench(game: Pick<Game, 'attendance' | 'lineup'>): AttendanceEntry[] {
-  const startedIds = new Set(game.lineup.map((entry) => entry.playerId).filter(Boolean))
-  const startedNames = new Set(
-    game.lineup.map((entry) => entry.name.trim()).filter((name) => name.length > 0),
+export function deriveBench(
+  game: Pick<Game, 'attendance' | 'lineup' | 'pitchers'>,
+): AttendanceEntry[] {
+  const playing = [...game.lineup, ...game.pitchers]
+  const playingIds = new Set(playing.map((entry) => entry.playerId).filter(Boolean))
+  const playingNames = new Set(
+    playing.map((entry) => entry.name.trim()).filter((name) => name.length > 0),
   )
 
   return game.attendance.filter((entry) => {
     if (entry.status !== 'yes') return false
-    if (entry.playerId && startedIds.has(entry.playerId)) return false
-    return !startedNames.has(entry.name.trim())
+    if (entry.playerId && playingIds.has(entry.playerId)) return false
+    return !playingNames.has(entry.name.trim())
   })
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AttendanceEntry, LineupEntry } from '#shared/schemas/game'
+import type { AttendanceEntry, LineupEntry, PitcherEntry } from '#shared/schemas/game'
 import { deriveBench } from '#shared/schemas/game'
 import { POSITIONS, POSITION_LABELS, type Player, type Position } from '#shared/schemas/player'
 
@@ -26,6 +26,11 @@ const props = defineProps<{
    * 排打線的當下最不想做的事，就是從全隊名單裡挑出今天會到的那幾位。
    */
   attendance?: AttendanceEntry[]
+  /**
+   * 這場比賽的投手紀錄。只為了算候補 —— **DH 制下先發投手不在打線裡**，
+   * 少了這份資料他會被算成「還沒排到的人」（見 `deriveBench()`）。
+   */
+  pitchers?: PitcherEntry[]
 }>()
 const model = defineModel<LineupEntry[]>({ required: true })
 
@@ -51,13 +56,17 @@ const attendingIds = computed(
 const hasAttendance = computed(() => attendingIds.value.size > 0)
 
 /**
- * 還沒排進先發、但當天會到的人 —— 前台會以「候補」呈現。
+ * 當天會到、但還沒安排上場的人 —— 前台會以「候補」呈現。
  *
  * 用與前台完全相同的 `deriveBench()`，不在這裡另外寫一套比對：
  * 兩邊各寫各的，遲早會出現「後台說還有 3 個人、前台列出 4 個」。
  */
 const bench = computed(() =>
-  deriveBench({ attendance: props.attendance ?? [], lineup: model.value }),
+  deriveBench({
+    attendance: props.attendance ?? [],
+    lineup: model.value,
+    pitchers: props.pitchers ?? [],
+  }),
 )
 
 /** 使用者手動切換成「顯示全部球員」—— 臨時來的人不一定有回報出席。 */

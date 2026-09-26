@@ -109,7 +109,7 @@ watchEffect(() => {
 })
 
 /**
- * 候補：確定出席、但不在先發打線上的人。
+ * 候補：確定出席、但今天沒有上場的人（不在打線也不在投手紀錄上）。
  * 推導而來，不是另外存的欄位 —— 理由見 `deriveBench()`。
  */
 const bench = computed(() => (game.value ? deriveBench(game.value) : []))

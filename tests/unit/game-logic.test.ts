@@ -598,7 +598,7 @@ describe('沒有打成的場次', () => {
 })
 
 /**
- * 候補名單是推導出來的（出席 − 先發），不是另外存的欄位。
+ * 候補名單是推導出來的（出席 − 今天有上場的人），不是另外存的欄位。
  * 比對錯了的症狀是「同一個人同時出現在先發與候補」，或是有到的人整個消失 ——
  * 兩種在畫面上都很刺眼，但只要比對邏輯錯一個分支就會發生。
  */
@@ -617,14 +617,59 @@ describe('deriveBench', () => {
     number: '',
     position: 'P' as const,
   })
+  const pitch = (playerId: string, name: string, role = 'starter' as const) => ({
+    playerId,
+    name,
+    number: '',
+    role,
+    note: '',
+  })
 
-  it('確定出席但不在打線上的人才是候補', () => {
+  it('確定出席但沒有上場的人才是候補', () => {
     const bench = deriveBench({
       attendance: [attend('p1', '王小明'), attend('p2', '陳大文'), attend('p3', '林志豪')],
       lineup: [bat(1, 'p1', '王小明')],
+      pitchers: [],
     })
 
     expect(bench.map((entry) => entry.name)).toEqual(['陳大文', '林志豪'])
+  })
+
+  /**
+   * ⚠️ 這一條是整組裡最重要的。
+   *
+   * **DH 制下先發投手不打擊，所以他不會出現在打線裡。** 只比對打線的話，
+   * 出賽名單圖卡上會同時印出「先發投手 #28 張宏宇」與「候補 #28 張宏宇」——
+   * 同一個人既是今天最先發的、又是坐板凳的。實際在正式站上發生過。
+   */
+  it('先發投手不是候補（DH 制下他不在打線裡）', () => {
+    const bench = deriveBench({
+      attendance: [attend('p1', '張宏宇', 'yes', '28'), attend('p2', '陳大文')],
+      lineup: [bat(1, 'p2', '陳大文')],
+      pitchers: [pitch('p1', '張宏宇')],
+    })
+
+    expect(bench).toEqual([])
+  })
+
+  it('中繼與終結投手也不是候補（他們上場投球了）', () => {
+    const bench = deriveBench({
+      attendance: [attend('p1', '中繼'), attend('p2', '終結'), attend('p3', '真的沒上場')],
+      lineup: [],
+      pitchers: [pitch('p1', '中繼', 'relief'), pitch('p2', '終結', 'closer')],
+    })
+
+    expect(bench.map((entry) => entry.name)).toEqual(['真的沒上場'])
+  })
+
+  it('投手紀錄上只有姓名、沒有 playerId 時也要認得出來', () => {
+    const bench = deriveBench({
+      attendance: [attend('p1', '張宏宇'), attend('p2', '陳大文')],
+      lineup: [],
+      pitchers: [pitch('', '張宏宇')],
+    })
+
+    expect(bench.map((entry) => entry.name)).toEqual(['陳大文'])
   })
 
   it('沒有確定出席的人不算候補（他們根本不會到）', () => {
@@ -636,6 +681,7 @@ describe('deriveBench', () => {
         attend('p4', '會到', 'yes'),
       ],
       lineup: [],
+      pitchers: [],
     })
 
     expect(bench.map((entry) => entry.name)).toEqual(['會到'])
@@ -649,6 +695,7 @@ describe('deriveBench', () => {
     const bench = deriveBench({
       attendance: [attend('p1', '王小明'), attend('p2', '陳大文')],
       lineup: [bat(1, '', '王小明')],
+      pitchers: [],
     })
 
     expect(bench.map((entry) => entry.name)).toEqual(['陳大文'])
@@ -658,6 +705,7 @@ describe('deriveBench', () => {
     const bench = deriveBench({
       attendance: [attend('', ' 王小明 ')],
       lineup: [bat(1, '', '王小明')],
+      pitchers: [],
     })
 
     expect(bench).toEqual([])
@@ -667,19 +715,23 @@ describe('deriveBench', () => {
     const bench = deriveBench({
       attendance: [attend('p1', '王小明'), attend('p2', '陳大文')],
       lineup: [],
+      pitchers: [],
     })
 
     expect(bench).toHaveLength(2)
   })
 
   it('沒有出席資料就沒有候補', () => {
-    expect(deriveBench({ attendance: [], lineup: [bat(1, 'p1', '王小明')] })).toEqual([])
+    expect(deriveBench({ attendance: [], lineup: [bat(1, 'p1', '王小明')], pitchers: [] })).toEqual(
+      [],
+    )
   })
 
   it('保留背號與備註，前台要顯示', () => {
     const bench = deriveBench({
       attendance: [attend('p9', '王小明', 'yes', '99')],
       lineup: [],
+      pitchers: [],
     })
 
     expect(bench[0]).toMatchObject({ number: '99', name: '王小明' })

@@ -56,7 +56,7 @@ import { formatGameStamp } from '~/utils/format'
 const props = withDefaults(
   defineProps<{
     entries: LineupEntry[]
-    /** 候補：確定出席但不在先發打序上的人。由 `deriveBench()` 推導。 */
+    /** 候補：確定出席但今天沒上場的人（先發投手不算）。由 `deriveBench()` 推導。 */
     bench?: AttendanceEntry[]
     teamName: string
     teamLogoUrl?: string

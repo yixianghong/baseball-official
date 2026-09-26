@@ -586,7 +586,12 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           />
         </div>
 
-        <AdminLineupEditor v-model="lineup" :players="roster" :attendance="attendance" />
+        <AdminLineupEditor
+          v-model="lineup"
+          :players="roster"
+          :attendance="attendance"
+          :pitchers="pitchers"
+        />
       </section>
 
       <!-- ══ 賽事管理 ══════════════════════════════════════════ -->
