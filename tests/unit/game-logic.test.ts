@@ -11,6 +11,7 @@ import {
   gamePatchSchema,
   gameQuerySchema,
   gameClipSchema,
+  clipEmbedUrl,
   gameResult,
   hasScore,
   parseYouTubeVideoId,
@@ -289,6 +290,38 @@ describe('emptyScoreboard', () => {
  * 如此），管理者要手動改成公開。私人影片嵌進前台只會顯示「無法播放」——
  * 而那是訪客看到的畫面，所以寧可少一段也不要一個壞掉的播放器。
  */
+/**
+ * 嵌入網址的參數。
+ *
+ * 這幾個參數是**實測**挑出來的，不是照文件猜的：沒有 `autoplay` 的播放器會
+ * 停在封面，整片蓋著標題、頻道頭像與「觀看平台：YouTube」；真的播起來之後
+ * 那些才會自己隱藏。而 `modestbranding` 在 2023 年被 YouTube 停用，
+ * 再也沒有參數拿得掉上方那條標題列 —— 有人「順手」加回來只是白費。
+ */
+describe('clipEmbedUrl', () => {
+  const url = clipEmbedUrl('abc12345678')
+
+  it('用 nocookie 網域（沒點播放就不該被種追蹤 cookie）', () => {
+    expect(url.startsWith('https://www.youtube-nocookie.com/embed/abc12345678?')).toBe(true)
+  })
+
+  it.each([
+    ['autoplay=1', '沒播起來的播放器會停在封面，整片被標題與品牌蓋住'],
+    ['rel=0', '結尾推薦只列本頻道'],
+    ['playsinline=1', 'iOS 維持在頁面裡播'],
+  ])('帶 %s（%s）', (param) => {
+    expect(url).toContain(param)
+  })
+
+  it('不帶已經被停用的 modestbranding', () => {
+    expect(url).not.toContain('modestbranding')
+  })
+
+  it('不帶 controls=0：一段是半局六到八分鐘，不能拖進度很難看完', () => {
+    expect(url).not.toContain('controls=0')
+  })
+})
+
 describe('visibleClips', () => {
   const clip = (
     inning: number,

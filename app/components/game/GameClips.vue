@@ -10,6 +10,13 @@ import { clipEmbedUrl, clipThumbnailUrl, HALF_LABELS, visibleClips } from '#shar
  * 在手機上會直接把頁面拖垮 —— 而訪客通常只想看其中一兩段。
  * 所以預設是縮圖 + 播放鈕，**點下去才換成 iframe**。
  *
+ * ## 播放中的那一段會佔滿整列
+ * YouTube 播放器上的標題列、控制列與品牌標誌都是**固定像素高度**，所以播放器
+ * 越小、被擋掉的比例越高 —— 在三欄網格裡一格只有兩百多像素高，那些東西幾乎
+ * 蓋掉半個畫面。而**沒有任何參數可以把它們拿掉**（`modestbranding` 在 2023 年
+ * 就被停用了，見 `clipEmbedUrl`），唯一有效的做法就是讓畫面變大。
+ * 所以點下去的那一段會展開成整列的寬度，其餘維持縮圖。
+ *
  * ## 為什麼有些片段不會出現
  * 透過 API 上傳的影片一律是私人的（未通過 YouTube 合規稽核的專案強制如此），
  * 管理者要手動改成公開。私人影片嵌進來只會顯示「無法播放」，而那是訪客
@@ -43,12 +50,13 @@ function label(clip: GameClip): string {
         v-for="clip in clips"
         :key="clip.videoId"
         class="surface-card overflow-hidden rounded-xl border border-border bg-surface-raised"
+        :class="playing === clip.videoId ? 'sm:col-span-2 lg:col-span-3' : ''"
       >
         <!-- 16:9 的框先佔好位，換成 iframe 時版面才不會跳 -->
         <div class="relative aspect-video bg-ink">
           <iframe
             v-if="playing === clip.videoId"
-            :src="`${clipEmbedUrl(clip.videoId)}?autoplay=1`"
+            :src="clipEmbedUrl(clip.videoId)"
             :title="label(clip)"
             class="absolute inset-0 size-full"
             allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"

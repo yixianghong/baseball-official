@@ -193,9 +193,30 @@ export function visibleClips(clips: GameClip[]): GameClip[] {
     )
 }
 
-/** YouTube 的嵌入網址。用 nocookie 網域：訪客還沒點播放就不該被種追蹤 cookie。 */
+/**
+ * YouTube 的嵌入網址。
+ *
+ * 用 nocookie 網域：訪客還沒點播放就不該被種追蹤 cookie。
+ *
+ * ## 參數
+ * - `autoplay=1` —— iframe 是使用者點了縮圖**之後**才建立的，所以瀏覽器把那次
+ *   點擊算成播放的使用者操作，影片會直接開始。這很重要：**沒有真的播起來的
+ *   播放器會停在封面畫面，而且整片蓋著標題、頻道頭像、正中央的紅色播放鈕與
+ *   「觀看平台：YouTube」**，正在播的時候那些反而會自己隱藏。
+ * - `rel=0` —— 播完的結尾推薦只列本頻道的影片，不會跳出一整片別人的內容。
+ * - `playsinline=1` —— iOS 維持在頁面裡播，不搶成系統的全螢幕播放器。
+ *
+ * ## ⚠️ 不要再加 `modestbranding=1`
+ * 它在 2023/08/15 被 YouTube 停用了，加了也不會有任何效果 —— 現在**沒有任何
+ * 參數**可以拿掉播放器上方的標題列與 YouTube 標誌。想讓畫面少被擋，
+ * 唯一有效的做法是把播放器放大（見 `GameClips.vue`）。
+ *
+ * `controls=0` 可以拿掉下面那條控制列，但代價是**不能拖動進度、也沒有全螢幕鈕**
+ * —— 一段是半局六到八分鐘，不能拖進度的影片很難看完，所以刻意不用。
+ * 而且它只拿掉控制列：暫停時那一整片標題與品牌覆蓋照樣會出現（實測過）。
+ */
 export function clipEmbedUrl(videoId: string): string {
-  return `https://www.youtube-nocookie.com/embed/${videoId}`
+  return `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0&playsinline=1`
 }
 
 /**
