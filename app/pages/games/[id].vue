@@ -476,7 +476,7 @@ useHead({
       <!-- ══ 延賽／取消 ════════════════════════════════════════ -->
       <UiBaseEmpty
         v-else
-        :title="isPostponed ? '這場比賽因雨延賽' : '這場比賽已取消'"
+        :title="isPostponed ? '這場比賽已延賽' : '這場比賽已取消'"
         :description="
           game.note || (isPostponed ? '改期後的日期會另行公告。' : '這場比賽不會補行。')
         "

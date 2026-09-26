@@ -37,7 +37,7 @@ export const GAME_STATUS_LABELS: Record<GameStatus, string> = {
   scheduled: '尚未開始',
   live: '比賽中',
   finished: '比賽結束',
-  postponed: '因雨延賽',
+  postponed: '延賽',
   canceled: '取消',
 }
 

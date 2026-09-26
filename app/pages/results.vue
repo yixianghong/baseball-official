@@ -107,7 +107,7 @@ useHead({ title: '比賽結果' })
         </p>
         <p class="text-fluid-sm text-content-muted">
           共 {{ record.total }} 場
-          <span v-if="postponedCount">（另有 {{ postponedCount }} 場因雨延賽）</span>
+          <span v-if="postponedCount">（另有 {{ postponedCount }} 場延賽）</span>
         </p>
       </div>
 

@@ -147,7 +147,7 @@ describe('GameCard 的狀態色條', () => {
     ['比賽中', { status: 'live', ...withScore(2, 1) }, 'border-l-danger'],
     ['勝', { status: 'finished', ...withScore(6, 3) }, 'border-l-accent-500'],
     ['敗', { status: 'finished', ...withScore(1, 4) }, 'border-l-danger'],
-    ['因雨延賽', { status: 'postponed' }, 'border-l-warning'],
+    ['延賽', { status: 'postponed' }, 'border-l-warning'],
   ])('%s 用對應的顏色', async (_label, overrides, expected) => {
     const component = await mount(overrides)
     expect(component.find('a').classes()).toContain(expected)
@@ -512,7 +512,7 @@ describe('ScoreBanner 的最新比數', () => {
   })
 
   it.each([
-    ['因雨延賽', 'postponed'],
+    ['延賽', 'postponed'],
     ['取消', 'canceled'],
   ])('%s 的場次把狀態寫出來，不顯示比數', async (label, status) => {
     const component = await mount({ status })
