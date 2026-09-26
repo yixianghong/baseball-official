@@ -880,16 +880,6 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 class="text-fluid-lg font-bold">打擊紀錄</h2>
-              <!--
-                ⚠️ 這句說明不能省。
-
-                備註是**純文字**，系統不解析也不加總。不講的話，登錄的人會
-                合理地以為打完這些數字之後某處會出現打擊率 —— 然後等著一個
-                永遠不會來的東西。理由寫在 `batterEntrySchema` 上。
-              -->
-              <p class="text-fluid-sm text-content-muted">
-                備註直接寫成一句話（例如「4 打數 2 安打 1 打點」），不會被拆開計算。
-              </p>
             </div>
             <div class="flex flex-wrap gap-2">
               <!--
@@ -949,10 +939,6 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
               </UiBaseButton>
             </li>
           </ul>
-
-          <p v-else class="text-fluid-sm text-content-muted">
-            還沒有打擊紀錄。前台只有在這裡填了東西之後才會出現「打擊紀錄」區塊。
-          </p>
         </div>
       </section>
     </template>
