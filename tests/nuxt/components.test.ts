@@ -1,8 +1,9 @@
 // @vitest-environment nuxt
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import BaseButton from '../../app/components/ui/BaseButton.vue'
 import BaseInput from '../../app/components/ui/BaseInput.vue'
+import AdminRowMenu from '../../app/components/admin/RowMenu.vue'
 
 describe('UiBaseButton', () => {
   it('渲染插槽內容', async () => {
@@ -96,5 +97,93 @@ describe('UiBaseInput', () => {
     await wrapper.find('input').setValue('dev@example.com')
 
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['dev@example.com'])
+  })
+})
+
+/**
+ * 表格列的操作選單（⋮）。
+ *
+ * 這一組守的是**刪除必須按兩下**。選單按一下就刪掉的話，在手機上一個誤觸
+ * 就少一場比賽 —— 而那是不可逆的，前台隔天才會有人發現。
+ *
+ * 位置計算（翻上翻下、貼齊視窗）沒有測：happy-dom 的
+ * `getBoundingClientRect()` 全部回 0，測出來的只會是測試環境的行為。
+ */
+describe('AdminRowMenu', () => {
+  const mount = (onSelect: () => void) =>
+    mountSuspended(AdminRowMenu, {
+      props: {
+        label: '某一列的操作',
+        items: [
+          { label: '編輯', onSelect: () => {} },
+          { label: '刪除', confirmLabel: '確定刪除？', danger: true, onSelect },
+        ],
+      },
+    })
+
+  /** 選單 teleport 到 `body`，所以不能從元件的 wrapper 裡找。 */
+  const menuItems = () =>
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('預設是收起來的，只有一顆觸發鈕', async () => {
+    const component = await mount(() => {})
+
+    expect(menuItems()).toHaveLength(0)
+    expect(component.find('button').attributes('aria-expanded')).toBe('false')
+    // 一張表裡有幾十顆一樣的 ⋮，讀螢幕軟體要念得出是哪一列
+    expect(component.find('button').attributes('aria-label')).toBe('某一列的操作')
+  })
+
+  it('點開之後選項出現在 body 上（不能留在會被裁切的容器裡）', async () => {
+    const component = await mount(() => {})
+
+    await component.find('button').trigger('click')
+
+    expect(menuItems().map((item) => item.textContent?.trim())).toEqual(['編輯', '刪除'])
+    expect(document.body.querySelector('[role="menu"]')?.closest('table')).toBe(null)
+  })
+
+  it('刪除按第一下只會變成確認文案，不會執行', async () => {
+    let removed = 0
+    const component = await mount(() => (removed += 1))
+
+    await component.find('button').trigger('click')
+    menuItems()[1]!.click()
+    await nextTick()
+
+    expect(removed).toBe(0)
+    expect(menuItems()[1]!.textContent?.trim()).toBe('確定刪除？')
+  })
+
+  it('再按一下才真的執行，而且選單會收起來', async () => {
+    let removed = 0
+    const component = await mount(() => (removed += 1))
+
+    await component.find('button').trigger('click')
+    menuItems()[1]!.click()
+    await nextTick()
+    menuItems()[1]!.click()
+    await nextTick()
+
+    expect(removed).toBe(1)
+    expect(menuItems()).toHaveLength(0)
+  })
+
+  it('關掉再打開，待確認狀態要歸零', async () => {
+    const component = await mount(() => {})
+
+    await component.find('button').trigger('click')
+    menuItems()[1]!.click()
+    await nextTick()
+    expect(menuItems()[1]!.textContent?.trim()).toBe('確定刪除？')
+
+    await component.find('button').trigger('click')
+    await component.find('button').trigger('click')
+
+    expect(menuItems()[1]!.textContent?.trim()).toBe('刪除')
   })
 })

@@ -107,7 +107,21 @@ useHead({ title: '賽事管理' })
             <th scope="col" class="px-4 py-3 font-semibold">場地</th>
             <th scope="col" class="px-4 py-3 font-semibold">狀態</th>
             <th scope="col" class="px-4 py-3 font-semibold">比數</th>
-            <th scope="col" class="px-4 py-3 text-right font-semibold">操作</th>
+            <!--
+              操作**黏在右邊**（`sticky right-0`）。這一欄在最後，而表格在手機上
+              是橫向捲動的 —— 不黏住的話，手機使用者得先把整張表往左拖到底
+              才看得到「編輯」與「刪除」，而那正是點進這一頁要做的事。
+
+              `shadow-[inset_1px_…]` 而不是 `border-l`：`border-collapse: collapse`
+              的表格會把框線畫在表格上而不是儲存格上，黏著欄橫向捲動時那條線
+              會跟著跑掉。inset 陰影畫在儲存格自己身上，不受影響。
+            -->
+            <th
+              scope="col"
+              class="sticky right-0 z-10 w-px bg-surface-muted px-2 py-3 font-semibold shadow-[inset_1px_0_0_0_var(--color-border)]"
+            >
+              <span class="sr-only">操作</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -143,17 +157,32 @@ useHead({ title: '賽事管理' })
               </template>
               <span v-else class="text-content-muted">—</span>
             </td>
-            <td class="px-4 py-3">
-              <div class="flex justify-end gap-1">
-                <UiBaseButton
-                  variant="ghost"
-                  size="sm"
-                  @click="navigateTo(`/admin/games/${game.id}`)"
-                >
-                  編輯
-                </UiBaseButton>
-                <AdminDeleteButton :loading="deleting" @confirm="handleDelete(game.id)" />
-              </div>
+            <!--
+              黏著欄的背景**必須是不透明的**，否則捲過去的儲存格會透出來。
+              所以待補登那一列不能沿用 `bg-warning/5`（半透明），
+              要用混好的同一個顏色。
+            -->
+            <td
+              class="sticky right-0 z-10 w-px px-2 py-3 shadow-[inset_1px_0_0_0_var(--color-border)]"
+              :class="
+                needsResultUpdate(game, today)
+                  ? 'bg-[color-mix(in_srgb,var(--color-warning)_5%,var(--color-surface))]'
+                  : 'bg-surface'
+              "
+            >
+              <AdminRowMenu
+                :label="`${formatGameDate(game.date)} 對 ${game.opponent} 的操作`"
+                :items="[
+                  { label: '編輯', onSelect: () => navigateTo(`/admin/games/${game.id}`) },
+                  {
+                    label: '刪除',
+                    confirmLabel: '確定刪除？',
+                    danger: true,
+                    disabled: deleting,
+                    onSelect: () => handleDelete(game.id),
+                  },
+                ]"
+              />
             </td>
           </tr>
         </tbody>

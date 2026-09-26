@@ -122,6 +122,26 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
   測試會直接寫進正式 Firestore、或真的去打氣象署的 API。**新增任何外部服務的金鑰時，
   記得回來加一行。**
 - **flex/grid item 的 `min-width: auto`** 會撐破容器，`minmax(0,1fr)` 只約束軌道管不到 item。
+- **`overflow-x-auto` 的容器裡放不下下拉選單。** CSS 規定**只要有一軸不是
+  `visible`，另一軸就不會是 `visible`** —— 所以橫向捲動的表格裡，絕對定位的
+  選單會被上下裁掉，或讓容器長出一條莫名其妙的垂直捲軸。加 `z-index` 沒有用，
+  它跟堆疊順序無關。解法是 teleport 到 `body` 並改用 `position: fixed`，
+  座標當下用 `getBoundingClientRect()` 算（`AdminRowMenu`）。代價是它不跟著
+  捲動走，所以**捲動就關閉** —— 監聽器要下在 `window` 上並且 `capture: true`，
+  因為 `scroll` 事件**不會冒泡**，只有捕獲階段聽得到容器自己的捲動。
+- **黏著欄（`sticky left-0` / `right-0`）的背景必須是不透明的**，否則捲過去的儲存格會
+  透出來。整列有半透明色調時（例如待補登那列的 `bg-warning/5`），黏著的那一格
+  要改成混好的同一個顏色（`color-mix(in srgb, …)`），不能沿用同一個 class。
+  而且分隔線要用 `shadow-[inset_…]` 而不是 `border-l/r`：
+  `border-collapse: collapse` 的表格把框線畫在表格上而不是儲存格上，橫向捲動時
+  那條線會跟著跑掉。
+- **`overflow-hidden` 的容器裡，焦點外框要內縮。** 全站的 `:focus-visible` 是
+  `outline-offset: 2px`（外擴），被切掉左右兩邊之後畫面上只剩上下兩條，
+  看起來像多了一條線。滿寬的選單項目要補 `focus-visible:-outline-offset-2`。
+- **`visibility: hidden` 的元素不能被 focus。** 「先畫出來量尺寸、再定位、
+  然後 focus 第一個項目」這種流程裡，`placed` 還沒寫進 DOM 的那一幀呼叫
+  `.focus()` 會**靜靜地沒有作用**，鍵盤使用者打開選單後焦點掉在 `<body>`。
+  要多等一次 `nextTick()`。
 - **Tailwind 掃不到執行期拼出來的 class**（`sm:${變數}`），完整名稱要寫死在原始碼裡。
 - **`watchEffect` 會立刻執行一次，所以不能放在它用到的 `const` 之前** —
   `const` 在宣告前是暫時性死區，開啟頁面當下就拋
