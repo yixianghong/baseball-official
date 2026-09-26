@@ -168,6 +168,26 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
   4 支內部 API，額度 100／分鐘等於全站每分鐘 25 次瀏覽就爆掉，而且**爆掉的樣子是
   頁面照常回 200、資料全部消失**。`30.rate-limit.ts` 認不出用戶端就直接放行，
   `tests/e2e/rate-limit.test.ts` 守著這個行為。
+- **兩個頁面讀同一支端點時，換頁不會重抓資料**（已經預設修掉，但要知道為什麼）。
+  `useApiFetch` 把 `useFetch` 包了一層，所以整個專案的 `useFetch` 只有**一個**
+  呼叫點 —— Nuxt 原本依呼叫位置產生的 key 退化成「只看網址」，兩個讀同一支
+  端點的頁面**共用同一筆 `useAsyncData` 快取**。而 Nuxt 只在參照數歸零時清
+  快取，換頁是新頁面**先掛載、舊頁面才卸載**，參照數永遠不會歸零，於是
+  Nuxt 直接沿用、**一次請求都不發**。
+  實際踩到：後台改完比賽資料（PATCH 已寫進資料庫），走到錄影頁或按「前台
+  預覽」再回來，畫面變回改之前的內容，要退回列表重新進入才正確。而且回來後
+  表單被舊資料灌回去（`syncFromGame()`），再存一次就**真的把新資料蓋掉**。
+  現在 `useApiFetch` 的 `revalidateOnEnter` **預設為 `true`**，行為等同「原生
+  useFetch 各頁各自的快取」，新增端點不必再想這件事。判斷靠 `useFetch` 剛回來
+  時的**同步**狀態：`pending` = 真的發了請求、`success` + `isHydrating` =
+  SSR payload、`success` + 非 hydrating = **沿用了別頁的快取**，只有最後一種
+  才補抓，所以成本只發生在原本會出錯的情況（實測前後台各種換頁都是
+  「這一頁需要幾份資料就幾個請求」，hydration 0 個）。補抓**擋在 `await` 前面**
+  —— 背景跑的話畫面會先畫舊資料，而表單會在資料到齊時重新灌一次，
+  使用者在那個空檔打的字就被蓋掉。
+  ⚠️ **只有一種情況該關掉**：掛在 layout 上、每頁都要、幾乎不會變的資料。
+  全站只有 `useSiteSettings()` 這一支（代價是後台改完隊名，已開著的分頁要
+  重新整理才會更新）。`tests/nuxt/useApiFetch.test.ts` 守著預設值與那三條判斷。
 - **`setup({ nuxtConfig: { runtimeConfig } })` 會被環境變數蓋掉。**
   本機 `.env` 有值、CI 沒有，就會出現「本機全過、CI 掛」而且完全重現不了的狀況。
   要在測試裡強制某個設定，用 `process.env.NUXT_XXX` 而不是 `nuxtConfig`。

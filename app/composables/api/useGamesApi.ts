@@ -65,6 +65,12 @@ export function useGames(
  * 【宣告式】單場比賽。
  *
  * 一次拿到完整資料（含打線、出席、計分板），詳情頁不需要第二次請求。
+ *
+ * **有三個頁面讀這支端點**：後台編輯頁、錄影頁、前台比賽頁。它們會共用
+ * 同一筆 `useAsyncData` 快取，所以「進到頁面就重新確認一次」對這一支特別
+ * 重要 —— 那是 `useApiFetch` 的預設行為（`revalidateOnEnter`），這裡不必
+ * 也不該關掉。這個坑就是在這三頁之間走來走去時踩到的，理由與實測寫在
+ * `useApiFetch` 的說明裡。
  */
 export function useGame(id: MaybeRefOrGetter<string>) {
   return useApiFetch<Game>(() => ENDPOINTS.detail(String(toValue(id))))
