@@ -14,22 +14,26 @@ import { formatGameDateLong } from '~/utils/format'
  * 對這一頁只是多一層要覆蓋掉的東西。
  * 放在 `/admin/record/` 底下也避開了與 `pages/admin/games/[id].vue` 的路由衝突。
  *
- * ## 橫向是主要的使用姿勢
- * 拍球場要的是最寬的畫面，所以人會把手機轉橫。但橫向的可用高度只有 320px 上下
- * （iPhone 橫向 390 再扣掉 Safari 的上下列），而直向的版面疊起來有 855px ——
- * 照搬過去的話錄影鈕會在畫面外 400 多 px，你得一邊端著手機對準球場一邊捲頁面。
- * 所以橫向是**另一套版面**（`field-mode:` variant）：預覽與控制項仍然是上下
- * 排列（和直向一致，不左右並排），但預覽改用 `42dvh` 的高度上限收斂 ——
- * 橫向若讓它吃滿寬度，16:9 會算出比整個視窗還高的高度。
- * 剩下的高度給控制項，而**錄影鈕永遠不參與捲動**。
+ * ## 只有一套版面：預覽滿寬、其餘捲動
+ * 拍球場要的是最寬的畫面，所以人會把手機轉橫。預覽**永遠維持 16:9 並吃滿寬度**
+ * —— 取景看得越大越準，不為了「塞進一屏」去壓縮它。
+ *
+ * 曾經為橫向做過第二套版面（預覽限高、標題與說明隱藏、局數與上下半併成一行），
+ * 目的是「不用捲」。那個目標本身是錯的：為了省下捲動，取景畫面被壓到只剩
+ * 三分之一屏高，而**取景正是這一頁唯一不能將就的東西**。現在橫向時整頁會
+ * 超過一屏，讓使用者自己捲 —— 其餘資訊捲過去無所謂，真正不能捲掉的只有
+ * 錄影鈕，所以**那一顆固定在螢幕底部**（`fixed`，不是 `sticky`，理由寫在那裡）。
+ *
+ * 少了一套版面也少了一整類只在特定視窗尺寸才出現的 bug（例如上傳錯誤清單
+ * 曾經因為 `landscape:` 而在桌機上被整個藏起來）。
  *
  * 不能用程式鎖定方向：`screen.orientation.lock()` 要先進全螢幕，而 iPhone 對
- * 非 video 元素的 Fullscreen API 長期不支援。只能用 CSS 回應，並在直向時提示。
+ * 非 video 元素的 Fullscreen API 長期不支援。
  *
  * ## 高度用 `dvh`、左右要留安全區
- * 手機瀏覽器的 `100vh` 含**會收起的**工具列，橫向本來就只有 320px 上下，
- * 再跟著工具列跳動就沒得用了。而橫向時瀏海吃的是**側邊**而不是下緣，
- * 所以這一頁三邊都要留（`viewport-fit=cover` 已在 `nuxt.config.ts` 設好）：
+ * 手機瀏覽器的 `100vh` 含**會收起的**工具列，跟著工具列跳動的底線沒得用。
+ * 而橫向時瀏海吃的是**側邊**而不是下緣，所以這一頁三邊都要留
+ * （`viewport-fit=cover` 已在 `nuxt.config.ts` 設好）：
  * 直向時 top 有值、左右是 0，橫向時剛好相反。
  *
  * ## 存檔與上傳是兩件事，而且順序不能反
@@ -187,11 +191,6 @@ function download(blob: Blob, filename: string) {
  * （上傳失敗的也在裡面，狀態是 `failed`），所以它就是「這一輪錄了什麼」的
  * 完整紀錄。兩份平行的清單遲早會對不上。
  */
-/** 最近一則上傳失敗的原因。球場模式只擺得下一行，那就擺最要緊的那一行。 */
-const firstUploadError = computed(
-  () => uploads.queue.value.find((item) => item.state === 'failed')?.error ?? '',
-)
-
 const recordedHalves = computed(
   () => new Set(uploads.queue.value.map((item) => `${item.inning}-${item.half}`)),
 )
@@ -225,17 +224,14 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
     </UiBaseEmpty>
 
     <!--
-      直向：由上往下堆，頁面可以捲。
-      橫向：鎖成一個滿高的兩欄，左邊預覽、右邊控制，整頁不捲。
+      一律由上往下堆、頁面可以捲。底部的 `pb-32` 是留給固定在螢幕底部的
+      錄影鈕的空間 —— 少了它，最後一段內容會永遠被那顆按鈕蓋住。
     -->
-    <div
-      v-else-if="game"
-      class="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-5 field-mode:h-dvh field-mode:max-w-none field-mode:gap-2 field-mode:px-3 field-mode:py-2"
-    >
+    <div v-else-if="game" class="flex flex-col gap-4 pt-5 pb-32">
       <!-- ══ 不支援：橫向直向都一樣，佔滿就好 ══════════════════ -->
       <div
         v-if="!recorder.supported.value"
-        class="rounded-xl border border-warning/40 bg-warning/10 p-4 text-fluid-sm field-mode:flex-1"
+        class="mx-auto w-full max-w-2xl rounded-xl border border-warning/40 bg-warning/10 p-4 text-fluid-sm"
       >
         <p class="font-semibold">這個裝置不能在瀏覽器裡錄影</p>
         <p class="mt-1 text-white/70">
@@ -246,18 +242,17 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
       <template v-else>
         <!-- ══ 預覽 ════════════════════════════════════════════ -->
         <!--
-          滿版：用負 margin 抵銷容器的左右內距，讓畫面貼齊螢幕兩側。
-          取景的時候看得越大越準，而這一頁上沒有別的東西需要跟它對齊。
+          滿版：它**放在寬度容器外面**，所以自然貼齊視窗兩側。
+          不要改用負 margin 把它從容器裡撐出去 —— 那需要 `100vw`，
+          而 `100vw` 含垂直捲軸的寬度，結果會橫向溢出十幾像素
+          （`CommonPageHero` 的註解記過這件事）。
+
+          取景看得越大越準，所以高度完全跟著 16:9 走、不設上限。
+          代價是橫向時整頁會超過一屏 —— 那沒關係，能捲，而真正不能捲掉的
+          只有錄影鈕，它是固定在底部的。
         -->
-        <div class="-mx-4 shrink-0 field-mode:-mx-3">
-          <!--
-            直向靠 16:9 決定高度；橫向改成固定高度 —— 844px 寬的 16:9 會算出
-            475px 高，比整個視窗還高。`object-cover` 會把超出的部分裁掉，
-            所以橫向看到的範圍比實際錄到的窄一點。
-          -->
-          <div
-            class="relative aspect-video w-full overflow-hidden bg-black field-mode:aspect-auto field-mode:h-[38dvh]"
-          >
+        <div class="shrink-0">
+          <div class="relative aspect-video w-full overflow-hidden bg-black">
             <!-- muted 不能省：沒有它 autoplay 會被瀏覽器擋下，而且會產生回授嘯叫 -->
             <video ref="videoRef" class="size-full object-cover" autoplay muted playsinline />
 
@@ -284,13 +279,6 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             </div>
 
             <!--
-              ⚠️ 錄出來是直的。
-
-              這和畫面方向是兩回事 —— 預覽可能看起來好好的，但存下來的檔案是
-              1080×1920。在球場上完全看不出來，回家打開才發現一整場都是直的，
-              所以這個警告要壓在畫面上、用紅底，不能只是一行小字。
-            -->
-            <!--
               解析度留著（不是警告，是給人核對「真的拿到 1920×1080 嗎」）。
               方向本身不再提示 —— 轉動裝置會自動重新取得串流並修正方向，
               見 `useGameRecorder` 的 `onOrientationChange`。
@@ -304,19 +292,19 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
           </div>
         </div>
 
-        <!-- ══ 右：控制項 ══════════════════════════════════════ -->
-        <div class="flex min-h-0 flex-col gap-3 field-mode:flex-1 field-mode:gap-2">
+        <!-- ══ 控制項（捲動區）══════════════════════════════════ -->
+        <div class="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4">
           <!--
             控制項可以捲，但錄影鈕在捲動區外面 —— 端著手機對準球場的人
             不可能一邊捲頁面一邊找按鈕。
           -->
-          <div class="min-h-0 flex-1 space-y-3 field-mode:overflow-y-auto">
+          <div class="space-y-3">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
-                <h1 class="truncate text-fluid-lg font-bold field-mode:text-fluid-sm">
+                <h1 class="truncate text-fluid-lg font-bold">
                   {{ teamName }} vs {{ game.opponent }}
                 </h1>
-                <p class="text-fluid-sm text-white/60 field-mode:hidden">
+                <p class="text-fluid-sm text-white/60">
                   {{ formatGameDateLong(game.date) }}
                 </p>
               </div>
@@ -333,14 +321,12 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             </p>
 
             <div>
-              <label for="camera" class="mb-1 block text-fluid-sm text-white/70 field-mode:hidden"
-                >鏡頭</label
-              >
+              <label for="camera" class="mb-1 block text-fluid-sm text-white/70">鏡頭</label>
               <select
                 id="camera"
                 :value="recorder.selectedCameraId.value"
                 :disabled="recorder.recording.value"
-                class="min-h-12 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-white disabled:opacity-50 field-mode:min-h-10 field-mode:text-fluid-sm"
+                class="min-h-12 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-white disabled:opacity-50"
                 @change="onCameraChange(($event.target as HTMLSelectElement).value)"
               >
                 <option
@@ -353,30 +339,24 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                 </option>
               </select>
               <!-- deviceId 每次都會變，所以不能記住上次的選擇，要講清楚 -->
-              <p class="mt-1 text-xs text-white/50 field-mode:hidden">
-                每次開啟都要重新挑一次，系統不會記住。
-              </p>
+              <p class="mt-1 text-xs text-white/50">每次開啟都要重新挑一次，系統不會記住。</p>
             </div>
 
             <!--
-              球場模式把局數與上下半併成一行。
-              橫向有的是寬度、缺的是高度 —— 分成兩排的話上下半會被擠出畫面，
-              而那正是每半局都要確認一次的東西。
+              局數與上下半分兩排。以前橫向時會併成一行（那時整頁不能捲，
+              分兩排上下半會被擠出畫面），現在頁面本來就可以捲，
+              擠成一行只是讓每一顆都更難按。
             -->
-            <div
-              class="space-y-3 field-mode:flex field-mode:items-start field-mode:gap-2 field-mode:space-y-0"
-            >
-              <div class="field-mode:min-w-0 field-mode:flex-1">
-                <span class="mb-1 block text-fluid-sm text-white/70 field-mode:hidden"
-                  >這一段是第幾局</span
-                >
+            <div class="space-y-3">
+              <div>
+                <span class="mb-1 block text-fluid-sm text-white/70">這一段是第幾局</span>
                 <div class="flex flex-wrap gap-2">
                   <button
                     v-for="n in totalInnings"
                     :key="n"
                     type="button"
                     :disabled="recorder.recording.value"
-                    class="min-h-11 min-w-11 flex-1 rounded-xl border px-3 font-bold tabular-nums transition disabled:opacity-40 field-mode:min-h-9 field-mode:min-w-9 field-mode:px-2"
+                    class="min-h-11 min-w-11 flex-1 rounded-xl border px-3 font-bold tabular-nums transition disabled:opacity-40"
                     :class="
                       inning === n
                         ? 'border-accent-400 bg-accent-500 text-ink-deep'
@@ -391,10 +371,8 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                 </div>
               </div>
 
-              <div class="field-mode:min-w-0 field-mode:flex-1">
-                <span class="mb-1 block text-fluid-sm text-white/70 field-mode:hidden"
-                  >上半還是下半</span
-                >
+              <div>
+                <span class="mb-1 block text-fluid-sm text-white/70">上半還是下半</span>
                 <div class="grid grid-cols-2 gap-2">
                   <!--
                     只有兩個選項，所以做成兩顆大按鈕而不是下拉 —— 這是戴著手套、
@@ -406,7 +384,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                     :key="option"
                     type="button"
                     :disabled="recorder.recording.value"
-                    class="min-h-12 rounded-xl border font-bold transition disabled:opacity-40 field-mode:min-h-9 field-mode:text-fluid-sm"
+                    class="min-h-12 rounded-xl border font-bold transition disabled:opacity-40"
                     :class="
                       half === option
                         ? 'border-accent-400 bg-accent-500 text-ink-deep'
@@ -427,7 +405,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             </div>
 
             <!-- ══ 已錄片段與上傳狀態 ══════════════════════════ -->
-            <div v-if="uploads.queue.value.length" class="field-mode:hidden">
+            <div v-if="uploads.queue.value.length">
               <h2 class="mb-2 text-fluid-sm font-semibold text-white/70">這一輪已錄</h2>
               <ul class="space-y-1.5">
                 <li
@@ -486,50 +464,43 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             </div>
           </div>
 
-          <!-- ══ 錄影鈕：永遠看得到，不參與捲動 ══════════════════ -->
-          <div class="shrink-0 space-y-2">
-            <UiBaseButton
-              v-if="!recorder.recording.value"
-              class="min-h-14 w-full text-fluid-lg field-mode:min-h-12"
-              :disabled="!recorder.stream.value || saving || recorder.initializing.value"
-              @click="recorder.start()"
-            >
-              開始錄{{ halfLabel }}
-            </UiBaseButton>
-            <UiBaseButton
-              v-else
-              variant="secondary"
-              class="min-h-14 w-full text-fluid-lg field-mode:min-h-12"
-              :loading="saving"
-              @click="finish"
-            >
-              結束並儲存
-            </UiBaseButton>
+          <!--
+            ══ 錄影鈕 ══
+            整頁可以捲動，但這一顆**固定在螢幕底部**。端著手機對準球場的人
+            不可能一邊捲頁面一邊找「結束」—— 其餘資訊捲過去無所謂，這顆不行。
 
-            <p v-if="recorder.recording.value" class="text-center text-fluid-sm text-warning">
-              ⚠️ 請勿切換 App 或鎖定螢幕
-            </p>
+            ⚠️ 用 `fixed` 而不是 `sticky`：sticky 不會把元素拉出它的容器範圍，
+            而這顆按鈕本來就在文件末端，所以 `sticky bottom-0` 在捲到底之前
+            完全沒有作用（看起來像沒生效，其實是規格如此）。
+          -->
+          <div
+            class="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-ink-deep/95 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur"
+          >
+            <div class="mx-auto w-full max-w-2xl space-y-2 px-4">
+              <UiBaseButton
+                v-if="!recorder.recording.value"
+                class="min-h-14 w-full text-fluid-lg"
+                :disabled="!recorder.stream.value || saving || recorder.initializing.value"
+                @click="recorder.start()"
+              >
+                開始錄{{ halfLabel }}
+              </UiBaseButton>
+              <UiBaseButton
+                v-else
+                variant="secondary"
+                class="min-h-14 w-full text-fluid-lg"
+                :loading="saving"
+                @click="finish"
+              >
+                結束並儲存
+              </UiBaseButton>
 
-            <!-- 球場模式沒空間列完整清單，收成一兩行 -->
-            <div v-else-if="uploads.queue.value.length" class="hidden text-center field-mode:block">
-              <p class="text-xs" :class="uploads.failed.value ? 'text-warning' : 'text-white/50'">
-                已錄 {{ uploads.queue.value.length }} 段<template v-if="uploads.pending.value">
-                  ・上傳中 {{ uploads.pending.value }}</template
-                ><template v-if="uploads.failed.value"
-                  >・{{ uploads.failed.value }} 段失敗</template
-                >
+              <p v-if="recorder.recording.value" class="text-center text-fluid-sm text-warning">
+                ⚠️ 請勿切換 App 或鎖定螢幕
               </p>
-              <!--
-                失敗時把原因也帶出來。只有計數的話，人在球場上會知道
-                「壞了」卻不知道是網路斷了還是設定沒做 —— 而這兩件事
-                一個當下重試就好、一個再試幾次也沒用。
-              -->
-              <p v-if="firstUploadError" class="truncate text-xs text-warning">
-                {{ firstUploadError }}
-              </p>
+
+              <p v-if="saveMessage" class="truncate text-center text-fluid-sm">{{ saveMessage }}</p>
             </div>
-
-            <p v-if="saveMessage" class="truncate text-center text-fluid-sm">{{ saveMessage }}</p>
           </div>
         </div>
       </template>

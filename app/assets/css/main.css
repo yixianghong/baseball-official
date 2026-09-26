@@ -21,20 +21,6 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /**
- * 「球場模式」—— 手機橫放在球場邊錄影的那個姿勢。
- *
- * ## 為什麼不能只用 `landscape:`
- * 桌機瀏覽器**永遠是橫向的**，所以 `landscape:` 會把桌機也算進去。
- * 錄影頁用它做成兩欄＋收合的緊湊版面之後，在電腦上測試的人會發現
- * 上傳錯誤訊息整個消失了 —— 因為那份詳細清單被 `landscape:hidden` 藏起來。
- * 踩過這一次。
- *
- * 真正的條件是「橫的**而且**很矮」：iPhone 橫放扣掉 Safari 的上下列只剩
- * 320px 上下，而桌機隨便都有 700px 以上。用 600px 當界線把兩者分開。
- */
-@custom-variant field-mode (@media (orientation: landscape) and (max-height: 600px));
-
-/**
  * Oswald —— 數字與英文標籤用的窄黑體。
  *
  * ## 為什麼自己放檔案而不是連 Google Fonts
