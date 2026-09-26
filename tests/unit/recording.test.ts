@@ -7,8 +7,10 @@ import {
   MIME_CANDIDATES,
   nextHalf,
   pickMimeType,
+  resumePosition,
   sortCameras,
 } from '../../app/utils/recording'
+import { createMemoryClipStore } from '../../app/utils/clip-store'
 import { battingSide } from '../../shared/schemas/game'
 
 /**
@@ -275,5 +277,95 @@ describe('formatDuration', () => {
 
   it('負數不會顯示成奇怪的東西', () => {
     expect(formatDuration(-1)).toBe('00:00')
+  })
+})
+
+/**
+ * 頁面被系統中斷後，要接著錄哪一格。
+ *
+ * 重新載入之後局數會回到第 1 局上半，而場邊的人剛經歷一次莫名其妙的閃退 ——
+ * 不該還要他自己回想剛剛錄到哪。
+ */
+describe('resumePosition', () => {
+  const at = (startedAt: number, inning: number, half: 'top' | 'bottom', finished: boolean) => ({
+    startedAt,
+    inning,
+    half,
+    finished,
+  })
+
+  it('沒有暫存的片段就不動', () => {
+    expect(resumePosition([], 7)).toBeNull()
+  })
+
+  it('錄到一半被中斷 → 停在同一個半局（剩下的還沒錄）', () => {
+    expect(resumePosition([at(1, 3, 'bottom', false)], 7)).toEqual({ inning: 3, half: 'bottom' })
+  })
+
+  it('錄完但還沒上傳 → 下一個半局', () => {
+    expect(resumePosition([at(1, 3, 'top', true)], 7)).toEqual({ inning: 3, half: 'bottom' })
+  })
+
+  it('看的是最後開始錄的那一段，不是陣列裡的最後一個', () => {
+    const sessions = [at(200, 4, 'top', false), at(100, 2, 'bottom', true)]
+    expect(resumePosition(sessions, 7)).toEqual({ inning: 4, half: 'top' })
+  })
+})
+
+/**
+ * 暫存片段的介面契約。
+ *
+ * 這裡測的是記憶體版；IndexedDB 版實作同一個介面，在真的瀏覽器裡驗證過
+ * （happy-dom 沒有 IndexedDB）。契約裡最要緊的是順序：塊組錯順序的影片
+ * 播不動，而錄的當下完全看不出來。
+ */
+describe('ClipStore', () => {
+  const session = (id: string, gameId: string, startedAt: number) => ({
+    id,
+    gameId,
+    inning: 1,
+    half: 'top' as const,
+    mimeType: 'video/mp4',
+    startedAt,
+    finished: false,
+  })
+
+  it('依 seq 組回，不管寫入的先後', async () => {
+    const store = createMemoryClipStore()
+    await store.begin(session('s1', 'g1', 1))
+    await store.append('s1', 1, new Blob(['BB']))
+    await store.append('s1', 0, new Blob(['AA']))
+    await store.append('s1', 2, new Blob(['CC']))
+
+    const blob = await store.assemble('s1')
+    expect(await blob!.text()).toBe('AABBCC')
+    expect(blob!.type).toBe('video/mp4')
+  })
+
+  it('一塊都沒有就回 null（錄影一開始就被中斷）', async () => {
+    const store = createMemoryClipStore()
+    await store.begin(session('s1', 'g1', 1))
+    expect(await store.assemble('s1')).toBeNull()
+  })
+
+  it('只列出這一場的，依開始時間排', async () => {
+    const store = createMemoryClipStore()
+    await store.begin(session('late', 'g1', 200))
+    await store.begin(session('other', 'g2', 150))
+    await store.begin(session('early', 'g1', 100))
+
+    expect((await store.list('g1')).map((item) => item.id)).toEqual(['early', 'late'])
+  })
+
+  it('finish 標記錄完，remove 連同資料一起刪', async () => {
+    const store = createMemoryClipStore()
+    await store.begin(session('s1', 'g1', 1))
+    await store.append('s1', 0, new Blob(['AA']))
+    await store.finish('s1')
+    expect((await store.list('g1'))[0]?.finished).toBe(true)
+
+    await store.remove('s1')
+    expect(await store.list('g1')).toEqual([])
+    expect(await store.assemble('s1')).toBeNull()
   })
 })

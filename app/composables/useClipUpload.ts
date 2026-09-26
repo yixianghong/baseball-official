@@ -1,5 +1,6 @@
 import type { GameHalf } from '#shared/schemas/game'
 import { HALF_LABELS } from '#shared/schemas/game'
+import { getClipStore } from '~/utils/clip-store'
 
 /**
  * 把錄好的片段上傳到 YouTube（見 `docs/game-recording-plan.md`）。
@@ -17,6 +18,10 @@ import { HALF_LABELS } from '#shared/schemas/game'
  * 每一段在丟進佇列之前都已經存到裝置上了（見 `pages/admin/record/[id].vue`）。
  * 所以這裡的失敗只是「這一段還沒上去」，不是「這一段沒了」——
  * 使用者事後從手機手動上傳也可以。訊息要講清楚這件事，不要讓人以為白錄了。
+ *
+ * ## 上傳成功才刪掉暫存
+ * 片段在 IndexedDB 裡留到**上傳成功**為止（見 `app/utils/clip-store.ts`）。
+ * 頁面在上傳途中被系統回收的話，下次打開錄影頁它會出現在「救回的錄影」裡。
  */
 
 /** 用 resumable upload 而不是一次 POST：大檔案中斷時才有機會續傳。 */
@@ -69,9 +74,18 @@ export function useClipUpload(options: {
   /** 把一段排進佇列。Blob 只留在這個 Map 裡，上傳完就丟掉。 */
   const blobs = new Map<string, Blob>()
 
-  function enqueue(clip: { inning: number; half: GameHalf; blob: Blob }): string {
+  /** 佇列項目 → IndexedDB 裡的片段 id。上傳成功後用它刪掉暫存。 */
+  const sessions = new Map<string, string>()
+
+  function enqueue(clip: {
+    inning: number
+    half: GameHalf
+    blob: Blob
+    sessionId?: string
+  }): string {
     const id = `${clip.inning}-${clip.half}-${Date.now()}`
     blobs.set(id, clip.blob)
+    if (clip.sessionId) sessions.set(id, clip.sessionId)
     queue.value = [
       ...queue.value,
       {
@@ -169,6 +183,15 @@ export function useClipUpload(options: {
        * 裝置上了 —— 大不了不重試，事後手動傳。
        */
       blobs.delete(item.id)
+
+      // 已經在 YouTube 上了，暫存可以放掉。刪不掉也不影響這一段 ——
+      // 最壞是下次打開時它出現在救回清單裡，使用者按丟棄就好
+      const sessionId = sessions.get(item.id)
+      sessions.delete(item.id)
+      if (sessionId)
+        void getClipStore()
+          .remove(sessionId)
+          .catch(() => {})
     } catch (err) {
       if (err instanceof UploadLimitError) {
         limitReached.value = true

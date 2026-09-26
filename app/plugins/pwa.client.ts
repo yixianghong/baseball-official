@@ -38,19 +38,37 @@ export default defineNuxtPlugin(() => {
   else window.addEventListener('load', register, { once: true })
 
   /**
-   * 新版 SW 接手之後重新整理一次。
+   * 新版 SW 接手之後，**下一次換頁**改成整頁載入。
    *
    * SW 裡用了 `skipWaiting()` + `clients.claim()`，新版會立刻接管 ——
-   * 但當下這個頁面是舊版 SW 送出來的，它引用的 `_nuxt` 檔名可能已經不存在了。
-   * 不重整的話，接下來的路由切換會載入失敗。
+   * 但當下這個頁面是舊版送出來的，它引用的 `_nuxt` 檔名可能已經不存在了，
+   * 接下來的路由切換會載入失敗。
    *
-   * `refreshing` 這個旗標不能省：`controllerchange` 在某些情況會連續觸發，
-   * 少了它就是無窮重整。
+   * ⚠️ 原本這裡是**當場** `location.reload()`。那會在任何時候把頁面砍掉：
+   * 錄影錄到一半（整段消失）、後台表單的自動儲存還在 debounce（那幾個字消失）。
+   * 使用者什麼都沒按，畫面就自己重新載入了。
+   *
+   * 現在只記一個旗標，等使用者自己換頁時才用整頁載入取代 SPA 導覽 ——
+   * 那是他本來就要離開這一頁的時機。元件自己的 `onBeforeRouteLeave`
+   * （上傳中的確認、自動儲存的 flush）會在全域守衛之前跑完，不受影響。
    */
-  let refreshing = false
+  let stale = false
+  /*
+   * 第一次安裝時 `clients.claim()` 也會觸發 `controllerchange`（從「沒有 SW」
+   * 變成「有」）。那不是換版，這一頁的資源本來就是最新的，不需要整頁載入。
+   */
+  let controlled = !!navigator.serviceWorker.controller
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (refreshing) return
-    refreshing = true
-    window.location.reload()
+    if (!controlled) {
+      controlled = true
+      return
+    }
+    stale = true
+  })
+
+  useRouter().beforeEach((to) => {
+    if (!stale) return
+    window.location.assign(to.fullPath)
+    return false
   })
 })

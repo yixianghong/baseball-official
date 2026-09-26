@@ -162,6 +162,26 @@ export function nextHalf(
   return { inning: current.inning + 1, half: 'top' }
 }
 
+/**
+ * 救回錄影之後要接著錄哪裡。
+ *
+ * 看最後開始錄的那一段：錄完了 → 下一個半局；錄到一半就被中斷 → 同一個半局
+ * （剩下的部分還沒錄）。頁面被系統回收之後局數會回到第 1 局上半，
+ * 場邊的人得自己想起來剛剛錄到哪 —— 而他剛經歷了一次莫名其妙的重新載入。
+ *
+ * 只是**盡量**接回去：上傳成功的片段已經從暫存刪掉了，所以這裡看不到完整的
+ * 歷史。接錯的話局數按鈕就在旁邊，比從第 1 局開始點過去好得多。
+ */
+export function resumePosition(
+  sessions: ReadonlyArray<{ inning: number; half: GameHalf; finished: boolean; startedAt: number }>,
+  totalInnings: number,
+): { inning: number; half: GameHalf } | null {
+  const last = [...sessions].sort((a, b) => b.startedAt - a.startedAt)[0]
+  if (!last) return null
+  const here = { inning: last.inning, half: last.half }
+  return last.finished ? nextHalf(here, totalInnings) : here
+}
+
 /** 秒數轉成 `12:34`。錄影中的計時器用。 */
 export function formatDuration(seconds: number): string {
   const safe = Math.max(0, Math.floor(seconds))

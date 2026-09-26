@@ -484,6 +484,30 @@ H／E 沒有逐局欄位可以加總，所以維持人工輸入。
 才透過 `ondataavailable` 送到的，提早組會讓每一局都少掉最後幾秒，而且錄的當下
 完全看不出來。
 
+**⚠️ 錄影中的資料不能留在記憶體。** 原本每 5 秒一塊全部留在 JS 陣列裡，按下
+結束才組成檔案 —— 在 iPhone 的 PWA 模式錄到十分鐘左右，iOS 就把整個網頁程序
+殺掉（記憶體上限比原生 App 低得多）。表現是**畫面閃一下、整頁重新載入、再要
+一次相機權限**，那一段只存在於被殺掉的程序裡，沒有下載也沒有上傳，就這樣消失
+（實際在球場發生過）。現在每一塊一到就寫進 IndexedDB 然後放掉
+（`app/utils/clip-store.ts`），結束時再從磁碟組回來；Safari 把 IndexedDB 的
+Blob 存成檔案，組回來、存檔、上傳都不必把整段搬進記憶體。寫入失敗時退回記憶體
+繼續錄，並在畫面上警告。
+
+**片段留在 IndexedDB 直到上傳成功**（存到裝置不算），所以頁面就算真的被回收，
+重開錄影頁時會出現「救回的錄影」，並依最後一段接回局數（`resumePosition()`）。
+救回的片段**不自動上傳**：錄到一半的那段是殘缺的，而片段以「第幾局的哪半局」
+為鍵覆蓋，自動傳可能蓋掉使用者重錄的完整版本。timeslice 錄出來的是
+fragmented MP4，截在任何一塊的邊界上都能播 —— 實測錄 16 秒後直接重新載入，
+救回 15.19 秒、1920×1080、可以跳到結尾。
+
+**macOS 的無頭 Chrome 其實可以測錄影**：加 `--use-fake-device-for-media-stream
+--use-fake-ui-for-media-stream` 會有一顆假相機與假麥克風，`MediaRecorder` 與
+IndexedDB 都是真的。救回流程就是這樣驗的（錄到一半 `Page.reload`）。
+但**記憶體上限只有 iPhone 本身重現得了**，改版之後要實機錄一段超過十分鐘確認。
+⚠️ 驗證播放時不能在站內頁面把 `blob:` 塞進 `<video>` —— CSP 沒有 `media-src`，
+會 fallback 到 `default-src 'self'` 而被擋（`Media load rejected by URL safety
+check`）。站內本來就不播放錄好的檔案，要驗就到 `about:blank` 分頁播。
+
 **mp4 一定要排在 webm 前面**（`app/utils/recording.ts` 的 `MIME_CANDIDATES`）：
 Safari 只錄得出 mp4，Chrome 兩種都行。順序反過來 Android 會錄成 webm，
 而 **webm 在 iPhone 上完全播不動** —— 錄的人看不出異常，一半的家屬打開是黑的。
@@ -569,8 +593,8 @@ Google 沒公布數字，依頻道信譽浮動（實務約 15～50），觸頂�
 沒有 label 就分不出哪顆是超廣角。
 
 判斷邏輯全在 `app/utils/recording.ts`（純函式、測得到），有狀態的那一半在
-`app/composables/useGameRecorder.ts`。**相機本身只能用實機驗證**，
-macOS 的無頭 Chrome 取不到相機。
+`app/composables/useGameRecorder.ts`。錄影與救回流程可以用無頭 Chrome 的假相機驗
+（見上面），但**鏡頭挑選、方向、記憶體上限只能用實機驗證**。
 
 ### 分享出賽名單（`app/composables/useShareRoster.ts`）
 
@@ -654,6 +678,14 @@ gcloud scheduler jobs create http game-reminders \
   同一台電腦切換兩邊就會遇到。
 
 iOS 必須先「加入主畫面」才能訂閱推播，這是系統限制，前台頁尾直接把這件事寫出來。
+
+**⚠️ SW 換版時不能當場 `location.reload()`。** `skipWaiting()` + `clients.claim()`
+讓新版立刻接管，舊頁面引用的 `_nuxt` 檔名可能已經不存在，所以一定要重新載入 ——
+但原本是**當場**重整，會在任何時候把頁面砍掉：錄影錄到一半、自動儲存還在
+debounce。現在 `controllerchange` 只記一個旗標，**下一次換頁**才用整頁載入取代
+SPA 導覽（`pwa.client.ts`）。元件的 `onBeforeRouteLeave`（上傳中的確認、
+自動儲存的 flush）在全域守衛之前跑，不受影響。第一次安裝時的 `claim()` 也會觸發
+`controllerchange`（從沒有 SW 變成有），那不是換版，要跳過。
 
 ## 部署
 

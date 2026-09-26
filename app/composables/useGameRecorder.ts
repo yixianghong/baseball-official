@@ -1,3 +1,5 @@
+import type { GameHalf } from '#shared/schemas/game'
+import { getClipStore } from '~/utils/clip-store'
 import { defaultCameraId, pickMimeType, sortCameras, type CameraOption } from '~/utils/recording'
 
 /**
@@ -13,11 +15,21 @@ import { defaultCameraId, pickMimeType, sortCameras, type CameraOption } from '~
  * 挑容器、排鏡頭、組檔名全部在 `app/utils/recording.ts`，那些是純函式、
  * 測得到。這個檔案只負責「有狀態」的部分：權限、串流、計時、Wake Lock。
  *
- * ## 錄好的 Blob 不留著
- * 一局 1080p 約 170～280 MB，七局就是 1～2 GB。全部掛在記憶體裡等使用者
- * 之後處理，手機會直接被系統殺掉。`stop()` 把 Blob 交給呼叫端，
- * 呼叫端存完就該讓它被回收 —— 這裡刻意不保留任何一份。
+ * ## 錄影中的資料不留在記憶體
+ * 每 5 秒一塊，**一到就寫進 IndexedDB 然後放掉**（`app/utils/clip-store.ts`），
+ * 按下結束時再從磁碟組回來。原本這些塊留在陣列裡，錄到十分鐘左右 iOS 就把
+ * 整個網頁程序殺掉 —— 畫面閃一下重新載入，那一段連同已錄的部分全部消失。
+ * 理由與救回機制寫在 `clip-store.ts`。
+ *
+ * 寫入失敗（沒有空間、瀏覽器不給用 IndexedDB）時**退回記憶體**繼續錄，
+ * 並在 `storageWarning` 講出來：錄得到但比較危險，總比錄影直接停掉好。
  */
+export interface RecordedClip {
+  blob: Blob
+  /** 片段在 IndexedDB 裡的 id。上傳成功後要用它刪掉。 */
+  sessionId: string
+}
+
 export function useGameRecorder() {
   const cameras = ref<CameraOption[]>([])
   const selectedCameraId = ref('')
@@ -47,8 +59,18 @@ export function useGameRecorder() {
    */
   const initializing = ref(false)
 
+  /** 寫進 IndexedDB 失敗、改用記憶體的時候，說明給使用者看。 */
+  const storageWarning = ref('')
+
+  const store = getClipStore()
   let recorder: MediaRecorder | null = null
-  let chunks: Blob[] = []
+  let sessionId = ''
+  let nextSeq = 0
+  /** 依序寫入：前一塊落地之後才寫下一塊，組回去的順序才不會亂。 */
+  let writes: Promise<void> = Promise.resolve()
+  /** 寫入失敗之後的塊改放這裡。它們一定排在已經落地的那些**後面**。 */
+  let memoryChunks: Blob[] = []
+  let persistFailed = false
   let timer: ReturnType<typeof setInterval> | null = null
   let wakeLock: WakeLockSentinel | null = null
 
@@ -176,10 +198,35 @@ export function useGameRecorder() {
     }, 400)
   }
 
-  function start(): boolean {
+  function fallBackToMemory(err: unknown) {
+    if (persistFailed) return
+    persistFailed = true
+    console.error('[record] 片段寫不進 IndexedDB，改用記憶體', err)
+    storageWarning.value =
+      '這一段沒辦法暫存到裝置上（空間不足或瀏覽器限制），改放在記憶體裡。錄太久可能被系統中斷，建議這半局不要超過 8 分鐘。'
+  }
+
+  /** 一塊資料到了：排進寫入佇列，寫完就放掉。 */
+  function persist(chunk: Blob) {
+    const seq = nextSeq++
+    const id = sessionId
+    writes = writes.then(async () => {
+      if (persistFailed) {
+        memoryChunks.push(chunk)
+        return
+      }
+      try {
+        await store.append(id, seq, chunk)
+      } catch (err) {
+        fallBackToMemory(err)
+        memoryChunks.push(chunk)
+      }
+    })
+  }
+
+  function start(clip: { gameId: string; inning: number; half: GameHalf }): boolean {
     if (recording.value || !stream.value || !mimeType.value) return false
 
-    chunks = []
     try {
       recorder = new MediaRecorder(stream.value, { mimeType: mimeType.value })
     } catch (err) {
@@ -187,8 +234,25 @@ export function useGameRecorder() {
       return false
     }
 
+    sessionId = `${clip.gameId}-${clip.inning}-${clip.half}-${Date.now()}`
+    nextSeq = 0
+    memoryChunks = []
+    persistFailed = false
+    storageWarning.value = ''
+    writes = store
+      .begin({
+        id: sessionId,
+        gameId: clip.gameId,
+        inning: clip.inning,
+        half: clip.half,
+        mimeType: mimeType.value,
+        startedAt: Date.now(),
+        finished: false,
+      })
+      .catch(fallBackToMemory)
+
     recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data)
+      if (event.data.size > 0) persist(event.data)
     }
 
     /*
@@ -211,7 +275,7 @@ export function useGameRecorder() {
    * 一定要等 `onstop` 才能組 Blob：`stop()` 回來的當下，最後一塊資料還沒
    * 透過 `ondataavailable` 送到 —— 提早組的話每一局都會少掉最後幾秒。
    */
-  function stop(): Promise<Blob | null> {
+  function stop(): Promise<RecordedClip | null> {
     return new Promise((resolve) => {
       const current = recorder
       if (!recording.value || !current) {
@@ -219,18 +283,40 @@ export function useGameRecorder() {
         return
       }
 
-      current.onstop = () => {
+      current.onstop = async () => {
         stopTimer()
         recording.value = false
         recorder = null
-        const blob = chunks.length ? new Blob(chunks, { type: mimeType.value }) : null
-        chunks = []
         void releaseWakeLock()
-        resolve(blob)
+
+        // 最後一塊在 onstop 之前就排進佇列了，這裡等它們全部落地
+        await writes
+        const id = sessionId
+        const stored = await assemble(id)
+        const parts = [stored, ...memoryChunks].filter((part): part is Blob => !!part)
+        memoryChunks = []
+
+        if (!parts.length) {
+          void store.remove(id).catch(() => {})
+          resolve(null)
+          return
+        }
+
+        void store.finish(id).catch(() => {})
+        resolve({ blob: new Blob(parts, { type: mimeType.value }), sessionId: id })
       }
 
       current.stop()
     })
+  }
+
+  async function assemble(id: string): Promise<Blob | null> {
+    try {
+      return await store.assemble(id)
+    } catch (err) {
+      console.error('[record] 無法從 IndexedDB 組回影片', err)
+      return null
+    }
   }
 
   /**
@@ -305,6 +391,7 @@ export function useGameRecorder() {
     supported,
     initializing,
     resolution,
+    storageWarning,
     init,
     openCamera,
     start,

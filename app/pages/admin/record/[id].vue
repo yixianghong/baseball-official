@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { clipFileName, formatDuration, nextHalf } from '~/utils/recording'
+import { clipFileName, formatDuration, nextHalf, resumePosition } from '~/utils/recording'
+import { getClipStore, type ClipSession } from '~/utils/clip-store'
 import { battingSide, HALF_LABELS, type GameHalf } from '#shared/schemas/game'
 import { formatBytes } from '~/utils/image'
 import { formatGameDateLong } from '~/utils/format'
@@ -92,9 +93,99 @@ watchEffect(() => {
   if (videoRef.value) videoRef.value.srcObject = recorder.stream.value
 })
 
+/**
+ * 上次沒處理完的錄影（頁面曾被系統中斷）。
+ *
+ * iOS 在記憶體吃緊時會直接殺掉網頁程序，主畫面 App 的表現就是「閃一下、
+ * 重新載入、再要一次相機權限」。已經錄到的部分在 IndexedDB 裡
+ * （見 `app/utils/clip-store.ts`），這裡把它們找回來讓使用者決定怎麼處理。
+ *
+ * **不自動上傳。** 錄到一半的那一段只有中斷前的部分，而使用者很可能已經
+ * 重錄了同一個半局 —— 自動傳上去的話，片段是以「第幾局的哪半局」為鍵覆蓋的，
+ * 一段殘缺的影片就可能蓋掉完整的那一段。
+ */
+interface RecoveredClip {
+  session: ClipSession
+  blob: Blob
+  confirmDiscard: boolean
+}
+const recovered = ref<RecoveredClip[]>([])
+
+async function loadRecovered() {
+  const store = getClipStore()
+  try {
+    const sessions = await store.list(gameId.value)
+    const items: RecoveredClip[] = []
+    for (const session of sessions) {
+      const blob = await store.assemble(session.id)
+      // 錄影一開始就被中斷、一塊都沒寫進去的，沒有東西可救
+      if (!blob) {
+        void store.remove(session.id).catch(() => {})
+        continue
+      }
+      items.push({ session, blob, confirmDiscard: false })
+    }
+    recovered.value = items
+
+    const position = resumePosition(
+      items.map((item) => item.session),
+      totalInnings.value,
+    )
+    if (position && !recorder.recording.value) {
+      inning.value = position.inning
+      half.value = position.half
+    }
+  } catch (err) {
+    // 讀不到暫存不影響錄影本身
+    console.error('[record] 無法讀取暫存的錄影', err)
+  }
+}
+
 onMounted(async () => {
+  void loadRecovered()
   await recorder.init()
 })
+
+function recoveredFileName(session: ClipSession) {
+  return clipFileName({
+    teamName: teamName.value,
+    opponent: game.value?.opponent ?? '對手',
+    date: game.value?.date ?? '',
+    inning: session.inning,
+    half: session.half,
+    mimeType: session.mimeType,
+  })
+}
+
+function uploadRecovered(item: RecoveredClip) {
+  uploads.enqueue({
+    inning: item.session.inning,
+    half: item.session.half,
+    blob: item.blob,
+    sessionId: item.session.id,
+  })
+  recovered.value = recovered.value.filter((other) => other !== item)
+}
+
+async function saveRecovered(item: RecoveredClip) {
+  await save(item.blob, recoveredFileName(item.session))
+}
+
+/** 兩段式：丟掉就真的沒了，而這個按鈕就在「上傳」旁邊。 */
+async function discardRecovered(item: RecoveredClip) {
+  if (!item.confirmDiscard) {
+    item.confirmDiscard = true
+    return
+  }
+  await getClipStore()
+    .remove(item.session.id)
+    .catch(() => {})
+  recovered.value = recovered.value.filter((other) => other !== item)
+}
+
+function startRecording() {
+  recorder.start({ gameId: gameId.value, inning: inning.value, half: half.value })
+}
 
 async function onCameraChange(deviceId: string) {
   if (recorder.recording.value) return
@@ -102,8 +193,8 @@ async function onCameraChange(deviceId: string) {
 }
 
 async function finish() {
-  const blob = await recorder.stop()
-  if (!blob) {
+  const clip = await recorder.stop()
+  if (!clip) {
     saveMessage.value = '這一段沒有錄到內容'
     return
   }
@@ -119,8 +210,13 @@ async function finish() {
 
   // ⚠️ 順序不能反：先存到裝置，再排進上傳佇列。
   // 反過來的話，上傳失敗就等於這一段沒了 —— 而球場的網路本來就不可靠。
-  await save(blob, filename)
-  uploads.enqueue({ inning: inning.value, half: half.value, blob })
+  await save(clip.blob, filename)
+  uploads.enqueue({
+    inning: inning.value,
+    half: half.value,
+    blob: clip.blob,
+    sessionId: clip.sessionId,
+  })
 
   const next = nextHalf({ inning: inning.value, half: half.value }, totalInnings.value)
   inning.value = next.inning
@@ -135,7 +231,9 @@ async function finish() {
  */
 onBeforeRouteLeave(() => {
   if (uploads.pending.value === 0) return true
-  return confirm(`還有 ${uploads.pending.value} 段影片正在上傳，離開會中斷。確定要離開嗎？`)
+  return confirm(
+    `還有 ${uploads.pending.value} 段影片正在上傳，離開會中斷上傳。影片會留在這台裝置上，下次打開錄影頁可以再傳。確定要離開嗎？`,
+  )
 })
 
 /** 優先走系統分享（iOS 才存得進「照片」），沒有才退回下載。 */
@@ -323,6 +421,9 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             <p v-if="recorder.error.value" class="text-fluid-sm text-warning">
               {{ recorder.error.value }}
             </p>
+            <p v-if="recorder.storageWarning.value" class="text-fluid-sm text-warning">
+              {{ recorder.storageWarning.value }}
+            </p>
 
             <div>
               <label for="camera" class="mb-1 block text-fluid-sm text-white/70">鏡頭</label>
@@ -408,6 +509,68 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
               </div>
             </div>
 
+            <!-- ══ 救回的錄影 ══════════════════════════════════
+              頁面上次被系統中斷時已經錄到的部分。放在最前面：它們是唯一
+              「不處理就可能永遠不見」的東西。
+            -->
+            <div
+              v-if="recovered.length"
+              class="rounded-xl border border-warning/40 bg-warning/10 p-3"
+            >
+              <h2 class="text-fluid-sm font-semibold text-warning">救回的錄影</h2>
+              <p class="mt-1 text-xs text-white/70">
+                頁面上次被系統中斷，這些是當時已經錄到、還沒上傳的部分。
+                上傳會取代網站上同一個半局的影片。
+              </p>
+              <ul class="mt-2 space-y-1.5">
+                <li
+                  v-for="item in recovered"
+                  :key="item.session.id"
+                  class="rounded-lg bg-white/10 px-3 py-2 text-fluid-sm"
+                >
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="font-bold">
+                      第 {{ item.session.inning }} 局{{ HALF_LABELS[item.session.half] }}
+                    </span>
+                    <span class="tabular-nums text-white/70">{{
+                      formatBytes(item.blob.size)
+                    }}</span>
+                  </div>
+                  <p class="mt-0.5 text-xs text-white/50">
+                    {{
+                      item.session.finished
+                        ? '已錄完，還沒上傳'
+                        : '錄到一半被中斷，只有中斷前的部分'
+                    }}
+                  </p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      class="min-h-9 rounded-lg bg-white/15 px-3 text-xs font-medium transition hover:bg-white/25"
+                      @click="uploadRecovered(item)"
+                    >
+                      上傳
+                    </button>
+                    <button
+                      type="button"
+                      class="min-h-9 rounded-lg bg-white/15 px-3 text-xs font-medium transition hover:bg-white/25"
+                      :disabled="saving"
+                      @click="saveRecovered(item)"
+                    >
+                      存到裝置
+                    </button>
+                    <button
+                      type="button"
+                      class="min-h-9 rounded-lg px-3 text-xs font-medium text-warning transition hover:bg-white/10"
+                      @click="discardRecovered(item)"
+                    >
+                      {{ item.confirmDiscard ? '確定丟棄？' : '丟棄' }}
+                    </button>
+                  </div>
+                </li>
+              </ul>
+            </div>
+
             <!-- ══ 已錄片段與上傳狀態 ══════════════════════════ -->
             <div v-if="uploads.queue.value.length">
               <h2 class="mb-2 text-fluid-sm font-semibold text-white/70">這一輪已錄</h2>
@@ -485,7 +648,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                 v-if="!recorder.recording.value"
                 class="min-h-14 w-full text-fluid-lg"
                 :disabled="!recorder.stream.value || saving || recorder.initializing.value"
-                @click="recorder.start()"
+                @click="startRecording"
               >
                 開始錄{{ halfLabel }}
               </UiBaseButton>
