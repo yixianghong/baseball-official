@@ -21,7 +21,7 @@ import { getClipStore } from '~/utils/clip-store'
  *
  * ## 上傳成功才刪掉暫存
  * 片段在 IndexedDB 裡留到**上傳成功**為止（見 `app/utils/clip-store.ts`）。
- * 頁面在上傳途中被系統回收的話，下次打開錄影頁它會出現在「救回的錄影」裡。
+ * 頁面在上傳途中被系統回收的話，下次打開錄影頁它會出現在「還沒上傳的錄影」裡。
  */
 
 /** 用 resumable upload 而不是一次 POST：大檔案中斷時才有機會續傳。 */

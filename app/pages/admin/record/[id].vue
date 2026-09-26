@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { clipFileName, formatDuration, nextHalf, resumePosition } from '~/utils/recording'
 import { getClipStore, type ClipSession } from '~/utils/clip-store'
+import type { ClipUpload } from '~/composables/useClipUpload'
 import { battingSide, HALF_LABELS, type GameHalf } from '#shared/schemas/game'
 import { formatBytes } from '~/utils/image'
 import { formatGameDateLong } from '~/utils/format'
@@ -72,6 +73,19 @@ const uploads = useClipUpload({
 /** 這一場預計幾局。乙組是七局，但延長賽會多打 —— 以計分板的實際局數為準。 */
 const totalInnings = computed(() => Math.max(game.value?.scoreboard.innings.length ?? 7, 7))
 
+/**
+ * 已經上傳到網站的片段（比賽資料上的 `clips`）。
+ *
+ * 錄影頁原本完全不讀它，只看「這次打開頁面之後」的上傳佇列 —— 於是離開再
+ * 回來，已經傳上去的片段在畫面上全部不見，局數也回到第 1 局上半，看起來就像
+ * 錄影資料被清掉了。資料其實一直都在，只是這一頁沒去看。
+ *
+ * 這次重錄過的半局以佇列為準（下面的 `rows` 會把舊的那一筆藏起來）。
+ */
+const uploadedClips = computed(() => game.value?.clips ?? [])
+
+const halfKey = (clip: { inning: number; half: GameHalf }) => `${clip.inning}-${clip.half}`
+
 /** 現在要錄的是哪半局。錄完會自動往前推，見 `nextHalf()`。 */
 const inning = ref(1)
 const half = ref<GameHalf>('top')
@@ -94,11 +108,12 @@ watchEffect(() => {
 })
 
 /**
- * 上次沒處理完的錄影（頁面曾被系統中斷）。
+ * 還留在裝置上、沒傳到 YouTube 的錄影。
  *
- * iOS 在記憶體吃緊時會直接殺掉網頁程序，主畫面 App 的表現就是「閃一下、
- * 重新載入、再要一次相機權限」。已經錄到的部分在 IndexedDB 裡
- * （見 `app/utils/clip-store.ts`），這裡把它們找回來讓使用者決定怎麼處理。
+ * 片段在上傳成功之前都留在 IndexedDB（見 `app/utils/clip-store.ts`），
+ * 所以**離開錄影頁、上傳失敗、頁面被 iOS 殺掉**，回來時都會在這裡。
+ * 最後一種最常見：iOS 在記憶體吃緊時會直接殺掉網頁程序，主畫面 App 的
+ * 表現就是「閃一下、重新載入、再要一次相機權限」。
  *
  * **不自動上傳。** 錄到一半的那一段只有中斷前的部分，而使用者很可能已經
  * 重錄了同一個半局 —— 自動傳上去的話，片段是以「第幾局的哪半局」為鍵覆蓋的，
@@ -126,19 +141,29 @@ async function loadRecovered() {
       items.push({ session, blob, confirmDiscard: false })
     }
     recovered.value = items
-
-    const position = resumePosition(
-      items.map((item) => item.session),
-      totalInnings.value,
-    )
-    if (position && !recorder.recording.value) {
-      inning.value = position.inning
-      half.value = position.half
-    }
   } catch (err) {
     // 讀不到暫存不影響錄影本身
     console.error('[record] 無法讀取暫存的錄影', err)
+  } finally {
+    // 暫存讀不到也要接回局數 —— 已上傳的片段在比賽資料裡，一定拿得到
+    restorePosition()
   }
+}
+
+/** 接著錄哪一格：看已上傳、這次傳的、裝置上沒傳的三者的聯集。 */
+function restorePosition() {
+  if (recorder.recording.value) return
+  const position = resumePosition(
+    [
+      ...uploadedClips.value.map((clip) => ({ ...clip, finished: true })),
+      ...uploads.queue.value.map((item) => ({ ...item, finished: true })),
+      ...recovered.value.map((item) => item.session),
+    ],
+    totalInnings.value,
+  )
+  if (!position) return
+  inning.value = position.inning
+  half.value = position.half
 }
 
 onMounted(async () => {
@@ -283,14 +308,52 @@ function download(blob: Blob, filename: string) {
 }
 
 /**
+ * 「這一場的錄影」清單：已上傳的 + 這次錄的，照比賽順序排。
+ *
+ * 同一個半局這次又錄了一段的話，只顯示這次的 —— 它上傳成功就會取代網站上
+ * 那一段（片段以「第幾局的哪半局」為鍵覆蓋），兩筆並列只會讓人以為有兩段。
+ */
+type ClipRow =
+  | { kind: 'uploaded'; key: string; inning: number; half: GameHalf; privacy: string }
+  | { kind: 'queued'; key: string; inning: number; half: GameHalf; item: ClipUpload }
+
+const rows = computed<ClipRow[]>(() => {
+  const queued = new Set(uploads.queue.value.map(halfKey))
+  const list: ClipRow[] = [
+    ...uploadedClips.value
+      .filter((clip) => !queued.has(halfKey(clip)))
+      .map((clip) => ({
+        kind: 'uploaded' as const,
+        key: `uploaded-${clip.videoId}`,
+        inning: clip.inning,
+        half: clip.half,
+        privacy: clip.privacy,
+      })),
+    ...uploads.queue.value.map((item) => ({
+      kind: 'queued' as const,
+      key: item.id,
+      inning: item.inning,
+      half: item.half,
+      item,
+    })),
+  ]
+  const order = (row: ClipRow) => row.inning * 2 + (row.half === 'bottom' ? 1 : 0)
+  return list.sort((a, b) => order(a) - order(b))
+})
+
+/**
  * 已經錄過的半局，鍵是「局-上下」。局數與上下半按鈕靠它標示錄過了沒。
  *
- * 直接從上傳佇列推導，不另外維護一份清單 —— 每一段錄完都一定會進佇列
- * （上傳失敗的也在裡面，狀態是 `failed`），所以它就是「這一輪錄了什麼」的
- * 完整紀錄。兩份平行的清單遲早會對不上。
+ * 三個來源的聯集：已上傳、這次錄的、裝置上還沒傳的。只看其中一個的話，
+ * 離開再回來之後按鈕上的「已錄」標示就全部消失了。
  */
 const recordedHalves = computed(
-  () => new Set(uploads.queue.value.map((item) => `${item.inning}-${item.half}`)),
+  () =>
+    new Set([
+      ...uploadedClips.value.map(halfKey),
+      ...uploads.queue.value.map(halfKey),
+      ...recovered.value.map((item) => halfKey(item.session)),
+    ]),
 )
 
 /** 兩個半局都錄完的局，整顆按鈕才算「完成」。 */
@@ -509,17 +572,18 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
               </div>
             </div>
 
-            <!-- ══ 救回的錄影 ══════════════════════════════════
-              頁面上次被系統中斷時已經錄到的部分。放在最前面：它們是唯一
+            <!-- ══ 還沒上傳的錄影 ══════════════════════════════
+              還留在裝置上、沒傳到 YouTube 的片段。放在最前面：它們是唯一
               「不處理就可能永遠不見」的東西。
             -->
             <div
               v-if="recovered.length"
               class="rounded-xl border border-warning/40 bg-warning/10 p-3"
             >
-              <h2 class="text-fluid-sm font-semibold text-warning">救回的錄影</h2>
+              <h2 class="text-fluid-sm font-semibold text-warning">還沒上傳的錄影</h2>
               <p class="mt-1 text-xs text-white/70">
-                頁面上次被系統中斷，這些是當時已經錄到、還沒上傳的部分。
+                這些還在這台裝置上、沒傳到
+                YouTube（離開錄影頁、上傳失敗或頁面被系統中斷都會留在這裡）。
                 上傳會取代網站上同一個半局的影片。
               </p>
               <ul class="mt-2 space-y-1.5">
@@ -571,50 +635,71 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
               </ul>
             </div>
 
-            <!-- ══ 已錄片段與上傳狀態 ══════════════════════════ -->
-            <div v-if="uploads.queue.value.length">
-              <h2 class="mb-2 text-fluid-sm font-semibold text-white/70">這一輪已錄</h2>
+            <!-- ══ 這一場的錄影 ══════════════════════════════
+              已經上傳到網站的 + 這次錄的，照比賽順序。已上傳的來自比賽資料，
+              所以離開錄影頁再回來也還在（原本只看這次的上傳佇列，一離開就全不見）。
+            -->
+            <div v-if="rows.length">
+              <h2 class="mb-2 text-fluid-sm font-semibold text-white/70">這一場的錄影</h2>
               <ul class="space-y-1.5">
                 <li
-                  v-for="item in uploads.queue.value"
-                  :key="item.id"
+                  v-for="row in rows"
+                  :key="row.key"
                   class="rounded-lg bg-white/10 px-3 py-2 text-fluid-sm"
                 >
                   <div class="flex items-center justify-between gap-3">
-                    <span class="font-bold">
-                      第 {{ item.inning }} 局{{ HALF_LABELS[item.half] }}
+                    <span class="font-bold">第 {{ row.inning }} 局{{ HALF_LABELS[row.half] }}</span>
+                    <span v-if="row.kind === 'queued'" class="tabular-nums text-white/70">
+                      {{ formatBytes(row.item.bytes) }}
                     </span>
-                    <span class="tabular-nums text-white/70">{{ formatBytes(item.bytes) }}</span>
                   </div>
 
-                  <div class="mt-1 flex items-center justify-between gap-3 text-xs">
-                    <span v-if="item.state === 'done'" class="text-success">✓ 已上傳</span>
-                    <span v-else-if="item.state === 'uploading'" class="text-white/70">
-                      上傳中 {{ item.progress }}%
+                  <!-- 之前就傳上去的：前台看不看得到取決於可見度 -->
+                  <p v-if="row.kind === 'uploaded'" class="mt-1 text-xs">
+                    <span class="text-success">✓ 已上傳</span>
+                    <span class="text-white/50">
+                      ・{{
+                        row.privacy === 'private'
+                          ? '私人（前台看不到）'
+                          : row.privacy === 'public'
+                            ? '公開'
+                            : '不公開'
+                      }}
                     </span>
-                    <span v-else-if="item.state === 'waiting'" class="text-white/50">等待上傳</span>
-                    <span v-else class="text-warning">{{ item.error }}</span>
+                  </p>
 
-                    <button
-                      v-if="item.state === 'failed'"
-                      type="button"
-                      class="shrink-0 underline underline-offset-4"
-                      @click="uploads.retry(item.id)"
-                    >
-                      重試
-                    </button>
-                  </div>
+                  <template v-else>
+                    <div class="mt-1 flex items-center justify-between gap-3 text-xs">
+                      <span v-if="row.item.state === 'done'" class="text-success">✓ 已上傳</span>
+                      <span v-else-if="row.item.state === 'uploading'" class="text-white/70">
+                        上傳中 {{ row.item.progress }}%
+                      </span>
+                      <span v-else-if="row.item.state === 'waiting'" class="text-white/50">
+                        等待上傳
+                      </span>
+                      <span v-else class="text-warning">{{ row.item.error }}</span>
 
-                  <!-- 進度條。傳一段要好幾分鐘，沒有它會以為卡住了 -->
-                  <div
-                    v-if="item.state === 'uploading'"
-                    class="mt-1.5 h-1 overflow-hidden rounded-full bg-white/15"
-                  >
+                      <button
+                        v-if="row.item.state === 'failed'"
+                        type="button"
+                        class="shrink-0 underline underline-offset-4"
+                        @click="uploads.retry(row.item.id)"
+                      >
+                        重試
+                      </button>
+                    </div>
+
+                    <!-- 進度條。傳一段要好幾分鐘，沒有它會以為卡住了 -->
                     <div
-                      class="h-full bg-brand-500 transition-all"
-                      :style="{ width: `${item.progress}%` }"
-                    />
-                  </div>
+                      v-if="row.item.state === 'uploading'"
+                      class="mt-1.5 h-1 overflow-hidden rounded-full bg-white/15"
+                    >
+                      <div
+                        class="h-full bg-brand-500 transition-all"
+                        :style="{ width: `${row.item.progress}%` }"
+                      />
+                    </div>
+                  </template>
                 </li>
               </ul>
               <!-- 撞到當天額度是「整批停下」，要一次講清楚而不是每段各喊一次 -->
@@ -625,7 +710,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                 已達 YouTube 今日的上傳數量上限，剩下的片段暫停上傳。影片都還在這台裝置上 ——
                 明天再按重試，或自己傳上 YouTube 後到後台的「賽事錄影」貼網址補登。
               </p>
-              <p v-else class="mt-2 text-xs text-white/50">
+              <p v-else-if="uploads.queue.value.length" class="mt-2 text-xs text-white/50">
                 每一段都已經存到這台裝置，上傳失敗也不會弄丟 —— 事後手動傳就好。
               </p>
             </div>

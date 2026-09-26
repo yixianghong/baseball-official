@@ -281,34 +281,48 @@ describe('formatDuration', () => {
 })
 
 /**
- * 頁面被系統中斷後，要接著錄哪一格。
+ * 回到錄影頁時要接著錄哪一格。
  *
- * 重新載入之後局數會回到第 1 局上半，而場邊的人剛經歷一次莫名其妙的閃退 ——
- * 不該還要他自己回想剛剛錄到哪。
+ * 離開再回來（或頁面被系統中斷）之後局數會回到第 1 局上半，場邊的人得自己
+ * 回想剛剛錄到哪 —— 而他通常正在看比賽。
  */
 describe('resumePosition', () => {
-  const at = (startedAt: number, inning: number, half: 'top' | 'bottom', finished: boolean) => ({
-    startedAt,
+  const at = (inning: number, half: 'top' | 'bottom', finished: boolean) => ({
     inning,
     half,
     finished,
   })
 
-  it('沒有暫存的片段就不動', () => {
+  it('什麼都還沒錄就不動', () => {
     expect(resumePosition([], 7)).toBeNull()
   })
 
   it('錄到一半被中斷 → 停在同一個半局（剩下的還沒錄）', () => {
-    expect(resumePosition([at(1, 3, 'bottom', false)], 7)).toEqual({ inning: 3, half: 'bottom' })
+    expect(resumePosition([at(3, 'bottom', false)], 7)).toEqual({ inning: 3, half: 'bottom' })
   })
 
-  it('錄完但還沒上傳 → 下一個半局', () => {
-    expect(resumePosition([at(1, 3, 'top', true)], 7)).toEqual({ inning: 3, half: 'bottom' })
+  it('錄完的 → 下一個半局', () => {
+    expect(resumePosition([at(3, 'top', true)], 7)).toEqual({ inning: 3, half: 'bottom' })
   })
 
-  it('看的是最後開始錄的那一段，不是陣列裡的最後一個', () => {
-    const sessions = [at(200, 4, 'top', false), at(100, 2, 'bottom', true)]
-    expect(resumePosition(sessions, 7)).toEqual({ inning: 4, half: 'top' })
+  it('看的是比賽裡最後面的那一格，不是陣列裡的最後一個', () => {
+    // 第 2 局下重錄過（後來才傳），但比賽已經打到第 4 局上
+    const entries = [at(4, 'top', true), at(2, 'bottom', true)]
+    expect(resumePosition(entries, 7)).toEqual({ inning: 4, half: 'bottom' })
+  })
+
+  it('下半局排在同一局的上半局後面', () => {
+    expect(resumePosition([at(5, 'bottom', true), at(5, 'top', true)], 7)).toEqual({
+      inning: 6,
+      half: 'top',
+    })
+  })
+
+  it('同一格有錄完的也有中斷的（重錄過）→ 往下一格走', () => {
+    expect(resumePosition([at(3, 'top', false), at(3, 'top', true)], 7)).toEqual({
+      inning: 3,
+      half: 'bottom',
+    })
   })
 })
 

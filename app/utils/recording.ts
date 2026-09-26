@@ -163,23 +163,33 @@ export function nextHalf(
 }
 
 /**
- * 救回錄影之後要接著錄哪裡。
+ * 回到錄影頁時要接著錄哪裡。
  *
- * 看最後開始錄的那一段：錄完了 → 下一個半局；錄到一半就被中斷 → 同一個半局
- * （剩下的部分還沒錄）。頁面被系統回收之後局數會回到第 1 局上半，
- * 場邊的人得自己想起來剛剛錄到哪 —— 而他剛經歷了一次莫名其妙的重新載入。
+ * 看**比賽裡最後面的那一格**（第幾局、上半在下半之前）：錄完了 → 下一個
+ * 半局；只有錄到一半被中斷的 → 同一個半局（剩下的部分還沒錄）。
  *
- * 只是**盡量**接回去：上傳成功的片段已經從暫存刪掉了，所以這裡看不到完整的
- * 歷史。接錯的話局數按鈕就在旁邊，比從第 1 局開始點過去好得多。
+ * 輸入是三個來源的聯集：已經上傳到網站的、這次正在傳的、還留在裝置上沒傳的。
+ * 只看其中一個的話，離開再回來就會從第 1 局上半開始 —— 場邊的人得自己回想
+ * 剛剛錄到哪，而他通常正在看比賽。
+ *
+ * 刻意不用時間戳：已上傳的片段與裝置上的暫存各有各的時間，比「局數」脆弱；
+ * 而錄影本來就是照比賽順序往前推的。
  */
 export function resumePosition(
-  sessions: ReadonlyArray<{ inning: number; half: GameHalf; finished: boolean; startedAt: number }>,
+  entries: ReadonlyArray<{ inning: number; half: GameHalf; finished: boolean }>,
   totalInnings: number,
 ): { inning: number; half: GameHalf } | null {
-  const last = [...sessions].sort((a, b) => b.startedAt - a.startedAt)[0]
-  if (!last) return null
-  const here = { inning: last.inning, half: last.half }
-  return last.finished ? nextHalf(here, totalInnings) : here
+  const order = (entry: { inning: number; half: GameHalf }) =>
+    entry.inning * 2 + (entry.half === 'bottom' ? 1 : 0)
+
+  let furthest = -1
+  for (const entry of entries) furthest = Math.max(furthest, order(entry))
+  if (furthest < 0) return null
+
+  const atFurthest = entries.filter((entry) => order(entry) === furthest)
+  const here = { inning: atFurthest[0]!.inning, half: atFurthest[0]!.half }
+  // 同一格有錄完的（例如重錄過）就往下一格走
+  return atFurthest.some((entry) => entry.finished) ? nextHalf(here, totalInnings) : here
 }
 
 /** 秒數轉成 `12:34`。錄影中的計時器用。 */
