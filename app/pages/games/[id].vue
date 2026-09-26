@@ -282,13 +282,6 @@ useHead({
         </div>
       </header>
 
-      <!--
-        ══ 本場影片 ══
-        放在計分板之前：比數在上面的主視覺已經看得到了，點進比賽頁的人
-        接下來最想要的是畫面。私人的片段不會出現，見 `GameClips`。
-      -->
-      <GameClips :clips="game.clips" :finished="isFinished" />
-
       <!-- ══ 進行中／已結束：計分板 + 打線 + 投手 ═══════════════ -->
       <template v-if="showScore">
         <section aria-labelledby="scoreboard-heading">
@@ -430,6 +423,20 @@ useHead({
         "
         icon="🌧️"
       />
+
+      <!--
+        ══ 本場影片 ══
+        **整頁最後一塊**，而且不分狀態都放這裡。
+
+        影片是「看完文字資訊之後才會想點的東西」：比數在最上面的主視覺、
+        計分板與名單在中間，這三樣是點進比賽頁的人真正要查的。影片十四段
+        排成網格，夾在中間會把後面的內容整個推到捲動範圍外 ——
+        要看逐局得分的人得先捲過一整片縮圖。
+
+        沒有可顯示的片段時 `GameClips` 自己整塊不渲染（私人影片也會被濾掉），
+        所以延賽／取消的場次不會多出一個空標題。
+      -->
+      <GameClips :clips="game.clips" :finished="isFinished" />
     </div>
   </div>
 </template>
