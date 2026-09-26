@@ -480,7 +480,6 @@ useHead({
         :description="
           game.note || (isPostponed ? '改期後的日期會另行公告。' : '這場比賽不會補行。')
         "
-        icon="🌧️"
       />
 
       <!--
