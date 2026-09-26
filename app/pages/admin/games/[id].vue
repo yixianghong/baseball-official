@@ -23,6 +23,7 @@ import {
 } from '#shared/schemas/game'
 import { teamNameCandidates } from '#shared/schemas/settings'
 import { TAIWAN_CITIES, type TaiwanCity } from '#shared/schemas/weather'
+import { mergeAttendanceWithRoster } from '~/utils/attendance'
 import { formatGameDateLong } from '~/utils/format'
 
 /**
@@ -176,7 +177,16 @@ function syncFromGame() {
     opponentLogoUrl: current.opponentLogoUrl,
   })
 
-  attendance.value = [...current.attendance]
+  /*
+   * 出席名單在這裡就先補上現役球員。
+   *
+   * `AdminAttendanceEditor` 掛上時也會做同一件事，但那發生在下面
+   * `markAsSaved()` 之後 —— 自動儲存會把它當成一筆變更，於是光是打開一場
+   * 還沒登記出席的比賽就送出一次 PATCH（實測：11 筆「未回覆」寫進資料庫，
+   * 畫面上跳一則「已自動儲存」）。在基準裡就含這份名單，編輯器算出同一個
+   * 結果、發現沒變就不寫回。理由完整寫在 `mergeAttendanceWithRoster()`。
+   */
+  attendance.value = mergeAttendanceWithRoster(current.attendance, roster.value)
   lineup.value = [...current.lineup]
   pitchers.value = [...current.pitchers]
   batters.value = [...current.batters]

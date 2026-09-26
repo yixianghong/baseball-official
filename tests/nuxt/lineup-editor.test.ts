@@ -1,5 +1,4 @@
 // @vitest-environment nuxt
-import { h } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import type { AttendanceEntry, LineupEntry } from '../../shared/schemas/game'
@@ -137,7 +136,10 @@ describe('LineupEditor 的挑人清單', () => {
  *
  * 排打線是「一直往下加棒次」的工作：按鈕放最上面，排到第七、八棒時得捲回去
  * 才按得到；放最下面則每加一棒它就往下跑一次。所以收在一條固定於畫面底部的
- * 操作列裡，儲存按鈕由頁面透過 slot 放進同一列。
+ * 操作列裡。
+ *
+ * 這一列曾經有一個 `actions` slot，給頁面放自動儲存的狀態 —— 狀態改用 toast
+ * 呈現之後（見 `useAutosave`）沒有人再用它，slot 就一起拿掉了。
  */
 describe('LineupEditor 的底部操作列', () => {
   const lineup: LineupEntry[] = [
@@ -155,15 +157,6 @@ describe('LineupEditor 的底部操作列', () => {
     expect(bar.text()).toContain('新增棒次')
     expect(bar.text()).toContain('全部清空')
     expect(bar.text()).toContain('共 2 棒')
-  })
-
-  it('頁面傳進來的儲存按鈕會出現在同一列', async () => {
-    const component = await mountSuspended(LineupEditor, {
-      props: { players, modelValue: lineup, 'onUpdate:modelValue': () => {} },
-      slots: { actions: () => h('button', '儲存先發陣容') },
-    })
-
-    expect(component.find('.sticky').text()).toContain('儲存先發陣容')
   })
 
   it('打線是空的時候顯示「帶入前九人」而不是「清空」', async () => {

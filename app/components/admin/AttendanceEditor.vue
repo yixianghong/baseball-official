@@ -2,6 +2,7 @@
 import type { AttendanceEntry, AttendanceStatus } from '#shared/schemas/game'
 import { ATTENDANCE_LABELS } from '#shared/schemas/game'
 import type { Player } from '#shared/schemas/player'
+import { mergeAttendanceWithRoster } from '~/utils/attendance'
 
 /**
  * 出席統計編輯器。
@@ -33,34 +34,14 @@ const counts = computed(() => ({
  * 正確答案 —— 進到這一頁就是要登記今天誰會來，名單當然要先在那裡。
  * 需要使用者先按一下才看得到隊員，那一步沒有任何決定可言。
  *
- * 規則：
- * - 名單中缺少的現役球員補進來，狀態「未回覆」
- * - 已經登記過的保持原狀，不會被洗掉
- * - 已退隊但先前登記過的保留下來（他當時確實回報過）
- * - 排序跟著球員名單走
- *
- * 這只改動編輯中的表單，按下「儲存出席名單」才會寫入。
+ * 規則與理由都在 `mergeAttendanceWithRoster()`，**使用這個元件的頁面在灌資料
+ * 時就要先呼叫同一支函式**（`pages/admin/games/[id].vue` 的 `syncFromGame`）。
+ * 少了那一步，這裡補上的名單會被自動儲存當成一筆變更，於是光是打開一場還沒
+ * 登記出席的比賽就寫一次資料庫。這裡留著同步是為了**之後**才發生的事 ——
+ * 新球員入隊時名單要自己長出來。
  */
 function syncWithRoster() {
-  const existing = new Map(model.value.map((entry) => [entry.playerId, entry]))
-  const active = props.players.filter((player) => player.status === 'active')
-
-  const merged = active.map(
-    (player) =>
-      existing.get(player.id) ?? {
-        playerId: player.id,
-        name: player.name,
-        number: player.number,
-        status: 'pending' as const,
-        note: '',
-      },
-  )
-
-  // 已退隊但先前登記過的人接在後面，不要讓歷史紀錄消失
-  const activeIds = new Set(active.map((player) => player.id))
-  const retired = model.value.filter((entry) => !activeIds.has(entry.playerId))
-
-  const next = [...merged, ...retired]
+  const next = mergeAttendanceWithRoster(model.value, props.players)
 
   // 內容沒變就不要寫回 model —— 每次都指派會讓頁面一直處於「有未儲存變更」的狀態
   if (JSON.stringify(next) === JSON.stringify(model.value)) return

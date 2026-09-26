@@ -3,6 +3,7 @@ import { defineComponent, h, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { useAutosave } from '../../app/composables/useAutosave'
+import { useToast } from '../../app/composables/useToast'
 
 /**
  * 自動儲存。
@@ -16,9 +17,11 @@ import { useAutosave } from '../../app/composables/useAutosave'
 async function setup(save: (value: { text: string }) => Promise<unknown>, delay = 10) {
   const source = ref({ text: 'initial' })
   let api: ReturnType<typeof useAutosave<{ text: string }>> | null = null
+  let toast: ReturnType<typeof useToast> | null = null
 
   const Harness = defineComponent({
     setup() {
+      toast = useToast()
       api = useAutosave(() => source.value, save, { delay })
       api.markAsSaved()
       return () => h('div')
@@ -26,7 +29,9 @@ async function setup(save: (value: { text: string }) => Promise<unknown>, delay 
   })
 
   await mountSuspended(Harness)
-  return { source, api: api! }
+  // 提示是整個 nuxt app 共用的狀態，先清掉上一個測試留下的
+  toast!.toasts.value = []
+  return { source, api: api!, toast: toast! }
 }
 
 /** 等待 debounce 與後續的 promise 解析。 */
@@ -142,5 +147,67 @@ describe('useAutosave', () => {
 
     expect(save).toHaveBeenLastCalledWith({ text: 'second' })
     expect(api.isDirty.value).toBe(false)
+  })
+})
+
+/**
+ * 狀態的呈現。
+ *
+ * 自動儲存的狀態由 composable 自己送出提示，頁面不必也不該再做一次 ——
+ * 「新增一個自動儲存的畫面時忘記把狀態顯示出來」的症狀是使用者以為存好了。
+ */
+describe('useAutosave 的提示', () => {
+  it('載入當下不會冒出提示', async () => {
+    const { toast } = await setup(vi.fn().mockResolvedValue(undefined))
+    await settle()
+
+    expect(toast.toasts.value).toEqual([])
+  })
+
+  it('存好了會送出一則會自己消失的提示', async () => {
+    const { source, toast } = await setup(vi.fn().mockResolvedValue(undefined))
+
+    source.value = { text: 'changed' }
+    await settle()
+
+    expect(toast.toasts.value.map((item) => item.message)).toEqual(['已自動儲存'])
+    expect(toast.toasts.value[0]?.duration).toBeGreaterThan(0)
+  })
+
+  it('連續儲存只會有一則提示', async () => {
+    const { source, toast } = await setup(vi.fn().mockResolvedValue(undefined))
+
+    source.value = { text: 'a' }
+    await settle()
+    source.value = { text: 'b' }
+    await settle()
+
+    // 沒有共用 key 的話，改十次就有十則一樣的「已自動儲存」疊在畫面下方
+    expect(toast.toasts.value).toHaveLength(1)
+  })
+
+  it('失敗的提示不會自己消失，而且可以直接從提示上重試', async () => {
+    const save = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('網路斷線'))
+      .mockResolvedValueOnce(undefined)
+
+    const { source, toast } = await setup(save)
+
+    source.value = { text: 'changed' }
+    await settle()
+
+    const failure = toast.toasts.value[0]
+    expect(failure?.tone).toBe('error')
+    expect(failure?.message).toContain('儲存失敗')
+    // 沒被看到的錯誤等於沒發生過
+    expect(failure?.duration).toBe(0)
+    expect(failure?.action?.label).toBe('重試')
+
+    await failure!.action!.handler()
+    await settle()
+
+    // 同一個 key，所以失敗那則被「已自動儲存」就地取代
+    expect(toast.toasts.value.map((item) => item.message)).toEqual(['已自動儲存'])
   })
 })

@@ -93,7 +93,8 @@ function apply() {
 
   emit('apply', applicable)
   entries.value = []
-  message.value = `已套用 ${applicable.length} 筆回覆，記得按下方的「儲存出席名單」。`
+  // 這一頁是自動儲存的，早就沒有「儲存出席名單」那顆按鈕了
+  message.value = `已套用 ${applicable.length} 筆回覆，會自動儲存。`
   warnings.value = []
 }
 
