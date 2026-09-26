@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import type { HomeAway, Scoreboard } from '#shared/schemas/game'
-import { sumInnings } from '#shared/schemas/game'
+import { scoreboardSides, sumInnings } from '#shared/schemas/game'
 
 /**
  * 計分板。
  *
  * ## 上下半局是算出來的，不是存出來的
  * 資料層存的是「我隊／對手」各局得分（見 `shared/schemas/game.ts` 的說明），
- * 但計分板的呈現慣例是「上面那列是先攻（客隊）」。這裡依 `homeAway`
- * 把兩列排到正確的位置 —— 同一份資料，換個主客場就換個順序，
- * 不需要在資料庫裡存兩份。
+ * 但計分板的呈現慣例是「上面那列是先攻（客隊）」。排序走共用的
+ * `scoreboardSides()` —— 同一份資料，換個主客場就換個順序，
+ * 不需要在資料庫裡存兩份，**後台的編輯器也用同一支函式**。
  *
  * ## `null` 顯示為 `X`
  * 後攻方領先時最後半局不用打，那一格是 `X` 而不是 `0`。
@@ -26,25 +26,21 @@ const props = defineProps<{
   opponentName: string
 }>()
 
-/** 先攻（上半局）那一方。我隊是主場時，先攻的是對手。 */
-const rows = computed(() => {
-  const ours = {
-    key: 'our',
-    name: props.ourName,
-    isOurs: true,
-    scores: props.scoreboard.innings.map((inning) => inning.our),
-    totals: props.scoreboard.totals.our,
-  }
-  const theirs = {
-    key: 'opponent',
-    name: props.opponentName,
-    isOurs: false,
-    scores: props.scoreboard.innings.map((inning) => inning.opponent),
-    totals: props.scoreboard.totals.opponent,
-  }
-
-  return props.homeAway === 'home' ? [theirs, ours] : [ours, theirs]
-})
+/**
+ * 由上而下的兩列，上面那列是先攻。
+ *
+ * 排序走共用的 `scoreboardSides()` —— 後台的編輯器用的是同一支，
+ * 兩邊各寫各的就會出現「同一場比賽在後台與前台順序相反」。
+ */
+const rows = computed(() =>
+  scoreboardSides(props.homeAway).map((side) => ({
+    key: side,
+    name: side === 'our' ? props.ourName : props.opponentName,
+    isOurs: side === 'our',
+    scores: props.scoreboard.innings.map((inning) => inning[side]),
+    totals: props.scoreboard.totals[side],
+  })),
+)
 
 const innings = computed(() => props.scoreboard.innings.map((inning) => inning.inning))
 

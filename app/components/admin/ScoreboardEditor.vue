@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { Scoreboard } from '#shared/schemas/game'
-import { emptyScoreboard, sumInnings, withSummedRuns } from '#shared/schemas/game'
+import type { HomeAway, Scoreboard } from '#shared/schemas/game'
+import { emptyScoreboard, scoreboardSides, sumInnings, withSummedRuns } from '#shared/schemas/game'
 import { LOW_CONFIDENCE_THRESHOLD } from '#shared/schemas/ai'
 import { ApiError } from '~/utils/api-error'
 
@@ -18,6 +18,12 @@ import { ApiError } from '~/utils/api-error'
  * 欄位留空代表「該半局沒有進行」（顯示為 X），輸入 0 代表「打了但沒得分」。
  * 這在計分板上是兩件完全不同的事，所以輸入介面也保留這個區別。
  *
+ * ## 列的順序跟前台一樣
+ * 上面那列是**先攻**（客隊），依 `homeAway` 決定，走的是和前台計分板同一支
+ * `scoreboardSides()`。這裡原本寫死「我隊在上」，於是主場的比賽在後台是
+ * 「我隊／對手」、前台是「對手／我隊」—— 而計分板正是拿來核對的東西，
+ * 順序相反看起來就像資料被改過。改主客場時這兩列會跟著對調，那是正確的。
+ *
  * ## R 不能輸入
  * 總得分一律是逐局加總（`withSummedRuns()`），所以它是一格唯讀的數字而不是
  * 輸入框。這裡曾經有一顆「用逐局加總填入 R」的按鈕 —— 那等於把「保持一致」
@@ -27,6 +33,8 @@ import { ApiError } from '~/utils/api-error'
 const props = defineProps<{
   ourName: string
   opponentName: string
+  /** 決定哪一列在上面（先攻）。和前台用同一條規則。 */
+  homeAway: HomeAway
   /** 送給 AI 比對「哪一列是我隊」的隊名清單。 */
   teamNames: string[]
 }>()
@@ -40,6 +48,9 @@ const aiWarnings = ref<string[]>([])
 const aiConfidence = ref<number | null>(null)
 
 const innings = computed(() => model.value.innings)
+
+/** 由上而下的兩列，上面那列是先攻。與前台共用同一支函式。 */
+const sides = computed(() => scoreboardSides(props.homeAway))
 
 /**
  * 畫面上顯示的 R。
@@ -194,11 +205,7 @@ async function handleFile(event: Event) {
             </tr>
           </thead>
           <tbody>
-            <tr
-              v-for="side in ['our', 'opponent'] as const"
-              :key="side"
-              class="border-t border-border"
-            >
+            <tr v-for="side in sides" :key="side" class="border-t border-border">
               <th
                 scope="row"
                 class="sticky left-0 z-10 max-w-40 truncate bg-surface px-3 py-2 text-left font-semibold"
@@ -258,7 +265,8 @@ async function handleFile(event: Event) {
       </div>
 
       <p class="text-xs text-content-muted">
-        提示：欄位留空代表該半局沒有進行（顯示為 X），輸入 0 代表打了但沒有得分。
+        提示：上面那列是先攻（客隊），和前台顯示的順序一樣，改主客場就會對調。
+        欄位留空代表該半局沒有進行（顯示為 X），輸入 0 代表打了但沒有得分。
         R（總得分）由逐局自動加總，不需要也不能手動填。
       </p>
     </template>

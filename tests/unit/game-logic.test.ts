@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   batterEntrySchema,
+  battingSide,
   deriveBench,
   deriveResult,
   emptyScoreboard,
@@ -13,6 +14,7 @@ import {
   gameResult,
   hasScore,
   parseYouTubeVideoId,
+  scoreboardSides,
   isFinished,
   isLive,
   isNotPlayed,
@@ -734,5 +736,30 @@ describe('isWithinForecastRange', () => {
   it('日期格式壞掉時回 false，不要讓它變成一個必然失敗的請求', () => {
     expect(isWithinForecastRange('不是日期', today)).toBe(false)
     expect(isWithinForecastRange('2026-09-25', '壞掉的今天')).toBe(false)
+  })
+})
+
+/**
+ * 計分板由上而下的順序。
+ *
+ * 前台計分板、後台編輯器、首頁的比分橫幅**都走這一支** —— 以前後台寫死
+ * 「我隊在上」，於是主場的比賽在後台是「我隊／對手」、前台是「對手／我隊」，
+ * 而計分板正是拿來核對的東西，順序相反看起來就像資料被改過。
+ */
+describe('scoreboardSides', () => {
+  it('客場（先攻）時我隊在上', () => {
+    expect(scoreboardSides('away')).toEqual(['our', 'opponent'])
+  })
+
+  it('主場（後攻）時對手在上', () => {
+    expect(scoreboardSides('home')).toEqual(['opponent', 'our'])
+  })
+
+  it('上面那列就是打上半局的那一方（和 battingSide 同一條規則）', () => {
+    for (const homeAway of ['home', 'away'] as const) {
+      const [first, second] = scoreboardSides(homeAway)
+      expect(first).toBe(battingSide('top', homeAway))
+      expect(second).toBe(battingSide('bottom', homeAway))
+    }
   })
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Game } from '#shared/schemas/game'
 import type { WeatherMap } from '#shared/schemas/weather'
-import { GAME_STATUS_LABELS, isLive, isNotPlayed } from '#shared/schemas/game'
+import { GAME_STATUS_LABELS, isLive, isNotPlayed, scoreboardSides } from '#shared/schemas/game'
 import { formatGameDate } from '~/utils/format'
 
 /**
@@ -37,25 +37,20 @@ const props = defineProps<{
   teamLogoUrl: string
 }>()
 
-/** 比分兩側的球隊。客場（先攻）時我隊在左。 */
+/**
+ * 比分兩側的球隊。先攻在左，和計分板由上而下的順序是同一條規則，
+ * 所以走同一支 `scoreboardSides()` —— 三個地方各寫一次遲早會有一個跑掉。
+ */
 const sides = computed(() => {
   const game = props.scoreGame
   if (!game) return null
 
-  const ours = {
-    name: props.teamName,
-    logoUrl: props.teamLogoUrl,
-    score: game.scoreboard.totals.our.r,
-    isOurs: true,
-  }
-  const theirs = {
-    name: game.opponent,
-    logoUrl: game.opponentLogoUrl,
-    score: game.scoreboard.totals.opponent.r,
-    isOurs: false,
-  }
-
-  return game.homeAway === 'home' ? [theirs, ours] : [ours, theirs]
+  return scoreboardSides(game.homeAway).map((side) => ({
+    name: side === 'our' ? props.teamName : game.opponent,
+    logoUrl: side === 'our' ? props.teamLogoUrl : game.opponentLogoUrl,
+    score: game.scoreboard.totals[side].r,
+    isOurs: side === 'our',
+  }))
 })
 
 /**

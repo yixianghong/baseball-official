@@ -92,6 +92,20 @@ export function battingSide(half: GameHalf, homeAway: HomeAway): 'our' | 'oppone
   return (half === 'top') === (homeAway === 'away') ? 'our' : 'opponent'
 }
 
+/**
+ * 計分板由上而下的兩列。**上面那列是先攻**，也就是打上半局的那一方。
+ *
+ * 資料層存的是「我隊／對手」，不存上下半局（見這個檔案開頭的說明），
+ * 所以要呈現成計分板的時候得自己排。**前台與後台一定要用同一支函式**：
+ * 各寫各的結果是後台永遠「我隊在上」、前台依主客場換位，同一場比賽兩邊
+ * 長得不一樣 —— 而計分板正是要拿來核對的東西，看起來像資料被改過。
+ *
+ * 直接由 `battingSide()` 推導，連「客隊先攻」這條規則也只寫在一個地方。
+ */
+export function scoreboardSides(homeAway: HomeAway): ['our' | 'opponent', 'our' | 'opponent'] {
+  return [battingSide('top', homeAway), battingSide('bottom', homeAway)]
+}
+
 /** 出席狀態。`pending` 是「還沒回覆」，與明確回答「不出席」不同。 */
 export const attendanceStatusSchema = z.enum(['yes', 'no', 'maybe', 'pending'])
 export type AttendanceStatus = z.infer<typeof attendanceStatusSchema>

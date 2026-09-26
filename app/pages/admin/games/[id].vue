@@ -666,6 +666,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             v-model="scoreboard"
             :our-name="teamName"
             :opponent-name="game.opponent"
+            :home-away="basic.homeAway"
             :team-names="teamNames"
           />
         </div>
