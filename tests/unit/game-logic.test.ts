@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  batterEntrySchema,
   deriveBench,
   deriveResult,
   emptyScoreboard,
@@ -374,12 +375,56 @@ describe('gameClipSchema', () => {
   })
 })
 
+/**
+ * 打擊紀錄。
+ *
+ * 這一組守的是**「備註是純文字」這件事沒有被偷偷改掉**：只要哪天有人
+ * 想不開加上 `hits: z.number()`，`.strict()` 之外的欄位就會靜靜地被吃掉，
+ * 而後台照樣顯示、資料庫照樣寫 —— 直到有人問「為什麼打擊率是空的」。
+ * 理由寫在 `batterEntrySchema` 上。
+ */
+describe('batterEntrySchema', () => {
+  it('只要姓名就成立，其餘欄位有預設值', () => {
+    const batter = batterEntrySchema.parse({ name: '陳育廷' })
+
+    expect(batter).toEqual({ playerId: '', name: '陳育廷', number: '', note: '' })
+  })
+
+  it('沒有姓名不成立 —— 一筆沒有人的打擊紀錄沒有意義', () => {
+    expect(() => batterEntrySchema.parse({ note: '4 打數 2 安打' })).toThrow()
+  })
+
+  it('備註原樣保留，不解析也不正規化', () => {
+    const note = '4 打數 2 安打 1 打點 2 得分'
+
+    expect(batterEntrySchema.parse({ name: '陳育廷', note }).note).toBe(note)
+  })
+
+  it('備註有長度上限（避免有人把整段賽記貼進來）', () => {
+    expect(() => batterEntrySchema.parse({ name: '陳育廷', note: 'x'.repeat(101) })).toThrow()
+  })
+
+  it('名冊上沒有的人也登得進來（臨時支援沒有 playerId）', () => {
+    const batter = batterEntrySchema.parse({ name: '臨時支援', note: '1 打數 1 安打' })
+
+    expect(batter.playerId).toBe('')
+  })
+})
+
 describe('gamePatchSchema', () => {
   it('只送一個欄位時，其他欄位不會被預設值填回來', () => {
     const patch = gamePatchSchema.parse({ status: 'finished' }) as Record<string, unknown>
 
     expect(Object.keys(patch)).toEqual(['status'])
-    for (const field of ['lineup', 'attendance', 'pitchers', 'scoreboard', 'venue', 'time']) {
+    for (const field of [
+      'lineup',
+      'attendance',
+      'pitchers',
+      'batters',
+      'scoreboard',
+      'venue',
+      'time',
+    ]) {
       expect(field in patch, `${field} 不該出現在 patch 裡`).toBe(false)
     }
   })

@@ -118,6 +118,15 @@ function createSeedStore(): MemoryStore {
       }
     })
 
+  /**
+   * 打擊紀錄。備註是**純文字**，系統不解析也不加總（見 `batterEntrySchema`）。
+   */
+  const battersFrom = (notes: Record<string, string>) =>
+    Object.entries(notes).map(([id, note]) => {
+      const p = players.find((item) => item.id === id)!
+      return { playerId: p.id, name: p.name, number: p.number, note }
+    })
+
   const attendanceFrom = (statuses: Record<string, Game['attendance'][number]['status']>) =>
     players
       .filter((p) => p.status === 'active')
@@ -160,6 +169,7 @@ function createSeedStore(): MemoryStore {
       }),
       lineup: lineupFrom(['p4', 'p5', 'p3', 'p6', 'p9', 'p8', 'p7', 'p2', 'p1']),
       pitchers: [],
+      batters: [],
       scoreboard: {
         innings: [],
         totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },
@@ -186,6 +196,7 @@ function createSeedStore(): MemoryStore {
       attendance: attendanceFrom({ p1: 'yes', p2: 'yes', p4: 'maybe' }),
       lineup: [],
       pitchers: [],
+      batters: [],
       scoreboard: {
         innings: [],
         totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },
@@ -212,6 +223,7 @@ function createSeedStore(): MemoryStore {
       attendance: [],
       lineup: [],
       pitchers: [],
+      batters: [],
       scoreboard: {
         innings: [],
         totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },
@@ -238,6 +250,7 @@ function createSeedStore(): MemoryStore {
       attendance: [],
       lineup: [],
       pitchers: [],
+      batters: [],
       scoreboard: {
         innings: [],
         totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },
@@ -272,6 +285,17 @@ function createSeedStore(): MemoryStore {
         { playerId: 'p1', name: '陳冠宇', number: '1', role: 'starter', note: '6 局 2 失分' },
         { playerId: 'p10', name: '鄭凱文', number: '24', role: 'closer', note: '2 局無失分' },
       ],
+      batters: battersFrom({
+        p4: '4 打數 2 安打 1 打點',
+        p5: '4 打數 1 安打 2 打點',
+        p3: '3 打數 1 安打 1 得分',
+        p6: '4 打數無安打',
+        p9: '3 打數 2 安打 1 二壘打',
+        p8: '4 打數 1 安打',
+        p7: '3 打數無安打 1 四壞',
+        p2: '3 打數 1 安打 2 打點',
+        p1: '3 打數無安打',
+      }),
       scoreboard: {
         innings: [
           { inning: 1, our: 0, opponent: 1 },
@@ -307,6 +331,7 @@ function createSeedStore(): MemoryStore {
       attendance: [],
       lineup: lineupFrom(['p5', 'p4', 'p3', 'p6', 'p8', 'p9', 'p7', 'p2', 'p10']),
       pitchers: [{ playerId: 'p10', name: '鄭凱文', number: '24', role: 'starter', note: '' }],
+      batters: [],
       scoreboard: {
         innings: [
           { inning: 1, our: 0, opponent: 0 },
@@ -341,6 +366,7 @@ function createSeedStore(): MemoryStore {
       attendance: [],
       lineup: lineupFrom(['p4', 'p5', 'p3', 'p9', 'p6', 'p8', 'p7', 'p2', 'p1']),
       pitchers: [{ playerId: 'p1', name: '陳冠宇', number: '1', role: 'starter', note: '' }],
+      batters: [],
       scoreboard: {
         innings: [
           { inning: 1, our: 1, opponent: 1 },

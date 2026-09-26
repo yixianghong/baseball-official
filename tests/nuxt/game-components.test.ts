@@ -119,6 +119,7 @@ describe('GameCard 的狀態色條', () => {
     attendance: [],
     lineup: [],
     pitchers: [],
+    batters: [],
     scoreboard: emptyScoreboard(0),
     createdAt: '',
     updatedAt: '',
@@ -345,11 +346,21 @@ describe('GameLineupCard', () => {
     expect(component.text()).not.toContain('DH')
   })
 
-  it('投手紀錄的備註有填才顯示', async () => {
-    const withNote = await mountSuspended(GameLineupCard, {
+  /**
+   * ⚠️ 這張卡上**不放賽後的成績**。
+   *
+   * 它是賽前的名單，而且會在賽前就被截圖丟進群組。投手紀錄的 `note`
+   * （「6 局 2 失分」）是賽後才填得出來的東西 —— 混進來之後，同一張卡
+   * 在不同時間點長得不一樣，看到舊截圖的人會以為名單被改過。
+   * 成績在單場比賽頁的「本場紀錄」。
+   */
+  it('先發投手只顯示名字，不帶投手紀錄的備註', async () => {
+    const component = await mountSuspended(GameLineupCard, {
       props: { ...baseProps, pitchers: [{ ...starter, note: '6 局 2 失分' }] },
     })
-    expect(withNote.text()).toContain('6 局 2 失分')
+
+    expect(component.text()).toContain('#18 王建民')
+    expect(component.text()).not.toContain('6 局 2 失分')
   })
 
   /*
@@ -462,6 +473,7 @@ describe('ScoreBanner 的最新比數', () => {
     attendance: [],
     lineup: [],
     pitchers: [],
+    batters: [],
     scoreboard: {
       innings: [],
       totals: { our: { r: 6, h: 0, e: 0 }, opponent: { r: 3, h: 0, e: 0 } },
@@ -622,6 +634,7 @@ describe('GameCalendar', () => {
     attendance: [],
     lineup: [],
     pitchers: [],
+    batters: [],
     scoreboard: {
       innings: [],
       totals: { our: { r: 6, h: 0, e: 0 }, opponent: { r: 3, h: 0, e: 0 } },

@@ -38,6 +38,16 @@ import { formatGameStamp } from '~/utils/format'
  *
  * 換句話說**不能再把 `aria-hidden` 加回來**。
  *
+ * ## 這張卡上不放賽後的成績
+ * 先發投手只顯示名字與背號，**不顯示投手紀錄的 `note`**（「6 局 2 失分」）。
+ * 打擊紀錄同理，完全不出現在這裡。
+ *
+ * 這是一張**賽前**的名單：排出來是為了讓大家知道今天誰上場、幾點在哪裡打，
+ * 而且它會在賽前就被截圖丟進群組。賽後才寫得出來的成績混進來之後，
+ * 同一張卡在不同時間點長得不一樣 —— 看到舊截圖的人會以為名單改過。
+ *
+ * 成績要看就去單場比賽頁的「本場紀錄」，那裡投打分開列，而且不必截圖。
+ *
  * ## 字體
  * 棒次、背號、守位縮寫的窄黑體來自**全站的預設字體**（`main.css` 的 body
  * 規則），這裡不需要、也刻意不再重複標 `font-display`。Oswald 只涵蓋 latin，
@@ -69,6 +79,8 @@ const props = withDefaults(
  * 但業餘棒球多半沒有 DH，投手自己也要打擊 —— 於是最該被看到的那個資訊
  * 剛好在最常見的情況下消失了。打序裡的守位雖然會標 `P`，那是「第幾棒守投手」，
  * 和「今天誰先發」不是同一件事，而且要一列一列找。
+ *
+ * ⚠️ **只取名字與背號，`note` 不放上來** —— 見下面那一段。
  */
 const startingPitcher = computed(
   () => props.pitchers.find((pitcher) => pitcher.role === 'starter') ?? null,
@@ -219,18 +231,12 @@ function onShare() {
                 :to="startingPitcher.playerId ? `/players/${startingPitcher.playerId}` : undefined"
                 class="flex min-w-0 flex-col items-center justify-center rounded-lg border-l-4 border-l-accent-500 bg-white/95 px-3 py-2 text-center text-ink-deep transition hover:bg-white"
               >
+                <!--
+                  ⚠️ 只有名字，**不顯示投手紀錄的 `note`**（「6 局 2 失分」那種）。
+                  理由見 `<script>` 開頭的「這張卡上不放賽後的成績」。
+                -->
                 <span class="min-w-0 max-w-full truncate text-fluid-lg font-bold">
                   {{ displayName(startingPitcher) }}
-                </span>
-                <!--
-                  投手紀錄的備註（例如「6 局 2 失分」）放在名字下面而不是右邊：
-                  擺右邊會把名字擠成偏左，而這一段的重點就是那個名字。沒填就不佔位。
-                -->
-                <span
-                  v-if="startingPitcher.note"
-                  class="max-w-full truncate text-fluid-sm text-ink-soft/70"
-                >
-                  {{ startingPitcher.note }}
                 </span>
               </component>
 

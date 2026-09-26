@@ -308,37 +308,64 @@ useHead({
           />
         </section>
 
-        <div class="grid gap-8 lg:grid-cols-2">
-          <section aria-labelledby="lineup-heading">
-            <h2 id="lineup-heading" class="mb-4 text-fluid-xl font-bold">出賽名單</h2>
+        <!--
+          出賽名單自己一列，但寬度收在 `max-w-xl`。
 
-            <!--
-              圖卡是唯一的呈現方式（先發打序與候補都在裡面），所以它必須語意
-              完整 —— 名字是連結、守位帶中文全名。不要再補一份表格上來。
-            -->
-            <GameLineupCard
-              v-if="game.lineup.length"
-              :entries="game.lineup"
-              :team-name="teamName"
-              :team-logo-url="settings?.logoUrl"
-              :opponent="game.opponent"
-              :opponent-logo-url="game.opponentLogoUrl"
-              :bench="bench"
-              :date="game.date"
-              :time="game.time"
-              :venue="game.venue"
-              :pitchers="game.pitchers"
-            />
-            <UiBaseEmpty v-else title="尚未登錄出賽名單" icon="📋" />
-          </section>
+          ⚠️ 不能讓它吃滿整個容器：`useShareRoster()` 截的就是這張卡本身，
+          所以版面寬度直接決定**下載下來的 PNG 有多寬** —— 在桌機上撐滿
+          會截出一張又扁又寬、貼進群組幾乎看不清楚的圖。
+          這個寬度大致等於它原本在兩欄格線裡的寬度。
+        -->
+        <section aria-labelledby="lineup-heading" class="max-w-xl">
+          <h2 id="lineup-heading" class="mb-4 text-fluid-xl font-bold">出賽名單</h2>
 
-          <section v-if="game.pitchers.length" aria-labelledby="pitchers-heading">
-            <h2 id="pitchers-heading" class="mb-4 text-fluid-xl font-bold">投手</h2>
-            <ul class="space-y-2">
+          <!--
+            圖卡是唯一的呈現方式（先發打序與候補都在裡面），所以它必須語意
+            完整 —— 名字是連結、守位帶中文全名。不要再補一份表格上來。
+          -->
+          <GameLineupCard
+            v-if="game.lineup.length"
+            :entries="game.lineup"
+            :team-name="teamName"
+            :team-logo-url="settings?.logoUrl"
+            :opponent="game.opponent"
+            :opponent-logo-url="game.opponentLogoUrl"
+            :bench="bench"
+            :date="game.date"
+            :time="game.time"
+            :venue="game.venue"
+            :pitchers="game.pitchers"
+          />
+          <UiBaseEmpty v-else title="尚未登錄出賽名單" icon="📋" />
+        </section>
+
+        <!--
+          ══ 本場紀錄 ══
+          投手與打擊是同一件事的兩面（這一場我們打得怎麼樣），所以收在同一個
+          標題底下，各自用 `<h3>` 分開 —— 而不是兩個平行的 `<h2>`，那會讓
+          目錄上出現兩個看起來不相干的區塊。
+
+          **上下排而不是左右並排**：投手通常一到三個人，打者九到十二個。
+          並排的話左欄兩列、右欄十二列，中間空一大塊，看起來像壞掉了。
+
+          兩種紀錄的成績都是後台一個字一個字打進去的純文字
+          （`batterEntrySchema` 說明了為什麼不是數字欄位），
+          所以這裡照原樣顯示，不做任何解析或加總。
+        -->
+        <section
+          v-if="game.pitchers.length || game.batters.length"
+          aria-labelledby="records-heading"
+          class="space-y-6"
+        >
+          <h2 id="records-heading" class="text-fluid-xl font-bold">本場紀錄</h2>
+
+          <div v-if="game.pitchers.length">
+            <h3 class="mb-3 text-fluid-base font-bold text-content-muted">投手</h3>
+            <ul class="grid gap-2 sm:grid-cols-2">
               <li
                 v-for="pitcher in game.pitchers"
                 :key="`${pitcher.playerId}-${pitcher.name}`"
-                class="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface-raised px-4 py-3"
+                class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-surface-raised px-4 py-3"
               >
                 <UiBaseBadge tone="brand" size="sm">
                   {{
@@ -365,8 +392,40 @@ useHead({
                 </span>
               </li>
             </ul>
-          </section>
-        </div>
+          </div>
+
+          <div v-if="game.batters.length">
+            <h3 class="mb-3 text-fluid-base font-bold text-content-muted">打擊</h3>
+            <ul class="grid gap-2 sm:grid-cols-2">
+              <li
+                v-for="batter in game.batters"
+                :key="`${batter.playerId}-${batter.name}`"
+                class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-surface-raised px-4 py-3"
+              >
+                <NuxtLink
+                  v-if="batter.playerId"
+                  :to="`/players/${batter.playerId}`"
+                  class="font-medium hover:text-brand-600"
+                >
+                  <span v-if="batter.number" class="mr-1 text-content-muted tabular-nums">
+                    #{{ batter.number }}
+                  </span>
+                  {{ batter.name }}
+                </NuxtLink>
+                <!-- 名冊上沒有的人（臨時支援）不連到球員頁 —— 那一頁不存在 -->
+                <span v-else class="font-medium">
+                  <span v-if="batter.number" class="mr-1 text-content-muted tabular-nums">
+                    #{{ batter.number }}
+                  </span>
+                  {{ batter.name }}
+                </span>
+                <span v-if="batter.note" class="text-fluid-sm text-content-muted">
+                  {{ batter.note }}
+                </span>
+              </li>
+            </ul>
+          </div>
+        </section>
       </template>
 
       <!-- ══ 未來：出席 + 先發陣容 ═════════════════════════════ -->

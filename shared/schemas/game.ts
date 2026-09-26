@@ -258,6 +258,33 @@ export const pitcherEntrySchema = z.object({
 export type PitcherEntry = z.infer<typeof pitcherEntrySchema>
 
 /**
+ * 打擊紀錄。
+ *
+ * ## ⚠️ `note` 是純文字，不是數據
+ * 裡面寫的是「4 打數 2 安打 1 打點」這種句子，**系統不解析也不加總**。
+ * 這是刻意的：拆成打數／安打／打點幾個數字欄位之後，一場要填 9～12 個人
+ * 乘以好幾格，而登錄的人是在賽後用手機打的 —— 欄位越多，實際發生的事
+ * 不是「資料更完整」而是「整段沒人填」。
+ *
+ * 另一個理由是**別讓它看起來像可以算的東西**。有了數字欄位，下一步必然是
+ * 打擊率、季賽累計、排行榜，而那需要每一場都完整且正確地登錄 ——
+ * 這個球隊沒有記錄員。一個少登三場的 `.412` 比沒有數字糟糕得多。
+ * 真的要做季賽統計時，該補的是結構化的欄位加上「這場有沒有完整登錄」的旗標，
+ * 而不是回頭去解析這些句子。
+ *
+ * 和 `pitcherEntrySchema` 的差別只有少一個 `role`：投手分先發／中繼／終結，
+ * 打者沒有對應的分類（棒次在 `lineup` 裡，是另一份資料）。
+ */
+export const batterEntrySchema = z.object({
+  playerId: z.string().default(''),
+  name: z.string().min(1),
+  number: z.string().default(''),
+  note: z.string().max(100).default(''),
+})
+
+export type BatterEntry = z.infer<typeof batterEntrySchema>
+
+/**
  * 單局得分。`null` 代表「沒打這半局」——例如主隊領先時九下不用打，
  * 那一格在計分板上是 `X` 而不是 `0`，兩者意義完全不同。
  */
@@ -500,6 +527,11 @@ export const gameInputSchema = z.object({
    */
   lineup: z.array(lineupEntrySchema).max(15).default([]),
   pitchers: z.array(pitcherEntrySchema).max(10).default([]),
+  /**
+   * 打擊紀錄。上限比打線寬（15）—— 一場可能換人代打，登錄的是「誰打過」
+   * 而不是「誰先發」，兩者不必一致。
+   */
+  batters: z.array(batterEntrySchema).max(25).default([]),
   scoreboard: scoreboardSchema.default(emptyScoreboard()),
 })
 

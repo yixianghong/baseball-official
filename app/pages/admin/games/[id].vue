@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type {
   AttendanceEntry,
+  BatterEntry,
   GameHalf,
   GameStatus,
   LineupEntry,
@@ -46,6 +47,7 @@ import { formatGameDateLong } from '~/utils/format'
 definePageMeta({ layout: 'admin', middleware: 'auth' })
 
 const route = useRoute()
+const router = useRouter()
 const gameId = computed(() => String(route.params.id))
 
 const { data: game, error } = await useGame(gameId)
@@ -63,7 +65,37 @@ const tabs = [
   { key: 'lineup', label: '打線' },
   { key: 'result', label: '賽事管理' },
 ] as const
-const activeTab = ref<(typeof tabs)[number]['key']>('basic')
+type TabKey = (typeof tabs)[number]['key']
+
+/**
+ * 現在停在哪個分頁放在網址上（`?tab=`）。
+ *
+ * 這不是為了做出可以分享的連結，而是為了**回得來**：錄影頁的「離開」要直接
+ * 回到「賽事管理」（剛錄完的片段就列在那裡），不該讓人再點一次分頁。
+ *
+ * 網址未知或沒帶時退回第一個分頁 —— 有人手改網址不該讓四個分頁全部消失。
+ */
+function tabFromQuery(value: unknown): TabKey {
+  return tabs.some((tab) => tab.key === value) ? (value as TabKey) : 'basic'
+}
+
+const activeTab = ref<TabKey>(tabFromQuery(route.query.tab))
+
+/*
+ * 換分頁時把網址一起改掉。
+ *
+ * 只讀不寫的話，切過分頁之後網址還停在進來時的那個值，重新整理就被彈回去 ——
+ * 那比完全不支援 `?tab=` 更容易讓人以為是壞掉了。
+ *
+ * 用 `replace` 而不是 `push`：分頁不是「上一頁」，切了三次之後按返回鍵
+ * 應該回到賽事列表，而不是在同一頁裡倒退三次。
+ */
+watch(activeTab, (tab) => {
+  const query = { ...route.query }
+  if (tab === 'basic') delete query.tab
+  else query.tab = tab
+  void router.replace({ query })
+})
 
 // ── 各分頁的表單狀態 ────────────────────────────────────────────
 const basic = reactive({
@@ -97,6 +129,7 @@ const mapUrlError = computed(() =>
 const attendance = ref<AttendanceEntry[]>([])
 const lineup = ref<LineupEntry[]>([])
 const pitchers = ref<PitcherEntry[]>([])
+const batters = ref<BatterEntry[]>([])
 const scoreboard = ref<Scoreboard>(emptyScoreboard(0))
 
 /**
@@ -119,6 +152,7 @@ const formState = computed(() => ({
   attendance: attendance.value,
   lineup: lineup.value,
   pitchers: pitchers.value,
+  batters: batters.value,
   scoreboard: board.value,
 }))
 
@@ -145,6 +179,7 @@ function syncFromGame() {
   attendance.value = [...current.attendance]
   lineup.value = [...current.lineup]
   pitchers.value = [...current.pitchers]
+  batters.value = [...current.batters]
   scoreboard.value = structuredClone(toRaw(current.scoreboard))
 }
 
@@ -209,6 +244,54 @@ function onPitcherPlayerChange(index: number, playerId: string) {
     index,
     player ? { playerId: player.id, name: player.name, number: player.number } : { playerId: '' },
   )
+}
+
+/*
+ * ── 打擊紀錄 ──────────────────────────────────────────────────
+ *
+ * 和投手紀錄同一個形狀（少一個 `role`），所以這三個函式也是同一套。
+ * 刻意不把兩者抽成一個泛型的 helper：省下的是十幾行，換來的是每次讀這段
+ * 都要先在腦中把泛型展開，而兩邊日後很可能會各自長出不一樣的欄位。
+ */
+function addBatter() {
+  batters.value = [...batters.value, { playerId: '', name: '', number: '', note: '' }]
+}
+
+function updateBatter(index: number, patch: Partial<BatterEntry>) {
+  const next = [...batters.value]
+  const entry = next[index]
+  if (!entry) return
+  next[index] = { ...entry, ...patch }
+  batters.value = next
+}
+
+function onBatterPlayerChange(index: number, playerId: string) {
+  const player = roster.value.find((item) => item.id === playerId)
+  updateBatter(
+    index,
+    player ? { playerId: player.id, name: player.name, number: player.number } : { playerId: '' },
+  )
+}
+
+/**
+ * 「從打線帶入」—— 一次把打線上的人全部加進來，省掉九次下拉選單。
+ *
+ * 只補**還沒在名單上**的人，已經填好備註的那幾筆不會被蓋掉 ——
+ * 這顆按鈕很可能在填到一半時被按第二次（中途換了代打再按一次）。
+ * 比對以 `playerId` 為主、姓名為輔，和 `deriveBench()` 同一套規則
+ * （打線允許沒有 `playerId`）。
+ */
+function fillBattersFromLineup() {
+  const existing = new Set(batters.value.map((batter) => batter.playerId || batter.name))
+  const added = lineup.value
+    .filter((entry) => entry.name && !existing.has(entry.playerId || entry.name))
+    .map((entry) => ({
+      playerId: entry.playerId,
+      name: entry.name,
+      number: entry.number,
+      note: '',
+    }))
+  batters.value = [...batters.value, ...added]
 }
 
 /**
@@ -788,6 +871,88 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
               </UiBaseButton>
             </li>
           </ul>
+        </div>
+
+        <hr class="border-border" />
+
+        <!-- ── 打擊紀錄 ──────────────────────────────────────── -->
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="text-fluid-lg font-bold">打擊紀錄</h2>
+              <!--
+                ⚠️ 這句說明不能省。
+
+                備註是**純文字**，系統不解析也不加總。不講的話，登錄的人會
+                合理地以為打完這些數字之後某處會出現打擊率 —— 然後等著一個
+                永遠不會來的東西。理由寫在 `batterEntrySchema` 上。
+              -->
+              <p class="text-fluid-sm text-content-muted">
+                備註直接寫成一句話（例如「4 打數 2 安打 1 打點」），不會被拆開計算。
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <!--
+                一場要登錄九到十二個人，逐一從下拉選單挑出來太慢 ——
+                打線上本來就有名單，直接帶進來只剩備註要填。
+              -->
+              <UiBaseButton
+                v-if="lineup.length"
+                variant="ghost"
+                size="sm"
+                @click="fillBattersFromLineup"
+              >
+                從打線帶入
+              </UiBaseButton>
+              <UiBaseButton variant="secondary" size="sm" @click="addBatter">
+                ＋ 新增打者
+              </UiBaseButton>
+            </div>
+          </div>
+
+          <ul v-if="batters.length" class="space-y-2">
+            <li
+              v-for="(batter, index) in batters"
+              :key="index"
+              class="grid items-end gap-3 rounded-xl border border-border bg-surface p-3 sm:grid-cols-[1fr_1.5fr_auto]"
+            >
+              <div class="space-y-2">
+                <UiBaseSelect
+                  label="打者"
+                  :model-value="batter.playerId"
+                  :options="pitcherOptions"
+                  @update:model-value="onBatterPlayerChange(index, $event)"
+                />
+                <!-- 沒在名冊上的人（臨時支援）也要登得進來，和投手紀錄同一個做法 -->
+                <UiBaseInput
+                  v-if="!batter.playerId"
+                  label="姓名"
+                  :model-value="batter.name"
+                  @update:model-value="updateBatter(index, { name: $event })"
+                />
+              </div>
+
+              <UiBaseInput
+                label="備註"
+                :model-value="batter.note"
+                placeholder="例如：4 打數 2 安打 1 打點"
+                @update:model-value="updateBatter(index, { note: $event })"
+              />
+
+              <UiBaseButton
+                variant="ghost"
+                size="sm"
+                aria-label="移除打者"
+                @click="batters = batters.filter((_, i) => i !== index)"
+              >
+                ✕
+              </UiBaseButton>
+            </li>
+          </ul>
+
+          <p v-else class="text-fluid-sm text-content-muted">
+            還沒有打擊紀錄。前台只有在這裡填了東西之後才會出現「打擊紀錄」區塊。
+          </p>
         </div>
       </section>
     </template>

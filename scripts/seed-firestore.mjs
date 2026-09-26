@@ -107,6 +107,7 @@ function game(overrides) {
     attendance: [],
     lineup: [],
     pitchers: [],
+    batters: [],
     scoreboard: emptyScoreboard,
     result: null,
     createdAt: NOW,
@@ -125,6 +126,24 @@ function lineupFrom(indexes, playerIds) {
       name: p.name,
       number: p.number,
       position: p.positions[0],
+    }
+  })
+}
+
+/**
+ * 打擊紀錄，順序比照打線。
+ *
+ * `notes` 是**純文字**（「4 打數 2 安打」這種句子），系統不解析也不加總 ——
+ * 理由寫在 `shared/schemas/game.ts` 的 `batterEntrySchema` 上。
+ */
+function battersFrom(indexes, playerIds, notes) {
+  return indexes.map((playerIndex, order) => {
+    const p = PLAYERS[playerIndex]
+    return {
+      playerId: playerIds[playerIndex] ?? '',
+      name: p.name,
+      number: p.number,
+      note: notes[order] ?? '',
     }
   })
 }
@@ -281,6 +300,18 @@ const GAMES = [
       { playerId: playerIds[0], name: '陳冠宇', number: '1', role: 'starter', note: '6 局 2 失分' },
       { playerId: playerIds[9], name: '鄭凱文', number: '24', role: 'closer', note: '2 局無失分' },
     ],
+    // 備註是純文字，系統不解析也不加總（見 `batterEntrySchema`）
+    batters: battersFrom(starters, playerIds, [
+      '4 打數 2 安打 1 打點',
+      '4 打數 1 安打 2 打點',
+      '3 打數 1 安打 1 得分',
+      '4 打數無安打',
+      '3 打數 2 安打 1 二壘打',
+      '4 打數 1 安打',
+      '3 打數無安打 1 四壞',
+      '3 打數 1 安打 2 打點',
+      '3 打數無安打',
+    ]),
     scoreboard: {
       innings: [
         { inning: 1, our: 0, opponent: 1 },

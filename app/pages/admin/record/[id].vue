@@ -308,8 +308,12 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                   {{ formatGameDateLong(game.date) }}
                 </p>
               </div>
+              <!--
+                回「賽事管理」那個分頁，不是回比賽頁的第一個分頁 ——
+                剛錄完的片段就列在那裡，上傳失敗的要在那裡補登網址。
+              -->
               <NuxtLink
-                :to="`/admin/games/${game.id}`"
+                :to="`/admin/games/${game.id}?tab=result`"
                 class="shrink-0 text-fluid-sm text-white/60 underline underline-offset-4"
               >
                 離開
