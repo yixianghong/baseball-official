@@ -7,6 +7,7 @@ import type {
   GamePatch,
   GameQuery,
 } from '#shared/schemas/game'
+import type { Play } from '#shared/schemas/play'
 
 /**
  * 「比賽」這個功能領域的所有 API 呼叫。
@@ -26,6 +27,7 @@ const ENDPOINTS = {
   clipsRefresh: (id: string) => `/admin/games/${encodeURIComponent(id)}/clips/refresh`,
   clip: (id: string, videoId: string) =>
     `/admin/games/${encodeURIComponent(id)}/clips/${encodeURIComponent(videoId)}`,
+  plays: (id: string) => `/admin/games/${encodeURIComponent(id)}/plays`,
 } as const
 
 /**
@@ -86,7 +88,7 @@ export function useGame(id: MaybeRefOrGetter<string>) {
  * ```
  */
 export function useGameActions() {
-  const { get, post, patch, del, loading, error, attempt } = useApi()
+  const { get, post, put, patch, del, loading, error, attempt } = useApi()
 
   return {
     loading,
@@ -129,5 +131,18 @@ export function useGameActions() {
     /** 只移除本站的紀錄，不刪 YouTube 上的影片。 */
     removeClip: (id: string, videoId: string) =>
       del<{ clips: GameClip[] }>(ENDPOINTS.clip(id, videoId)),
+
+    /**
+     * 寫入一個半局的逐打席紀錄。
+     *
+     * 送進去的陣列**取代**那個半局既有的全部打席（空陣列＝清空），所以
+     * 重送一次不會變成兩份 —— 離線草稿的重試就是靠這一點。
+     *
+     * 回傳的 `scoreboard` 是套用逐打席之後的：有打席的半局，那一格的得分
+     * 由打席加總決定（見 `applyPlayDerivedScores()`）。前端直接用回傳的，
+     * 不要自己再算一次。
+     */
+    savePlays: (id: string, inning: number, half: GameHalf, plays: Play[]) =>
+      put<Pick<Game, 'plays' | 'scoreboard'>>(ENDPOINTS.plays(id), { inning, half, plays }),
   }
 }

@@ -28,7 +28,8 @@ import { ApiError } from '~/utils/api-error'
  * 總得分一律是逐局加總（`withSummedRuns()`），所以它是一格唯讀的數字而不是
  * 輸入框。這裡曾經有一顆「用逐局加總填入 R」的按鈕 —— 那等於把「保持一致」
  * 外包給使用者記得按，沒按的下場是逐局 3:1、R 欄 0:0，而前台的比數、勝敗、
- * 戰績全部讀 R。H／E 沒有逐局欄位可以加總，所以維持人工輸入。
+ * 戰績全部讀 R。H／E 在逐打席涵蓋那一隊的所有半局時由打席推導（見 `derivedTotals`），
+ * 否則人工輸入。
  */
 const props = defineProps<{
   ourName: string
@@ -37,6 +38,26 @@ const props = defineProps<{
   homeAway: HomeAway
   /** 送給 AI 比對「哪一列是我隊」的隊名清單。 */
   teamNames: string[]
+  /**
+   * 哪幾格的得分是由逐打席推導出來的（`{ inning, side }`）。
+   *
+   * 這些格子在這裡是**唯讀**的：一個半局只要有任何一筆打席，那一格就完全
+   * 由打席加總決定（見 `applyPlayDerivedScores()`）。同時開放手填的話，
+   * 同一格會有兩個來源，而它們對不上的時候畫面上完全看不出來。
+   *
+   * 逐格判斷而不是整張表二選一 —— 登錄一定是零碎的：先補了第 3 局上，
+   * 對手的半局還沒登。
+   */
+  derivedCells?: Array<{ inning: number; side: 'our' | 'opponent' }>
+  /**
+   * H／E 由逐打席推導時的值（沒有推導的欄位是 `undefined`）。
+   *
+   * 推導的那幾格顯示這個值、而且唯讀 —— 和逐局得分同一套做法。
+   * 值從這裡傳進來而不是讀 `model`：本機的表單在打席寫回之前可能還停在舊值。
+   * 規則見 `applyPlayDerivedScores()`：一隊每個打過的半局都有打席，那一隊的
+   * H（與對方的 E）才推導，否則維持手填。
+   */
+  derivedTotals?: Record<'our' | 'opponent', { h?: number; e?: number }>
 }>()
 
 const model = defineModel<Scoreboard>({ required: true })
@@ -59,6 +80,21 @@ const sides = computed(() => scoreboardSides(props.homeAway))
  * 兩者可能對不上，而這一格要顯示的是**現在這張表算出來的數字**。
  */
 const runs = computed(() => sumInnings(model.value))
+
+/** 這一格是不是由逐打席推導的。用 Set 而不是每格跑一次 `some()`。 */
+const derivedKeys = computed(
+  () => new Set((props.derivedCells ?? []).map((cell) => `${cell.inning}-${cell.side}`)),
+)
+
+function isDerived(inning: number, side: 'our' | 'opponent'): boolean {
+  return derivedKeys.value.has(`${inning}-${side}`)
+}
+
+const hasDerived = computed(
+  () =>
+    derivedKeys.value.size > 0 ||
+    Object.values(props.derivedTotals ?? {}).some((t) => t.h !== undefined || t.e !== undefined),
+)
 
 /**
  * 所有改動都經過這裡，順手把 R 對齊逐局。
@@ -214,7 +250,19 @@ async function handleFile(event: Event) {
               </th>
 
               <td v-for="(inning, index) in innings" :key="inning.inning" class="px-1 py-1.5">
+                <!--
+                  ⚠️ **有逐打席的那一格是唯讀的**，而且一定要說出原因。
+                  一格數字突然改不動、畫面上又什麼都沒講的話，看起來就是壞了。
+                -->
+                <span
+                  v-if="isDerived(inning.inning, side)"
+                  class="inline-flex h-10 w-12 items-center justify-center rounded-lg bg-brand-600/10 font-bold tabular-nums text-brand-600 dark:text-brand-300"
+                  :title="`第 ${inning.inning} 局的逐打席加總，請到「逐局紀錄」分頁修改`"
+                >
+                  {{ inning[side] }}
+                </span>
                 <input
+                  v-else
                   :value="inning[side] === null ? '' : inning[side]"
                   type="number"
                   min="0"
@@ -235,7 +283,16 @@ async function handleFile(event: Event) {
                 </span>
               </td>
               <td class="px-1 py-1.5">
+                <span
+                  v-if="derivedTotals?.[side]?.h !== undefined"
+                  class="inline-flex h-10 w-14 items-center justify-center rounded-lg bg-brand-600/10 font-bold tabular-nums text-brand-600 dark:text-brand-300"
+                  :aria-label="`${side === 'our' ? ourName : opponentName} 安打數（由逐打席推導）`"
+                  title="由「逐局紀錄」的逐打席加總，請到那裡修改"
+                >
+                  {{ derivedTotals?.[side]?.h }}
+                </span>
                 <input
+                  v-else
                   :value="model.totals[side].h"
                   type="number"
                   min="0"
@@ -245,7 +302,16 @@ async function handleFile(event: Event) {
                 />
               </td>
               <td class="px-1 py-1.5">
+                <span
+                  v-if="derivedTotals?.[side]?.e !== undefined"
+                  class="inline-flex h-10 w-14 items-center justify-center rounded-lg bg-brand-600/10 font-bold tabular-nums text-brand-600 dark:text-brand-300"
+                  :aria-label="`${side === 'our' ? ourName : opponentName} 失誤數（由逐打席推導）`"
+                  title="由「逐局紀錄」的逐打席加總，請到那裡修改"
+                >
+                  {{ derivedTotals?.[side]?.e }}
+                </span>
                 <input
+                  v-else
                   :value="model.totals[side].e"
                   type="number"
                   min="0"
@@ -263,6 +329,15 @@ async function handleFile(event: Event) {
         <UiBaseButton variant="secondary" size="sm" @click="addInning">＋ 延長一局</UiBaseButton>
         <UiBaseButton variant="ghost" size="sm" @click="removeInning">－ 減少一局</UiBaseButton>
       </div>
+
+      <p
+        v-if="hasDerived"
+        class="rounded-lg bg-brand-600/10 px-3 py-2 text-fluid-sm text-brand-600 dark:text-brand-300"
+      >
+        有底色的格子是「逐局紀錄」分頁的逐打席加總，所以在這裡不能改 ——
+        要改就去改那個半局的打席。H（安打）與 E（失誤）要等一隊打過的每個半局都有
+        登錄才會接管，否則維持手填；E 只算得到「失誤上壘」。
+      </p>
 
       <p class="text-xs text-content-muted">
         提示：上面那列是先攻（客隊），和前台顯示的順序一樣，改主客場就會對調。

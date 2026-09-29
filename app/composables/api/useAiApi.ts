@@ -1,5 +1,7 @@
 import type {
   ParseAttendanceResponse,
+  ParsePlaysRequest,
+  ParsePlaysResponse,
   ParseRosterResponse,
   ParseScheduleResponse,
   ParseScoreboardResponse,
@@ -25,6 +27,7 @@ const ENDPOINTS = {
   parseScoreboard: '/admin/ai/parse-scoreboard',
   parseRoster: '/admin/ai/parse-roster',
   parseAttendance: '/admin/ai/parse-attendance',
+  parsePlays: '/admin/ai/parse-plays',
 } as const
 
 export function useAiActions() {
@@ -54,6 +57,19 @@ export function useAiActions() {
         teamNames,
         defaultYear,
       })
+    },
+
+    /**
+     * 用語音辨識逐打席。
+     *
+     * 和圖片辨識一樣，回傳的是**建議** —— 拿到之後進暫存卡片讓人確認，
+     * 確認過才寫進那個半局。
+     *
+     * 送出去的一律是 16kHz 單聲道的 WAV（`app/utils/wav.ts`），
+     * 不是 `MediaRecorder` 原本吐出來的格式 —— 理由寫在那個檔案裡。
+     */
+    parsePlays(payload: ParsePlaysRequest): Promise<ParsePlaysResponse> {
+      return post<ParsePlaysResponse>(ENDPOINTS.parsePlays, payload)
     },
 
     /**

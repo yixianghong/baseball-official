@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { GameClip } from '#shared/schemas/game'
 import { clipEmbedUrl, clipThumbnailUrl, HALF_LABELS, visibleClips } from '#shared/schemas/game'
+import { describeHalfInning, playsOf, type Play } from '#shared/schemas/play'
 
 /**
  * 這一場的錄影片段（見 `docs/game-recording-plan.md`）。
@@ -27,9 +28,27 @@ const props = defineProps<{
   clips: GameClip[]
   /** 未開打／進行中說「片段」，已結束說「回放」—— 同一份資料，兩種說法。 */
   finished?: boolean
+  /**
+   * 這一場的逐打席紀錄。有的話，每一段底下會多一行那半局的賽況。
+   *
+   * 影片與打席共用 `(inning, half)` 這個身分，所以對得起來 ——
+   * 不必另外存一個「這段影片對應哪些打席」的欄位。
+   */
+  plays?: Play[]
 }>()
 
 const clips = computed(() => visibleClips(props.clips))
+
+/**
+ * 每一段底下那一行賽況（「#24 三壘安打、#56 三振」）。
+ *
+ * 一面縮圖牆本來只有「第 3 局上」這種標題，點開之前看不出任何內容 ——
+ * 而一段是六到八分鐘。有了這一行，訪客掃一眼就知道哪一段值得點。
+ */
+function summary(clip: GameClip): string {
+  if (!props.plays?.length) return ''
+  return describeHalfInning(playsOf(props.plays, clip.inning, clip.half))
+}
 
 /** 目前展開成播放器的那一段。同時只留一個 —— 兩個影片一起播沒有意義。 */
 const playing = ref('')
@@ -93,7 +112,12 @@ function label(clip: GameClip): string {
           </button>
         </div>
 
-        <p class="px-4 py-3 font-bold">{{ label(clip) }}</p>
+        <div class="px-4 py-3">
+          <p class="font-bold">{{ label(clip) }}</p>
+          <p v-if="summary(clip)" class="mt-1 text-fluid-sm text-content-muted">
+            {{ summary(clip) }}
+          </p>
+        </div>
       </li>
     </ul>
   </section>

@@ -5,8 +5,11 @@ import {
   LOW_CONFIDENCE_THRESHOLD,
   parseAttendanceResponseSchema,
   parseRosterResponseSchema,
+  parsePlaysResponseSchema,
   parseScheduleResponseSchema,
   parseScoreboardResponseSchema,
+  type ParsePlaysRequest,
+  type ParsePlaysResponse,
   type ParseAttendanceRequest,
   type ParseAttendanceResponse,
   type ParseRosterRequest,
@@ -17,6 +20,7 @@ import {
   type ParseScoreboardResponse,
 } from '../../shared/schemas/ai'
 import { POSITIONS, type Hand, type Position } from '../../shared/schemas/player'
+import { defaultRbi, PLAY_RESULTS, type PlayResult } from '../../shared/schemas/play'
 
 /**
  * Gemini 圖片辨識。
@@ -609,16 +613,204 @@ export function normalizeAttendanceStatus(input: unknown): 'yes' | 'no' | 'maybe
   return 'pending'
 }
 
+const PLAYS_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    plays: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          number: { type: 'STRING', description: '打者的背號，只要數字。聽不出來填空字串' },
+          result: {
+            type: 'STRING',
+            description:
+              '這個打席的結果，照說話的人講的原樣輸出，例如「三壘安打」「三振」「雙殺打」',
+          },
+          runs: { type: 'INTEGER', description: '這個打席隊伍得了幾分，沒講就填 0' },
+          sourceText: { type: 'STRING', description: '這一筆對應到語音裡的哪一句' },
+          confidence: { type: 'NUMBER', description: '對這一筆的把握程度，0 到 1' },
+        },
+        required: ['number', 'result', 'confidence'],
+      },
+    },
+    transcript: { type: 'STRING', description: '整段語音的逐字稿' },
+    warnings: { type: 'ARRAY', items: { type: 'STRING' } },
+  },
+  required: ['plays', 'transcript'],
+} as const
+
+/**
+ * 用語音登錄逐打席。
+ *
+ * ## 為什麼是 Gemini 而不是瀏覽器內建的 SpeechRecognition
+ * **iOS 加到主畫面的 PWA 沒有 `SpeechRecognition`** —— API 偵測得到，
+ * 但 `onresult` 永遠不會觸發（WebKit #225298，2021 年開的，標成
+ * RESOLVED/LATER）。而這個球隊的登錄裝置正是 iPhone 的主畫面 App。
+ *
+ * 走 Gemini 還多拿到一件事：一次可以連著講三四個打席，模型自己斷句。
+ *
+ * ## 結果字串一律用程式碼收斂，不靠提示詞叮嚀
+ * prompt 只要求模型「照說話的人講的原樣輸出」，收斂成列舉值是
+ * `normalizePlayResult()` 的工作（純函式、測得到）。這是這個專案既有的
+ * 紀律 —— 叮嚀模型輸出列舉值的話，它偶爾回一個列舉外的字串，而那種錯
+ * 只會在正式環境發生一次然後再也重現不了。
+ */
+export async function parsePlayAudio(
+  event: H3Event,
+  request: ParsePlaysRequest,
+): Promise<ParsePlaysResponse> {
+  const halfLabel = `第 ${request.inning} 局${request.half === 'top' ? '上' : '下'}`
+  const ourAtBat = request.batting === 'our'
+
+  const rosterLines = request.roster
+    .map((player) => `${player.number ? `${player.number} 號` : '（無背號）'}＝${player.name}`)
+    .join('、')
+
+  const existingLines = request.existing.length
+    ? request.existing.map((item, i) => `${i + 1}. ${item.number} 號 ${item.result}`).join('\n')
+    : '（這個半局還沒有任何打席）'
+
+  const prompt = [
+    '你是一位棒球記錄員的助理。這段語音是有人在口述一場比賽的逐打席結果。',
+    '',
+    `現在記錄的是：${halfLabel}，${ourAtBat ? '我隊' : '對手'}在打擊。`,
+    '',
+    '這個半局已經登錄的打席：',
+    existingLines,
+    '',
+    ...(ourAtBat && rosterLines ? ['我隊球員的背號對照：', rosterLines, ''] : []),
+    '請把語音中提到的**每一個打席**各輸出一筆，依照講的順序。',
+    '',
+    '每一筆請輸出：',
+    '- number：打者的背號，只要數字（「二十四號」請輸出 24）。聽不出來就填空字串。',
+    '- result：這個打席的結果，**照說話的人講的原樣輸出**，不要換成別的說法，',
+    '  也不要翻成英文。例如「三壘安打」「三振」「雙殺打」「四壞」「滾地球出局」。',
+    '- runs：這個打席**隊伍**得了幾分。講「得一分」就是 1，沒提到就填 0。',
+    '  全壘打如果沒講得幾分，就照壘上有幾個人推算；推算不出來填 1。',
+    '- sourceText：這一筆對應到語音裡的哪一句，讓人可以核對。',
+    '- confidence：你對這一筆的把握程度，0 到 1。',
+    '',
+    '另外輸出 transcript：整段語音的逐字稿。',
+    '',
+    '注意事項：',
+    '- 「三振」和「三壘安打」聽起來很像，請依上下文仔細分辨 —— 這兩個弄錯的話',
+    '  出局數與得分都會跟著錯。',
+    '- 只輸出語音裡真的講到的打席，**不要自行補齊**這個半局剩下的打席。',
+    '- 講的人可能會自我修正（「五十六號三振、啊不對是保送」），以最後說的為準。',
+    '- 聽不清楚的地方請寫進 warnings，不要猜。',
+  ].join('\n')
+
+  const raw = await generate<{
+    plays?: Array<Record<string, unknown>>
+    transcript?: string
+    warnings?: string[]
+  }>(event, prompt, request.audioBase64, request.mimeType, PLAYS_RESPONSE_SCHEMA)
+
+  const warnings = [...(raw.warnings ?? []).map(String)]
+  const byNumber = new Map(
+    request.roster.filter((player) => player.number).map((player) => [player.number, player]),
+  )
+
+  const plays = (raw.plays ?? []).map((entry) => {
+    const spoken = String(entry.result ?? '').trim()
+    const result = normalizePlayResult(spoken)
+    if (result === 'other' && spoken) {
+      warnings.push(`「${spoken}」不在可選的結果裡，已標成「其他」，請手動改。`)
+    }
+
+    const number = normalizeJerseyNumber(entry.number)
+    // 對手打擊時不要去對我隊名冊 —— 兩隊的背號會撞，對上了反而更糟
+    const player = ourAtBat ? byNumber.get(number) : undefined
+    const runs = clampRuns(entry.runs)
+
+    return {
+      playerId: player?.id ?? '',
+      number,
+      name: player?.name ?? '',
+      result,
+      runs,
+      rbi: defaultRbi(result, runs),
+      confidence: clamp01(Number(entry.confidence ?? 0)),
+      sourceText: String(entry.sourceText ?? '').trim(),
+    }
+  })
+
+  if (plays.length === 0 && warnings.length === 0) {
+    warnings.push('這段語音裡沒有聽到任何打席，請再說一次。')
+  }
+
+  return parsePlaysResponseSchema.parse({
+    plays,
+    transcript: String(raw.transcript ?? '').trim(),
+    warnings,
+  })
+}
+
+/**
+ * 把模型聽到的說法收斂成 `playResultSchema` 的列舉值。
+ *
+ * ## 為什麼用程式碼而不是叫模型直接輸出列舉值
+ * 這個專案既有的紀律：格式收斂用程式碼處理，不靠提示詞叮嚀 —— 只有這樣
+ * 才測得到。叮嚀模型的話，它偶爾回一個列舉外的字串，而那種錯通常只在
+ * 正式環境發生一次，之後再也重現不了。
+ *
+ * ## ⚠️ 比對的順序是「長的別名優先」
+ * 「三壘安打」含有「三」，而「三振」也是。如果照列舉的順序比對，
+ * 「三壘安打」可能先撞上某個更短的別名。所以一律**先試完全相符**，
+ * 再依別名長度由長到短做包含比對。`tests/unit/gemini-normalize.test.ts`
+ * 直接守著「三振」不可以變成三壘安打這一條。
+ *
+ * 認不得的一律回 `other` —— 猜一個結果填進去，出局數與打擊率都會跟著錯，
+ * 而畫面上看起來完全正常。寧可讓那一筆標成「其他」等人確認。
+ */
+const RESULT_ALIASES: Array<{ alias: string; result: PlayResult }> = Object.entries(PLAY_RESULTS)
+  .flatMap(([result, meta]) =>
+    [meta.label, ...meta.aliases].map((alias) => ({ alias, result: result as PlayResult })),
+  )
+  .sort((a, b) => b.alias.length - a.alias.length)
+
+export function normalizePlayResult(input: unknown): PlayResult {
+  const text = String(input ?? '')
+    .trim()
+    .replace(/\s+/g, '')
+  if (!text) return 'other'
+
+  // 完全相符優先：語音多半就是講一個完整的詞
+  const exact = RESULT_ALIASES.find((entry) => entry.alias === text)
+  if (exact) return exact.result
+
+  // 其次才是包含比對，而且長的別名先試
+  const partial = RESULT_ALIASES.find((entry) => text.includes(entry.alias))
+  return partial?.result ?? 'other'
+}
+
+/** 背號只留數字。「二十四號」由模型轉成 24，這裡只負責把雜訊清掉。 */
+export function normalizeJerseyNumber(input: unknown): string {
+  return String(input ?? '')
+    .replace(/[^0-9]/g, '')
+    .slice(0, 3)
+}
+
+function clampRuns(input: unknown): number {
+  const value = Math.round(Number(input ?? 0))
+  if (!Number.isFinite(value)) return 0
+  return Math.min(Math.max(value, 0), 4)
+}
+
 /**
  * 呼叫 Gemini 並取出結構化 JSON。
  *
- * `temperature: 0` 是刻意的：這是讀圖抄寫的工作，不需要創造力，
- * 同一張圖每次都該讀出同樣的結果。
+ * `temperature: 0` 是刻意的：這是抄寫的工作，不需要創造力 ——
+ * 同一張圖、同一段語音，每次都該讀出同樣的結果。
+ *
+ * `media` 收的是圖片或音訊（逐打席的語音登錄走這裡），兩者對 Gemini 來說
+ * 都只是一個 `inline_data` 的 part，差別只在 MIME 型別。
  */
 async function generate<T>(
   event: H3Event,
   prompt: string,
-  imageBase64: string,
+  mediaBase64: string,
   mimeType: string,
   responseSchema: unknown,
 ): Promise<T> {
@@ -629,7 +821,7 @@ async function generate<T>(
     // 換成泛用的「系統發生錯誤」反而讓人不知道該怎麼辦。
     throw new AppError(
       ERROR_CODE.SERVICE_UNAVAILABLE,
-      '尚未設定 Gemini API 金鑰，無法使用圖片辨識。請改用手動輸入。',
+      '尚未設定 Gemini API 金鑰，無法使用辨識功能。請改用手動輸入。',
       { expose: true },
     )
   }
@@ -643,7 +835,7 @@ async function generate<T>(
         contents: [
           {
             role: 'user',
-            parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }],
+            parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: mediaBase64 } }],
           },
         ],
         generationConfig: {
@@ -661,7 +853,7 @@ async function generate<T>(
       { blockReason: response.promptFeedback.blockReason },
       'gemini blocked the request',
     )
-    throw new AppError(ERROR_CODE.UPSTREAM_ERROR, '這張圖片無法被辨識，請改用手動輸入。', {
+    throw new AppError(ERROR_CODE.UPSTREAM_ERROR, '這份內容無法被辨識，請改用手動輸入。', {
       expose: true,
     })
   }

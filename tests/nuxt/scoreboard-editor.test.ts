@@ -58,3 +58,42 @@ describe('AdminScoreboardEditor 的列順序', () => {
     expect(await editorRows(homeAway)).toEqual(await publicRows(homeAway))
   })
 })
+
+describe('AdminScoreboardEditor 的 H／E', () => {
+  async function mountWith(derivedTotals?: Record<'our' | 'opponent', { h?: number; e?: number }>) {
+    return mountSuspended(ScoreboardEditor, {
+      props: {
+        modelValue: scoreboard,
+        'onUpdate:modelValue': () => {},
+        ourName: '城市隊',
+        opponentName: '藍鷹隊',
+        homeAway: 'home' as HomeAway,
+        teamNames: ['城市隊'],
+        derivedTotals,
+      },
+    })
+  }
+
+  it('沒有逐打席時 H／E 照樣可以手填', async () => {
+    const component = await mountWith()
+    expect(component.find('input[aria-label="城市隊 安打數"]').exists()).toBe(true)
+    expect(component.find('input[aria-label="城市隊 失誤數"]').exists()).toBe(true)
+  })
+
+  it('推導的那幾格是唯讀的，顯示推導出來的值（不是表單裡的舊值）', async () => {
+    const component = await mountWith({ our: { h: 8 }, opponent: { e: 2 } })
+
+    expect(component.find('input[aria-label="城市隊 安打數"]').exists()).toBe(false)
+    expect(component.find('[aria-label="城市隊 安打數（由逐打席推導）"]').text()).toBe('8')
+    expect(component.find('[aria-label="藍鷹隊 失誤數（由逐打席推導）"]').text()).toBe('2')
+
+    // 沒有推導的欄位維持可以輸入
+    expect(component.find('input[aria-label="城市隊 失誤數"]').exists()).toBe(true)
+    expect(component.find('input[aria-label="藍鷹隊 安打數"]').exists()).toBe(true)
+  })
+
+  it('有推導的欄位時會說明原因', async () => {
+    const component = await mountWith({ our: { h: 8 }, opponent: {} })
+    expect(component.text()).toContain('E 只算得到「失誤上壘」')
+  })
+})

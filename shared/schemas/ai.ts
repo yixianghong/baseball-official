@@ -157,6 +157,95 @@ export const parseAttendanceResponseSchema = z.object({
 
 export type ParseAttendanceResponse = z.infer<typeof parseAttendanceResponseSchema>
 
+/**
+ * 可接受的音訊格式（逐打席的語音登錄）。
+ *
+ * ## ⚠️ 這份清單是實測出來的，不是照文件抄的
+ * Gemini 的文件只列 wav／mp3／aiff／aac／ogg／flac —— 不含 `audio/webm`
+ * （Chrome 產出）與 `audio/mp4`（iOS Safari 產出），也就是 `MediaRecorder`
+ * 實際會吐出來的那兩種。實測結果：**`audio/mp4` 其實收得下**（同一段語音
+ * 標成 `audio/mp4` 或 `audio/aac` 都正確轉出文字）。
+ *
+ * 不過前端**預設還是會先轉成 16kHz 單聲道 WAV** 再送（見 `app/utils/wav.ts`），
+ * 理由是一條路比兩條路好：`audio/webm` 到現在都沒有實測過，而 Android 的
+ * Chrome 只錄得出它。真的轉不成功時才退回送原始格式，所以這裡兩種都收。
+ */
+export const audioMimeSchema = z.enum([
+  'audio/wav',
+  'audio/mp4',
+  'audio/aac',
+  'audio/webm',
+  'audio/ogg',
+])
+
+/**
+ * 用語音登錄逐打席的請求。
+ *
+ * 把名冊與「已經登錄了什麼」一起送給模型，理由和出席截圖辨識
+ * （`parseAttendanceRequestSchema`）相同：這種對應交給模型比在後端寫字串
+ * 比對規則可靠得多。講的人會說「24 號三壘安打」，而 24 號是誰、現在輪到
+ * 第幾棒、還剩幾個出局，都是判斷的依據。
+ */
+export const parsePlaysRequestSchema = z.object({
+  /** 不含 `data:` 前綴的純 base64 字串。 */
+  audioBase64: z.string().min(32, '缺少語音內容'),
+  mimeType: audioMimeSchema,
+  inning: z.number().int().min(1).max(20),
+  half: z.enum(['top', 'bottom']),
+  /** 現在是我隊還是對手在打擊 —— 決定要不要把背號對到我隊名冊上。 */
+  batting: z.enum(['our', 'opponent']),
+  /** 我隊名冊（背號 → 姓名）。對手打擊時只會用到背號。 */
+  roster: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        number: z.string().default(''),
+      }),
+    )
+    .max(80)
+    .default([]),
+  /** 這個半局已經登錄的打席，讓模型知道接下來輪到誰、還剩幾個出局。 */
+  existing: z
+    .array(z.object({ number: z.string().default(''), result: z.string().default('') }))
+    .max(30)
+    .default([]),
+})
+
+export type ParsePlaysRequest = z.infer<typeof parsePlaysRequestSchema>
+
+/**
+ * 辨識出的一個打席。
+ *
+ * `result` 已經由後端**用程式碼**收斂成 `playResultSchema` 的列舉值
+ * （`normalizePlayResult()`），不是模型自由發揮的字串 —— 格式收斂靠程式碼
+ * 而不是提示詞叮嚀，是這個專案既有的紀律，而且只有這樣才測得到。
+ * 收不進列舉的一律變成 `other` 並附一句 warning。
+ */
+export const parsedPlaySchema = z.object({
+  /** 對應到的我隊球員 id。對不上或是對手打者時為空字串。 */
+  playerId: z.string().default(''),
+  number: z.string().default(''),
+  name: z.string().default(''),
+  result: z.string().default('other'),
+  runs: z.number().int().min(0).max(4).default(0),
+  rbi: z.number().int().min(0).max(4).default(0),
+  confidence: z.number().min(0).max(1).default(0),
+  /** 這一筆對應到語音裡的哪一句，供人工核對。 */
+  sourceText: z.string().default(''),
+})
+
+export type ParsedPlay = z.infer<typeof parsedPlaySchema>
+
+export const parsePlaysResponseSchema = z.object({
+  plays: z.array(parsedPlaySchema).default([]),
+  /** 整段語音的逐字稿。辨識錯的時候，看得到當初講了什麼才知道該改成什麼。 */
+  transcript: z.string().default(''),
+  warnings: z.array(z.string()).default([]),
+})
+
+export type ParsePlaysResponse = z.infer<typeof parsePlaysResponseSchema>
+
 /** 上傳圖片的請求。 */
 export const uploadRequestSchema = imagePayloadSchema.extend({
   /** 存放的用途分類，決定 Storage 上的資料夾。 */

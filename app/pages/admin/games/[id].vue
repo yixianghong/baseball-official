@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import type {
   AttendanceEntry,
-  BatterEntry,
   GameHalf,
   GameStatus,
   LineupEntry,
-  PitcherEntry,
   Scoreboard,
+  StartingPitcher,
 } from '#shared/schemas/game'
 import {
   emptyScoreboard,
@@ -17,12 +16,14 @@ import {
   gameResult,
   GAME_HALVES,
   HALF_LABELS,
+  battingSide,
   parseYouTubeVideoId,
   isGoogleMapsUrl,
   withSummedRuns,
 } from '#shared/schemas/game'
 import { teamNameCandidates } from '#shared/schemas/settings'
 import { TAIWAN_CITIES, type TaiwanCity } from '#shared/schemas/weather'
+import { applyPlayDerivedScores, playDerivedTotalFields } from '#shared/schemas/box-score'
 import { mergeAttendanceWithRoster } from '~/utils/attendance'
 import { formatGameDateLong } from '~/utils/format'
 
@@ -64,6 +65,7 @@ const tabs = [
   { key: 'basic', label: '基本資料' },
   { key: 'attendance', label: '出席統計' },
   { key: 'lineup', label: '打線' },
+  { key: 'innings', label: '逐局紀錄' },
   { key: 'result', label: '賽事管理' },
 ] as const
 type TabKey = (typeof tabs)[number]['key']
@@ -129,8 +131,7 @@ const mapUrlError = computed(() =>
 
 const attendance = ref<AttendanceEntry[]>([])
 const lineup = ref<LineupEntry[]>([])
-const pitchers = ref<PitcherEntry[]>([])
-const batters = ref<BatterEntry[]>([])
+const startingPitcher = ref<StartingPitcher | null>(null)
 const scoreboard = ref<Scoreboard>(emptyScoreboard(0))
 
 /**
@@ -152,8 +153,7 @@ const formState = computed(() => ({
   ...basic,
   attendance: attendance.value,
   lineup: lineup.value,
-  pitchers: pitchers.value,
-  batters: batters.value,
+  startingPitcher: startingPitcher.value,
   scoreboard: board.value,
 }))
 
@@ -188,8 +188,7 @@ function syncFromGame() {
    */
   attendance.value = mergeAttendanceWithRoster(current.attendance, roster.value)
   lineup.value = [...current.lineup]
-  pitchers.value = [...current.pitchers]
-  batters.value = [...current.batters]
+  startingPitcher.value = current.startingPitcher ? { ...current.startingPitcher } : null
   scoreboard.value = structuredClone(toRaw(current.scoreboard))
 }
 
@@ -233,110 +232,81 @@ function statusButtonClass(status: GameStatus): string {
   return 'border-brand-600 bg-brand-600 text-white'
 }
 
-function addPitcher() {
-  pitchers.value = [
-    ...pitchers.value,
-    { playerId: '', name: '', number: '', role: 'starter', note: '' },
-  ]
-}
-
-function updatePitcher(index: number, patch: Partial<PitcherEntry>) {
-  const next = [...pitchers.value]
-  const entry = next[index]
-  if (!entry) return
-  next[index] = { ...entry, ...patch }
-  pitchers.value = next
-}
-
-function onPitcherPlayerChange(index: number, playerId: string) {
-  const player = roster.value.find((item) => item.id === playerId)
-  updatePitcher(
-    index,
-    player ? { playerId: player.id, name: player.name, number: player.number } : { playerId: '' },
-  )
-}
-
-/*
- * ── 打擊紀錄 ──────────────────────────────────────────────────
- *
- * 和投手紀錄同一個形狀（少一個 `role`），所以這三個函式也是同一套。
- * 刻意不把兩者抽成一個泛型的 helper：省下的是十幾行，換來的是每次讀這段
- * 都要先在腦中把泛型展開，而兩邊日後很可能會各自長出不一樣的欄位。
- */
-function addBatter() {
-  batters.value = [...batters.value, { playerId: '', name: '', number: '', note: '' }]
-}
-
-function updateBatter(index: number, patch: Partial<BatterEntry>) {
-  const next = [...batters.value]
-  const entry = next[index]
-  if (!entry) return
-  next[index] = { ...entry, ...patch }
-  batters.value = next
-}
-
-function onBatterPlayerChange(index: number, playerId: string) {
-  const player = roster.value.find((item) => item.id === playerId)
-  updateBatter(
-    index,
-    player ? { playerId: player.id, name: player.name, number: player.number } : { playerId: '' },
-  )
-}
-
 /**
- * 「從打線帶入」—— 一次把打線上的人全部加進來，省掉九次下拉選單。
+ * 先發投手，做成「打線」分頁上的一個欄位。
  *
- * 只補**還沒在名單上**的人，已經填好備註的那幾筆不會被蓋掉 ——
- * 這顆按鈕很可能在填到一半時被按第二次（中途換了代打再按一次）。
- * 比對以 `playerId` 為主、姓名為輔，和 `deriveBench()` 同一套規則
- * （打線允許沒有 `playerId`）。
- */
-function fillBattersFromLineup() {
-  const existing = new Set(batters.value.map((batter) => batter.playerId || batter.name))
-  const added = lineup.value
-    .filter((entry) => entry.name && !existing.has(entry.playerId || entry.name))
-    .map((entry) => ({
-      playerId: entry.playerId,
-      name: entry.name,
-      number: entry.number,
-      note: '',
-    }))
-  batters.value = [...batters.value, ...added]
-}
-
-/**
- * 先發投手，做成「先發陣容」分頁上的一個欄位。
- *
- * 它實際上編輯的就是 `pitchers` 裡 `role: 'starter'` 的那一筆 —— 和「賽事管理」
- * 分頁的投手紀錄是同一份資料，不是另外存一個會不同步的欄位。
- *
- * 為什麼要在這裡也放一個：先發投手是**賽前**就決定的事，會印在出賽名單圖卡上，
- * 而投手紀錄整段是為了賽後登錄而設計的。要為了填一個賽前欄位跑去「賽事管理」
- * 分頁，這件事本身就會讓人不填 —— 然後圖卡上永遠少一項。
+ * 先發投手是**賽前**就決定的事：會印在出賽名單圖卡上，DH 制下也要把他從
+ * 候補名單排除（見 `deriveBench()`）。中繼與終結是比賽中才出現的，記在
+ * 逐打席紀錄的投手欄上，不在這裡。
  */
 const startingPitcherId = computed<string>({
-  get: () => pitchers.value.find((pitcher) => pitcher.role === 'starter')?.playerId ?? '',
+  get: () => startingPitcher.value?.playerId ?? '',
   set: (playerId) => {
-    const others = pitchers.value.filter((pitcher) => pitcher.role !== 'starter')
-    if (!playerId) {
-      pitchers.value = others
-      return
-    }
     const player = roster.value.find((item) => item.id === playerId)
-    if (!player) return
-    const existing = pitchers.value.find((pitcher) => pitcher.role === 'starter')
-    pitchers.value = [
-      {
-        ...(existing ?? { note: '' }),
-        playerId: player.id,
-        name: player.name,
-        number: player.number,
-        role: 'starter' as const,
-      },
-      ...others,
-    ]
+    startingPitcher.value = player
+      ? { playerId: player.id, name: player.name, number: player.number }
+      : null
   },
 })
+
+/*
+ * ── 逐局逐打席 ────────────────────────────────────────────────
+ *
+ * 和 `clips` 一樣**不放進自動儲存的 `formState`**：`plays` 刻意不在
+ * `gameInputSchema` 裡（理由見 `gameSchema`），它走自己的端點，而且寫入
+ * 的單位是一個半局。
+ *
+ * ⚠️ 計分板要跟著更新。有打席的半局，那一格的得分是推導出來的
+ * （`applyPlayDerivedScores()`）—— 伺服器已經算好回傳了，這裡直接灌進
+ * `scoreboard`，不要自己再算一次（算兩次就會有兩個答案）。
+ */
+const playLog = usePlayLog(() => gameId.value)
+
+watch(
+  game,
+  () => {
+    playLog.setPlays([...(game.value?.plays ?? [])])
+    void playLog.refreshPending()
+  },
+  { immediate: true },
+)
+
+function onPlaysSaved() {
+  const board = playLog.scoreboard.value
+  if (!board) return
+  scoreboard.value = structuredClone(toRaw(board))
+  // 計分板是自動儲存 `formState` 的一部分，而這一次的變更是伺服器算出來的
+  // ——不重新取基準的話，它會被當成使用者的變更再 PATCH 一次回去
+  autosave.markAsSaved()
+}
+
+watch(playLog.scoreboard, onPlaysSaved)
+
+/**
+ * H／E 由逐打席推導時的值（沒有推導的欄位是 `undefined`）。
+ *
+ * 用本機的計分板與打席現算，而不是等伺服器回來：手填一格逐局得分就可能讓
+ * 某一隊不再「全部由打席推導」，那一格 H 要當下變回可以輸入。存檔時伺服器
+ * 會用同一支 `applyPlayDerivedScores()` 再算一次，所以兩邊不會對不上。
+ */
+const derivedTotals = computed(() => {
+  const game = { scoreboard: board.value, plays: playLog.plays.value, homeAway: basic.homeAway }
+  const fields = playDerivedTotalFields(game)
+  const applied = applyPlayDerivedScores(game)
+  const pick = (side: 'our' | 'opponent') => ({
+    h: fields[side].h ? applied.totals[side].h : undefined,
+    e: fields[side].e ? applied.totals[side].e : undefined,
+  })
+  return { our: pick('our'), opponent: pick('opponent') }
+})
+
+/** 哪幾格的得分是由逐打席推導的（後台要標成唯讀，並說出原因）。 */
+const derivedCells = computed(() =>
+  playLog.plays.value.map((play) => ({
+    inning: play.inning,
+    side: battingSide(play.half, basic.homeAway),
+  })),
+)
 
 /*
  * ── 賽事錄影 ──────────────────────────────────────────────────
@@ -582,7 +552,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             label="先發投手"
             placeholder="— 尚未決定 —"
             :options="pitcherOptions.filter((option) => option.value)"
-            hint="會顯示在前台的出賽名單圖卡上。和「賽事管理」分頁的投手紀錄是同一筆。"
+            hint="會顯示在前台的出賽名單圖卡上。中繼與終結投手在「逐局紀錄」裡登錄。"
           />
         </div>
 
@@ -590,7 +560,26 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           v-model="lineup"
           :players="roster"
           :attendance="attendance"
-          :pitchers="pitchers"
+          :starting-pitcher="startingPitcher"
+          :plays="playLog.plays.value"
+        />
+      </section>
+
+      <!-- ══ 逐局紀錄 ══════════════════════════════════════════ -->
+      <section v-show="activeTab === 'innings'" role="tabpanel">
+        <AdminInningEditor
+          :plays="playLog.plays.value"
+          :home-away="basic.homeAway"
+          :lineup="lineup"
+          :starting-pitcher="startingPitcher"
+          :players="roster"
+          :clips="clips"
+          :scoreboard="board"
+          :our-name="teamName"
+          :opponent-name="game.opponent"
+          :pending-count="playLog.pending.value.length"
+          @save="playLog.saveHalf"
+          @retry="playLog.syncPending"
         />
       </section>
 
@@ -673,6 +662,8 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             :opponent-name="game.opponent"
             :home-away="basic.homeAway"
             :team-names="teamNames"
+            :derived-cells="derivedCells"
+            :derived-totals="derivedTotals"
           />
         </div>
 
@@ -815,136 +806,11 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           <p v-if="clipsMessage" class="text-fluid-sm">{{ clipsMessage }}</p>
         </div>
 
-        <hr class="border-border" />
-
-        <div class="space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-fluid-lg font-bold">投手紀錄</h2>
-            <UiBaseButton variant="secondary" size="sm" @click="addPitcher"
-              >＋ 新增投手</UiBaseButton
-            >
-          </div>
-
-          <ul v-if="pitchers.length" class="space-y-2">
-            <li
-              v-for="(pitcher, index) in pitchers"
-              :key="index"
-              class="grid items-end gap-3 rounded-xl border border-border bg-surface p-3 sm:grid-cols-[1fr_8rem_1fr_auto]"
-            >
-              <div class="space-y-2">
-                <UiBaseSelect
-                  label="投手"
-                  :model-value="pitcher.playerId"
-                  :options="pitcherOptions"
-                  @update:model-value="onPitcherPlayerChange(index, $event)"
-                />
-                <UiBaseInput
-                  v-if="!pitcher.playerId"
-                  label="姓名"
-                  :model-value="pitcher.name"
-                  @update:model-value="updatePitcher(index, { name: $event })"
-                />
-              </div>
-
-              <UiBaseSelect
-                label="角色"
-                :model-value="pitcher.role"
-                :options="
-                  [
-                    { value: 'starter', label: '先發' },
-                    { value: 'relief', label: '中繼' },
-                    { value: 'closer', label: '終結' },
-                  ] as Array<{ value: PitcherEntry['role']; label: string }>
-                "
-                @update:model-value="updatePitcher(index, { role: $event })"
-              />
-
-              <UiBaseInput
-                label="備註"
-                :model-value="pitcher.note"
-                placeholder="例如：6 局 2 失分"
-                @update:model-value="updatePitcher(index, { note: $event })"
-              />
-
-              <UiBaseButton
-                variant="ghost"
-                size="sm"
-                aria-label="移除投手"
-                @click="pitchers = pitchers.filter((_, i) => i !== index)"
-              >
-                ✕
-              </UiBaseButton>
-            </li>
-          </ul>
-        </div>
-
-        <hr class="border-border" />
-
-        <!-- ── 打擊紀錄 ──────────────────────────────────────── -->
-        <div class="space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 class="text-fluid-lg font-bold">打擊紀錄</h2>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <!--
-                一場要登錄九到十二個人，逐一從下拉選單挑出來太慢 ——
-                打線上本來就有名單，直接帶進來只剩備註要填。
-              -->
-              <UiBaseButton
-                v-if="lineup.length"
-                variant="ghost"
-                size="sm"
-                @click="fillBattersFromLineup"
-              >
-                從打線帶入
-              </UiBaseButton>
-              <UiBaseButton variant="secondary" size="sm" @click="addBatter">
-                ＋ 新增打者
-              </UiBaseButton>
-            </div>
-          </div>
-
-          <ul v-if="batters.length" class="space-y-2">
-            <li
-              v-for="(batter, index) in batters"
-              :key="index"
-              class="grid items-end gap-3 rounded-xl border border-border bg-surface p-3 sm:grid-cols-[1fr_1.5fr_auto]"
-            >
-              <div class="space-y-2">
-                <UiBaseSelect
-                  label="打者"
-                  :model-value="batter.playerId"
-                  :options="pitcherOptions"
-                  @update:model-value="onBatterPlayerChange(index, $event)"
-                />
-                <!-- 沒在名冊上的人（臨時支援）也要登得進來，和投手紀錄同一個做法 -->
-                <UiBaseInput
-                  v-if="!batter.playerId"
-                  label="姓名"
-                  :model-value="batter.name"
-                  @update:model-value="updateBatter(index, { name: $event })"
-                />
-              </div>
-
-              <UiBaseInput
-                label="備註"
-                :model-value="batter.note"
-                placeholder="例如：4 打數 2 安打 1 打點"
-                @update:model-value="updateBatter(index, { note: $event })"
-              />
-
-              <UiBaseButton
-                variant="ghost"
-                size="sm"
-                aria-label="移除打者"
-                @click="batters = batters.filter((_, i) => i !== index)"
-              >
-                ✕
-              </UiBaseButton>
-            </li>
-          </ul>
-        </div>
+        <!--
+          投手紀錄與打擊紀錄（純文字備註）已經拿掉：誰投了幾局、誰打了什麼，
+          現在由「逐局紀錄」的逐打席推導（前台的成績表）。留著純文字就是
+          第二個來源，兩邊寫的不一樣時前台沒辦法知道該信哪一個。
+        -->
       </section>
     </template>
   </div>

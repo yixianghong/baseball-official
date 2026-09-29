@@ -3,6 +3,17 @@ import type { Game } from '../../shared/schemas/game'
 import type { Announcement } from '../../shared/schemas/announcement'
 import type { SiteSettings } from '../../shared/schemas/settings'
 import type { PushSubscriptionRecord } from '../../shared/schemas/push'
+import type { GameHalf } from '../../shared/schemas/half-inning'
+import type { Play, PlayResult } from '../../shared/schemas/play'
+import {
+  defaultBatted,
+  FIELDER_SPOTS,
+  nearestFielder,
+  needsBattedType,
+  needsFielder,
+  NO_LANDING_RESULTS,
+  roundPoint,
+} from '../../shared/schemas/field'
 import { DEFAULT_SITE_SETTINGS } from '../../shared/schemas/settings'
 import { toDateKey } from '../../shared/schemas/game'
 
@@ -119,13 +130,116 @@ function createSeedStore(): MemoryStore {
     })
 
   /**
-   * 打擊紀錄。備註是**純文字**，系統不解析也不加總（見 `batterEntrySchema`）。
+   * 逐打席的示範資料。
+   *
+   * 一列就是一個打席：`[第幾局, 上/下, 打者, 結果, 這個打席得幾分?]`。
+   * 打者寫我隊的球員 id（`'p4'`）或對手打者的背號（`'#11'`）—— 對手沒有名冊，
+   * 名單上本來就只有背號，這份示範資料照著真實情況長。
+   *
+   * 投手一律填我隊的那位，但**只會被記進我隊防守的半局**
+   * （`derivePitching()` 自己會擋），所以不必在這裡分情況。
    */
-  const battersFrom = (notes: Record<string, string>) =>
-    Object.entries(notes).map(([id, note]) => {
-      const p = players.find((item) => item.id === id)!
-      return { playerId: p.id, name: p.name, number: p.number, note }
+  /**
+   * 示範資料的落點。
+   *
+   * ⚠️ **這些位置是依結果類型輪流產生的，不是真的比賽**：滾地球輪流打向
+   * 內野手、飛球輪流打向外野手、安打輪流落在幾個空檔。目的只是讓落點圖
+   * 開箱就有東西可以看，並且每一種形狀（滾地／平飛／高飛、安打／出局）都有。
+   */
+  const demoLanding = (
+    result: PlayResult,
+    index: number,
+  ): Pick<Play, 'location' | 'fielder' | 'batted'> => {
+    if ((NO_LANDING_RESULTS as readonly string[]).includes(result)) {
+      return { location: null, fielder: null, batted: null }
+    }
+
+    const cycle = <T>(items: readonly T[]) => items[index % items.length]!
+    const jitter = ((index * 37) % 7) / 100 - 0.03
+
+    const near = (position: keyof typeof FIELDER_SPOTS) => ({
+      x: FIELDER_SPOTS[position].x + jitter,
+      y: FIELDER_SPOTS[position].y + jitter / 2,
     })
+
+    const byResult: Partial<Record<PlayResult, () => { x: number; y: number }>> = {
+      groundout: () => near(cycle(['SS', '2B', '3B', '1B', 'P'] as const)),
+      doublePlay: () => near(cycle(['SS', '2B'] as const)),
+      fieldersChoice: () => near('SS'),
+      sacrificeBunt: () => ({ x: 0.05, y: 0.08 }),
+      popout: () => near(cycle(['2B', 'SS'] as const)),
+      flyout: () => near(cycle(['CF', 'LF', 'RF'] as const)),
+      lineout: () => near(cycle(['SS', 'LF', '2B'] as const)),
+      sacrificeFly: () => near('RF'),
+      foulout: () =>
+        cycle([
+          { x: 0.42, y: 0.12 },
+          { x: -0.4, y: 0.15 },
+        ]),
+      reachedOnError: () => near('3B'),
+      single: () =>
+        cycle([
+          { x: -0.2, y: 0.58 },
+          { x: 0.24, y: 0.56 },
+          { x: 0.02, y: 0.62 },
+          { x: -0.36, y: 0.5 },
+        ]),
+      double: () =>
+        cycle([
+          { x: -0.3, y: 0.9 },
+          { x: 0.33, y: 0.88 },
+        ]),
+      triple: () =>
+        cycle([
+          { x: 0.56, y: 0.7 },
+          { x: -0.5, y: 0.76 },
+        ]),
+      homerun: () =>
+        cycle([
+          { x: -0.4, y: 1.04 },
+          { x: 0.12, y: 1.07 },
+        ]),
+    }
+
+    const location = roundPoint((byResult[result] ?? (() => near('CF')))())
+    return {
+      location,
+      fielder: needsFielder(result) ? nearestFielder(location).position : null,
+      batted: needsBattedType(result) ? defaultBatted(location) : null,
+    }
+  }
+
+  const playsFrom = (
+    ourPitcherId: string,
+    /** 這一場的打線（球員 id 依棒次排）—— 用來替我隊的打席記上第幾棒。 */
+    lineupIds: string[],
+    spec: Array<
+      [number, GameHalf, string, PlayResult] | [number, GameHalf, string, PlayResult, number]
+    >,
+  ): Play[] => {
+    const pitcher = players.find((item) => item.id === ourPitcherId)!
+    return spec.map(([inning, half, who, result, runs = 0], index) => {
+      const player = who.startsWith('#') ? undefined : players.find((item) => item.id === who)
+      return {
+        inning,
+        half,
+        batter: player
+          ? { playerId: player.id, name: player.name, number: player.number }
+          : { playerId: '', name: '', number: who.slice(1) },
+        pitcher: { playerId: pitcher.id, name: pitcher.name, number: pitcher.number },
+        result,
+        runs,
+        // 示範資料裡的得分都是打點（沒有失誤、暴投推進回來的分數）
+        rbi: runs,
+        note: '',
+        transcript: '',
+        ...demoLanding(result, index),
+        bats: player ? (player.bats === 'S' ? (index % 2 ? 'L' : 'R') : player.bats) : null,
+        battingSlot:
+          player && lineupIds.includes(player.id) ? lineupIds.indexOf(player.id) + 1 : null,
+      }
+    })
+  }
 
   const attendanceFrom = (statuses: Record<string, Game['attendance'][number]['status']>) =>
     players
@@ -154,6 +268,7 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       remindersSent: [],
+      plays: [],
       clips: [],
       attendance: attendanceFrom({
         p1: 'yes',
@@ -168,8 +283,7 @@ function createSeedStore(): MemoryStore {
         p10: 'yes',
       }),
       lineup: lineupFrom(['p4', 'p5', 'p3', 'p6', 'p9', 'p8', 'p7', 'p2', 'p1']),
-      pitchers: [],
-      batters: [],
+      startingPitcher: null,
       scoreboard: {
         innings: [],
         totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },
@@ -192,11 +306,11 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       remindersSent: [],
+      plays: [],
       clips: [],
       attendance: attendanceFrom({ p1: 'yes', p2: 'yes', p4: 'maybe' }),
       lineup: [],
-      pitchers: [],
-      batters: [],
+      startingPitcher: null,
       scoreboard: {
         innings: [],
         totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },
@@ -219,11 +333,11 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       remindersSent: [],
+      plays: [],
       clips: [],
       attendance: [],
       lineup: [],
-      pitchers: [],
-      batters: [],
+      startingPitcher: null,
       scoreboard: {
         innings: [],
         totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },
@@ -246,11 +360,11 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       remindersSent: [],
+      plays: [],
       clips: [],
       attendance: [],
       lineup: [],
-      pitchers: [],
-      batters: [],
+      startingPitcher: null,
       scoreboard: {
         innings: [],
         totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },
@@ -279,23 +393,42 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       remindersSent: [],
+      /**
+       * 只登錄了前兩局 —— 用來呈現「**登錄不完整**」的樣子：那幾格的得分
+       * 由打席推導（後台會變成唯讀），其餘維持手填，而 box score 上
+       * **不會出現打擊率**（見 `playLogComplete()`）。
+       * 主場，所以上半局是對手打擊。
+       */
+      plays: playsFrom(
+        'p1',
+        ['p4', 'p5', 'p3', 'p6', 'p9', 'p8', 'p7', 'p2', 'p1'],
+        [
+          // 1 上（對手）1 分
+          [1, 'top', '#8', 'single'],
+          [1, 'top', '#12', 'single', 1],
+          [1, 'top', '#20', 'strikeout'],
+          [1, 'top', '#4', 'doublePlay'],
+          // 1 下（我隊）0 分
+          [1, 'bottom', 'p4', 'flyout'],
+          [1, 'bottom', 'p5', 'walk'],
+          [1, 'bottom', 'p3', 'strikeout'],
+          [1, 'bottom', 'p6', 'groundout'],
+          // 2 上（對手）0 分
+          [2, 'top', '#16', 'groundout'],
+          [2, 'top', '#8', 'flyout'],
+          [2, 'top', '#12', 'strikeout'],
+          // 2 下（我隊）2 分
+          [2, 'bottom', 'p9', 'double'],
+          [2, 'bottom', 'p8', 'single'],
+          [2, 'bottom', 'p7', 'triple', 2],
+          [2, 'bottom', 'p2', 'strikeout'],
+          [2, 'bottom', 'p1', 'flyout'],
+          [2, 'bottom', 'p4', 'groundout'],
+        ],
+      ),
       attendance: [],
       lineup: lineupFrom(['p4', 'p5', 'p3', 'p6', 'p9', 'p8', 'p7', 'p2', 'p1']),
-      pitchers: [
-        { playerId: 'p1', name: '陳冠宇', number: '1', role: 'starter', note: '6 局 2 失分' },
-        { playerId: 'p10', name: '鄭凱文', number: '24', role: 'closer', note: '2 局無失分' },
-      ],
-      batters: battersFrom({
-        p4: '4 打數 2 安打 1 打點',
-        p5: '4 打數 1 安打 2 打點',
-        p3: '3 打數 1 安打 1 得分',
-        p6: '4 打數無安打',
-        p9: '3 打數 2 安打 1 二壘打',
-        p8: '4 打數 1 安打',
-        p7: '3 打數無安打 1 四壞',
-        p2: '3 打數 1 安打 2 打點',
-        p1: '3 打數無安打',
-      }),
+      startingPitcher: { playerId: 'p1', name: '陳冠宇', number: '1' },
       scoreboard: {
         innings: [
           { inning: 1, our: 0, opponent: 1 },
@@ -327,11 +460,11 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       remindersSent: [],
+      plays: [],
       clips: [],
       attendance: [],
       lineup: lineupFrom(['p5', 'p4', 'p3', 'p6', 'p8', 'p9', 'p7', 'p2', 'p10']),
-      pitchers: [{ playerId: 'p10', name: '鄭凱文', number: '24', role: 'starter', note: '' }],
-      batters: [],
+      startingPitcher: { playerId: 'p10', name: '鄭凱文', number: '24' },
       scoreboard: {
         innings: [
           { inning: 1, our: 0, opponent: 0 },
@@ -362,11 +495,89 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       remindersSent: [],
+      /**
+       * 這一場**逐打席全部登錄完整**（每個半局都到三出局），所以前台的
+       * box score 會顯示打擊率 —— 這是示範資料裡唯一一場。g3 只登錄了
+       * 前兩局，用來呈現「登錄不完整」的樣子（那時候不顯示打擊率）。
+       */
+      plays: playsFrom(
+        'p1',
+        ['p4', 'p5', 'p3', 'p9', 'p6', 'p8', 'p7', 'p2', 'p1'],
+        [
+          // 1 上（對手）1 分
+          [1, 'top', '#3', 'single'],
+          [1, 'top', '#6', 'double', 1],
+          [1, 'top', '#11', 'strikeout'],
+          [1, 'top', '#14', 'groundout'],
+          [1, 'top', '#17', 'flyout'],
+          // 1 下（我隊）1 分
+          [1, 'bottom', 'p4', 'single'],
+          [1, 'bottom', 'p5', 'double', 1],
+          [1, 'bottom', 'p3', 'strikeout'],
+          [1, 'bottom', 'p9', 'groundout'],
+          [1, 'bottom', 'p6', 'flyout'],
+          // 2 上
+          [2, 'top', '#23', 'groundout'],
+          [2, 'top', '#33', 'strikeout'],
+          [2, 'top', '#3', 'flyout'],
+          // 2 下 —— 雙殺打一次吃掉兩個出局
+          [2, 'bottom', 'p8', 'walk'],
+          [2, 'bottom', 'p7', 'doublePlay'],
+          [2, 'bottom', 'p2', 'groundout'],
+          // 3 上（對手）1 分，高飛犧牲打不算打數
+          [3, 'top', '#6', 'single'],
+          [3, 'top', '#11', 'single'],
+          [3, 'top', '#14', 'sacrificeFly', 1],
+          [3, 'top', '#17', 'strikeout'],
+          [3, 'top', '#23', 'groundout'],
+          // 3 下（我隊）2 分
+          [3, 'bottom', 'p1', 'strikeout'],
+          [3, 'bottom', 'p4', 'walk'],
+          [3, 'bottom', 'p5', 'single'],
+          [3, 'bottom', 'p3', 'triple', 2],
+          [3, 'bottom', 'p9', 'flyout'],
+          [3, 'bottom', 'p6', 'groundout'],
+          // 4 上（對手）1 分
+          [4, 'top', '#33', 'homerun', 1],
+          [4, 'top', '#3', 'flyout'],
+          [4, 'top', '#6', 'strikeout'],
+          [4, 'top', '#11', 'groundout'],
+          // 4 下
+          [4, 'bottom', 'p8', 'flyout'],
+          [4, 'bottom', 'p7', 'strikeout'],
+          [4, 'bottom', 'p2', 'groundout'],
+          // 5 上（對手）1 分
+          [5, 'top', '#14', 'double'],
+          [5, 'top', '#17', 'single', 1],
+          [5, 'top', '#23', 'doublePlay'],
+          [5, 'top', '#33', 'flyout'],
+          // 5 下（我隊）1 分
+          [5, 'bottom', 'p1', 'groundout'],
+          [5, 'bottom', 'p4', 'homerun', 1],
+          [5, 'bottom', 'p5', 'strikeout'],
+          [5, 'bottom', 'p3', 'flyout'],
+          // 6 上
+          [6, 'top', '#3', 'groundout'],
+          [6, 'top', '#6', 'flyout'],
+          [6, 'top', '#11', 'strikeout'],
+          // 6 下 —— 野手選擇上壘，算打數但不算安打
+          [6, 'bottom', 'p9', 'single'],
+          [6, 'bottom', 'p6', 'fieldersChoice'],
+          [6, 'bottom', 'p8', 'doublePlay'],
+          // 7 上
+          [7, 'top', '#14', 'strikeout'],
+          [7, 'top', '#17', 'groundout'],
+          [7, 'top', '#23', 'lineout'],
+          // 7 下
+          [7, 'bottom', 'p7', 'flyout'],
+          [7, 'bottom', 'p2', 'strikeout'],
+          [7, 'bottom', 'p1', 'groundout'],
+        ],
+      ),
       clips: [],
       attendance: [],
       lineup: lineupFrom(['p4', 'p5', 'p3', 'p9', 'p6', 'p8', 'p7', 'p2', 'p1']),
-      pitchers: [{ playerId: 'p1', name: '陳冠宇', number: '1', role: 'starter', note: '' }],
-      batters: [],
+      startingPitcher: { playerId: 'p1', name: '陳冠宇', number: '1' },
       scoreboard: {
         innings: [
           { inning: 1, our: 1, opponent: 1 },
@@ -377,7 +588,8 @@ function createSeedStore(): MemoryStore {
           { inning: 6, our: 0, opponent: 0 },
           { inning: 7, our: 0, opponent: 0 },
         ],
-        totals: { our: { r: 4, h: 8, e: 2 }, opponent: { r: 4, h: 8, e: 2 } },
+        // 逐打席全部登錄完整，H／E 都由打席推導：這一場沒有失誤上壘，所以 E 是 0
+        totals: { our: { r: 4, h: 6, e: 0 }, opponent: { r: 4, h: 7, e: 0 } },
       },
       createdAt: NOW,
       updatedAt: NOW,

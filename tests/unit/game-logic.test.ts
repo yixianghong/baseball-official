@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { playSchema } from '../../shared/schemas/play'
 import {
-  batterEntrySchema,
+  migrateLegacyGame,
+  startingPitcherSchema,
   battingSide,
   deriveBench,
   deriveResult,
@@ -411,38 +413,55 @@ describe('gameClipSchema', () => {
 })
 
 /**
- * 打擊紀錄。
+ * 先發投手，以及舊文件的 `pitchers` 陣列。
  *
- * 這一組守的是**「備註是純文字」這件事沒有被偷偷改掉**：只要哪天有人
- * 想不開加上 `hits: z.number()`，`.strict()` 之外的欄位就會靜靜地被吃掉，
- * 而後台照樣顯示、資料庫照樣寫 —— 直到有人問「為什麼打擊率是空的」。
- * 理由寫在 `batterEntrySchema` 上。
+ * 投手紀錄與打擊紀錄（純文字備註）已經拿掉，由逐打席推導。先發投手留下來，
+ * 因為它是賽前的資訊（出賽名單圖卡、DH 制的候補名單）。**正式站上的舊文件
+ * 只有 `pitchers` 陣列** —— 不轉的話，所有舊比賽的出賽名單圖卡都會少掉先發投手。
  */
-describe('batterEntrySchema', () => {
-  it('只要姓名就成立，其餘欄位有預設值', () => {
-    const batter = batterEntrySchema.parse({ name: '陳育廷' })
-
-    expect(batter).toEqual({ playerId: '', name: '陳育廷', number: '', note: '' })
+describe('startingPitcherSchema／migrateLegacyGame', () => {
+  it('先發投手不再帶成績備註與角色（那些由逐打席推導）', () => {
+    expect(Object.keys(startingPitcherSchema.shape).sort()).toEqual(['name', 'number', 'playerId'])
   })
 
-  it('沒有姓名不成立 —— 一筆沒有人的打擊紀錄沒有意義', () => {
-    expect(() => batterEntrySchema.parse({ note: '4 打數 2 安打' })).toThrow()
+  it('從舊的 pitchers 陣列撈出先發投手', () => {
+    const migrated = migrateLegacyGame({
+      pitchers: [
+        { playerId: 'p10', name: '鄭凱文', number: '24', role: 'closer', note: '' },
+        { playerId: 'p1', name: '陳冠宇', number: '1', role: 'starter', note: '6 局 2 失分' },
+      ],
+    })
+    expect(migrated.startingPitcher).toEqual({ playerId: 'p1', name: '陳冠宇', number: '1' })
   })
 
-  it('備註原樣保留，不解析也不正規化', () => {
-    const note = '4 打數 2 安打 1 打點 2 得分'
-
-    expect(batterEntrySchema.parse({ name: '陳育廷', note }).note).toBe(note)
+  it('舊的 pitchers 裡沒有先發時是 null', () => {
+    const migrated = migrateLegacyGame({ pitchers: [{ name: '中繼', role: 'relief' }] })
+    expect(migrated.startingPitcher).toBeNull()
   })
 
-  it('備註有長度上限（避免有人把整段賽記貼進來）', () => {
-    expect(() => batterEntrySchema.parse({ name: '陳育廷', note: 'x'.repeat(101) })).toThrow()
+  it('已經有 startingPitcher（包含刻意清空的 null）時不覆蓋', () => {
+    // 使用者清空的先發投手不能被舊資料偷偷補回來
+    const legacy = [{ playerId: 'p1', name: '陳冠宇', role: 'starter' }]
+    expect(
+      migrateLegacyGame({ startingPitcher: null, pitchers: legacy }).startingPitcher,
+    ).toBeNull()
+    expect(
+      migrateLegacyGame({ startingPitcher: { name: '新的' }, pitchers: legacy }).startingPitcher,
+    ).toEqual({ name: '新的' })
   })
 
-  it('名冊上沒有的人也登得進來（臨時支援沒有 playerId）', () => {
-    const batter = batterEntrySchema.parse({ name: '臨時支援', note: '1 打數 1 安打' })
-
-    expect(batter.playerId).toBe('')
+  it('轉完之後通過 schema 驗證，舊的 pitchers／batters 被丟掉', () => {
+    const parsed = gameInputSchema.parse(
+      migrateLegacyGame({
+        date: '2026-03-05',
+        opponent: '藍鷹',
+        pitchers: [{ playerId: 'p1', name: '陳冠宇', number: '1', role: 'starter', note: '' }],
+        batters: [{ name: '王小明', note: '4 打數 2 安打' }],
+      }),
+    ) as Record<string, unknown>
+    expect(parsed.startingPitcher).toEqual({ playerId: 'p1', name: '陳冠宇', number: '1' })
+    expect(parsed.pitchers).toBeUndefined()
+    expect(parsed.batters).toBeUndefined()
   })
 })
 
@@ -454,8 +473,7 @@ describe('gamePatchSchema', () => {
     for (const field of [
       'lineup',
       'attendance',
-      'pitchers',
-      'batters',
+      'startingPitcher',
       'scoreboard',
       'venue',
       'time',
@@ -498,6 +516,29 @@ describe('gameInputSchema', () => {
     const parsed = gameInputSchema.parse({ ...base, result: 'win' }) as Record<string, unknown>
 
     expect(parsed.result).toBeUndefined()
+  })
+
+  /**
+   * ⚠️ 系統自己寫的狀態一律不能出現在 input schema 裡。
+   *
+   * 後台的編輯表單是**自動儲存**的，而且整份 `formState` 送出（PATCH）。
+   * 這幾個欄位只要被 input schema 收下，光是改一個場地名稱就會把它們
+   * 一起送上來 —— 而表單裡根本沒有它們，送上去的值是空的：
+   *
+   * - `clips`：整場的影片紀錄清空
+   * - `plays`：整場兩百筆逐打席紀錄清空（連帶讓計分板的逐局得分歸零）
+   * - `remindersSent`：記號被清掉，所有人再收一次同樣的推播
+   *
+   * 三個欄位各自有專屬的端點與 repository 函式（單欄位 merge）。
+   */
+  it.each(['clips', 'plays', 'remindersSent'])('不接受系統自己寫的 %s 欄位', (field) => {
+    expect(Object.keys(gameInputSchema.shape)).not.toContain(field)
+
+    const parsed = gameInputSchema.parse({ ...base, [field]: [{ anything: true }] }) as Record<
+      string,
+      unknown
+    >
+    expect(parsed[field]).toBeUndefined()
   })
 
   it('拒絕格式錯誤的日期', () => {
@@ -617,19 +658,25 @@ describe('deriveBench', () => {
     number: '',
     position: 'P' as const,
   })
-  const pitch = (playerId: string, name: string, role = 'starter' as const) => ({
-    playerId,
-    name,
-    number: '',
-    role,
-    note: '',
-  })
+  const starter = (playerId: string, name: string) => ({ playerId, name, number: '' })
+  /** 我隊防守的一個打席，投手是 `pitcher`（用來表示中繼、終結上場過）。 */
+  const pitched = (playerId: string, name: string) =>
+    playSchema.parse({
+      inning: 5,
+      half: 'top',
+      result: 'groundout',
+      batter: { number: '11' },
+      pitcher: { playerId, name },
+    })
+  /** 我隊進攻的一個打席，打者是 `batter`（用來表示代打上場過）。 */
+  const batted = (playerId: string, name: string) =>
+    playSchema.parse({ inning: 5, half: 'bottom', result: 'single', batter: { playerId, name } })
 
   it('確定出席但沒有上場的人才是候補', () => {
     const bench = deriveBench({
       attendance: [attend('p1', '王小明'), attend('p2', '陳大文'), attend('p3', '林志豪')],
       lineup: [bat(1, 'p1', '王小明')],
-      pitchers: [],
+      startingPitcher: null,
     })
 
     expect(bench.map((entry) => entry.name)).toEqual(['陳大文', '林志豪'])
@@ -646,30 +693,54 @@ describe('deriveBench', () => {
     const bench = deriveBench({
       attendance: [attend('p1', '張宏宇', 'yes', '28'), attend('p2', '陳大文')],
       lineup: [bat(1, 'p2', '陳大文')],
-      pitchers: [pitch('p1', '張宏宇')],
+      startingPitcher: starter('p1', '張宏宇'),
     })
 
     expect(bench).toEqual([])
   })
 
-  it('中繼與終結投手也不是候補（他們上場投球了）', () => {
+  it('中繼與終結投手也不是候補（他們在打席上投過球了）', () => {
     const bench = deriveBench({
       attendance: [attend('p1', '中繼'), attend('p2', '終結'), attend('p3', '真的沒上場')],
       lineup: [],
-      pitchers: [pitch('p1', '中繼', 'relief'), pitch('p2', '終結', 'closer')],
+      startingPitcher: null,
+      plays: [pitched('p1', '中繼'), pitched('p2', '終結')],
     })
 
     expect(bench.map((entry) => entry.name)).toEqual(['真的沒上場'])
   })
 
-  it('投手紀錄上只有姓名、沒有 playerId 時也要認得出來', () => {
+  it('先發投手只有姓名、沒有 playerId 時也要認得出來', () => {
     const bench = deriveBench({
       attendance: [attend('p1', '張宏宇'), attend('p2', '陳大文')],
       lineup: [],
-      pitchers: [pitch('', '張宏宇')],
+      startingPitcher: starter('', '張宏宇'),
     })
 
     expect(bench.map((entry) => entry.name)).toEqual(['陳大文'])
+  })
+
+  it('代打上場過的人不是候補', () => {
+    // 代打只記在打席上（賽前的打線不會改），所以要看打席才知道他上場了
+    const bench = deriveBench({
+      attendance: [attend('p9', '代打王'), attend('p3', '真的沒上場')],
+      lineup: [],
+      startingPitcher: null,
+      plays: [batted('p9', '代打王')],
+    })
+
+    expect(bench.map((entry) => entry.name)).toEqual(['真的沒上場'])
+  })
+
+  it('對手的打者（沒有姓名、只有背號）不會誤排除我隊的人', () => {
+    const bench = deriveBench({
+      attendance: [attend('p3', '王小明', 'yes', '11')],
+      lineup: [],
+      startingPitcher: null,
+      plays: [pitched('p1', '先發')],
+    })
+
+    expect(bench.map((entry) => entry.name)).toEqual(['王小明'])
   })
 
   it('沒有確定出席的人不算候補（他們根本不會到）', () => {
@@ -681,7 +752,7 @@ describe('deriveBench', () => {
         attend('p4', '會到', 'yes'),
       ],
       lineup: [],
-      pitchers: [],
+      startingPitcher: null,
     })
 
     expect(bench.map((entry) => entry.name)).toEqual(['會到'])
@@ -695,7 +766,7 @@ describe('deriveBench', () => {
     const bench = deriveBench({
       attendance: [attend('p1', '王小明'), attend('p2', '陳大文')],
       lineup: [bat(1, '', '王小明')],
-      pitchers: [],
+      startingPitcher: null,
     })
 
     expect(bench.map((entry) => entry.name)).toEqual(['陳大文'])
@@ -705,7 +776,7 @@ describe('deriveBench', () => {
     const bench = deriveBench({
       attendance: [attend('', ' 王小明 ')],
       lineup: [bat(1, '', '王小明')],
-      pitchers: [],
+      startingPitcher: null,
     })
 
     expect(bench).toEqual([])
@@ -715,23 +786,23 @@ describe('deriveBench', () => {
     const bench = deriveBench({
       attendance: [attend('p1', '王小明'), attend('p2', '陳大文')],
       lineup: [],
-      pitchers: [],
+      startingPitcher: null,
     })
 
     expect(bench).toHaveLength(2)
   })
 
   it('沒有出席資料就沒有候補', () => {
-    expect(deriveBench({ attendance: [], lineup: [bat(1, 'p1', '王小明')], pitchers: [] })).toEqual(
-      [],
-    )
+    expect(
+      deriveBench({ attendance: [], lineup: [bat(1, 'p1', '王小明')], startingPitcher: null }),
+    ).toEqual([])
   })
 
   it('保留背號與備註，前台要顯示', () => {
     const bench = deriveBench({
       attendance: [attend('p9', '王小明', 'yes', '99')],
       lineup: [],
-      pitchers: [],
+      startingPitcher: null,
     })
 
     expect(bench[0]).toMatchObject({ number: '99', name: '王小明' })

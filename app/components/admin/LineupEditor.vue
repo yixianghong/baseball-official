@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AttendanceEntry, LineupEntry, PitcherEntry } from '#shared/schemas/game'
+import type { AttendanceEntry, Game, LineupEntry, StartingPitcher } from '#shared/schemas/game'
 import { deriveBench } from '#shared/schemas/game'
 import { POSITIONS, POSITION_LABELS, type Player, type Position } from '#shared/schemas/player'
 
@@ -27,10 +27,12 @@ const props = defineProps<{
    */
   attendance?: AttendanceEntry[]
   /**
-   * 這場比賽的投手紀錄。只為了算候補 —— **DH 制下先發投手不在打線裡**，
+   * 先發投手。只為了算候補 —— **DH 制下先發投手不在打線裡**，
    * 少了這份資料他會被算成「還沒排到的人」（見 `deriveBench()`）。
    */
-  pitchers?: PitcherEntry[]
+  startingPitcher?: StartingPitcher | null
+  /** 已登錄的打席。代打與中繼投手上場過就不是候補。 */
+  plays?: Game['plays']
 }>()
 const model = defineModel<LineupEntry[]>({ required: true })
 
@@ -65,7 +67,8 @@ const bench = computed(() =>
   deriveBench({
     attendance: props.attendance ?? [],
     lineup: model.value,
-    pitchers: props.pitchers ?? [],
+    startingPitcher: props.startingPitcher ?? null,
+    plays: props.plays ?? [],
   }),
 )
 

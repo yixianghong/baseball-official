@@ -1,6 +1,7 @@
 import {
   gameInputSchema,
   gameSchema,
+  migrateLegacyGame,
   taipeiDateKey,
   withSummedRuns,
   type Game,
@@ -9,6 +10,9 @@ import {
   type GamePatch,
   type GameQueryOptions,
 } from '../../shared/schemas/game'
+import { applyPlayDerivedScores } from '../../shared/schemas/box-score'
+import { replaceHalfInning, type Play } from '../../shared/schemas/play'
+import type { GameHalf } from '../../shared/schemas/half-inning'
 import { getDb, isFirebaseConfigured } from '../utils/firebase'
 import { getMemoryStore, memoryId } from '../utils/memory-store'
 import { notFound, nowIso, parseEntity, parseEntityOrNull } from './_helpers'
@@ -65,7 +69,8 @@ export async function getGame(id: string): Promise<Game | null> {
   const db = await getDb()
   const doc = await db.collection(COLLECTION).doc(id).get()
   if (!doc.exists) return null
-  return parseEntity(gameSchema, { ...doc.data(), id: doc.id }, 'game')
+  // 舊格式（`pitchers` 陣列）先轉成現在的形狀再驗證，見 `migrateLegacyGame()`
+  return parseEntity(gameSchema, migrateLegacyGame({ ...doc.data(), id: doc.id }), 'game')
 }
 
 export async function createGame(input: GameInput): Promise<Game> {
@@ -73,14 +78,21 @@ export async function createGame(input: GameInput): Promise<Game> {
   const timestamps = { createdAt: nowIso(), updatedAt: nowIso() }
 
   if (!isFirebaseConfigured()) {
-    const game: Game = { ...data, ...timestamps, remindersSent: [], clips: [], id: memoryId('g') }
+    const game: Game = {
+      ...data,
+      ...timestamps,
+      remindersSent: [],
+      clips: [],
+      plays: [],
+      id: memoryId('g'),
+    }
     getMemoryStore().games.set(game.id, game)
     return game
   }
 
   const db = await getDb()
   const ref = await db.collection(COLLECTION).add({ ...data, ...timestamps })
-  return { ...data, ...timestamps, remindersSent: [], clips: [], id: ref.id }
+  return { ...data, ...timestamps, remindersSent: [], clips: [], plays: [], id: ref.id }
 }
 
 export async function updateGame(id: string, patch: GamePatch): Promise<Game> {
@@ -166,6 +178,50 @@ export async function setClipPrivacy(
   return clips
 }
 
+/**
+ * 換掉一個半局的逐打席紀錄（空陣列＝清空那個半局）。
+ *
+ * ## 為什麼粒度是「一個半局」而不是「一筆打席」
+ * 三個理由各自都足夠：
+ *
+ * 1. 一個半局就是自然的編輯單位 —— 打席會插入、刪除、重排，逐筆同步順序
+ *    很麻煩，而順序在這裡是資料的一部分。
+ * 2. **冪等**，所以離線重送天然安全。球場的行動網路上，失敗是常態
+ *    （這條規則整個專案都適用，見 `docs/game-recording-plan.md`）。
+ * 3. 和 `addGameClip()` 以 `(inning, half)` 為鍵覆蓋是**同一個身分概念** ——
+ *    影片與打席講的是同一個半局，兩者可以直接對齊。
+ *
+ * ## 為什麼不走 `updateGame()`
+ * 和 `addGameClip()`、`markReminderSent()` 相同：只動這一個欄位，不會把
+ * 管理者同時在別的分頁編輯的內容蓋掉。逐局紀錄頁和編輯頁很可能同時開著。
+ *
+ * ⚠️ 計分板要跟著寫回去。逐局得分是由打席推導的（`applyPlayDerivedScores()`），
+ * 只寫 `plays` 的話，資料庫裡的計分板會停在改動之前的數字 —— 而前台的
+ * 比數、勝敗、戰績全部讀它。
+ */
+export async function saveHalfInningPlays(
+  id: string,
+  inning: number,
+  half: GameHalf,
+  plays: Play[],
+): Promise<Pick<Game, 'plays' | 'scoreboard'>> {
+  const existing = await getGame(id)
+  if (!existing) throw notFound('比賽')
+
+  const next = replaceHalfInning(existing.plays, inning, half, plays)
+  const { scoreboard } = withDerivedRuns({ ...existing, plays: next })
+  const payload = { plays: next, scoreboard }
+
+  if (!isFirebaseConfigured()) {
+    getMemoryStore().games.set(id, { ...existing, ...payload })
+    return payload
+  }
+
+  const db = await getDb()
+  await db.collection(COLLECTION).doc(id).set(payload, { merge: true })
+  return payload
+}
+
 async function saveClips(id: string, existing: Game, clips: GameClip[]): Promise<void> {
   if (!isFirebaseConfigured()) {
     getMemoryStore().games.set(id, { ...existing, clips })
@@ -203,14 +259,28 @@ export async function createGames(inputs: GameInput[]): Promise<Game[]> {
 }
 
 /**
- * R（總得分）一律等於逐局加總。
+ * 計分板的推導鏈，一條單向的路：
+ *
+ * ```
+ * 逐打席 → applyPlayDerivedScores() → 逐局得分 → withSummedRuns() → R
+ * ```
  *
  * 放在 repository 而不是端點或表單：不論從哪個入口寫入（後台表單、AI 辨識
- * 計分板照片、批次匯入），存進去的資料都保證一致。前台的比數、勝敗、
- * 戰績全部讀 R，它一旦和逐局對不上，錯的是整個網站而不只是那張表格。
+ * 計分板照片、批次匯入、逐局紀錄頁），存進去的資料都保證一致。前台的比數、
+ * 勝敗、戰績全部讀 R，它一旦和逐局對不上，錯的是整個網站而不只是那張表格。
+ *
+ * ⚠️ **順序不能反。** 先套逐打席、再加總 R —— 反過來的話，R 會是套用逐打席
+ * **之前**那份逐局得分的總和，而畫面上那兩個數字會安靜地對不起來。
  */
-function withDerivedRuns<T extends { scoreboard: Game['scoreboard'] }>(game: T): T {
-  return { ...game, scoreboard: withSummedRuns(game.scoreboard) }
+function withDerivedRuns<
+  T extends { scoreboard: Game['scoreboard']; homeAway: Game['homeAway']; plays?: Game['plays'] },
+>(game: T): T {
+  const scoreboard = applyPlayDerivedScores({
+    scoreboard: game.scoreboard,
+    homeAway: game.homeAway,
+    plays: game.plays ?? [],
+  })
+  return { ...game, scoreboard: withSummedRuns(scoreboard) }
 }
 
 async function readAll(): Promise<Game[]> {
@@ -221,6 +291,8 @@ async function readAll(): Promise<Game[]> {
   const db = await getDb()
   const snapshot = await db.collection(COLLECTION).get()
   return snapshot.docs
-    .map((doc) => parseEntityOrNull(gameSchema, { ...doc.data(), id: doc.id }, 'game'))
+    .map((doc) =>
+      parseEntityOrNull(gameSchema, migrateLegacyGame({ ...doc.data(), id: doc.id }), 'game'),
+    )
     .filter((game): game is Game => game !== null)
 }

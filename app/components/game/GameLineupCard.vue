@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AttendanceEntry, LineupEntry, PitcherEntry } from '#shared/schemas/game'
+import type { AttendanceEntry, LineupEntry, StartingPitcher } from '#shared/schemas/game'
 import { POSITION_LABELS } from '#shared/schemas/player'
 import { NuxtLink } from '#components'
 import { formatGameStamp } from '~/utils/format'
@@ -39,14 +39,14 @@ import { formatGameStamp } from '~/utils/format'
  * 換句話說**不能再把 `aria-hidden` 加回來**。
  *
  * ## 這張卡上不放賽後的成績
- * 先發投手只顯示名字與背號，**不顯示投手紀錄的 `note`**（「6 局 2 失分」）。
- * 打擊紀錄同理，完全不出現在這裡。
+ * 先發投手只顯示名字與背號。以前的投手紀錄帶一句 `note`（「6 局 2 失分」），
+ * 曾經印在這張卡上，後來拿掉了；現在 `startingPitcher` 連那個欄位都沒有。
  *
  * 這是一張**賽前**的名單：排出來是為了讓大家知道今天誰上場、幾點在哪裡打，
  * 而且它會在賽前就被截圖丟進群組。賽後才寫得出來的成績混進來之後，
  * 同一張卡在不同時間點長得不一樣 —— 看到舊截圖的人會以為名單改過。
  *
- * 成績要看就去單場比賽頁的「本場紀錄」，那裡投打分開列，而且不必截圖。
+ * 成績要看就去單場比賽頁的「成績表」（由逐打席推導），而且不必截圖。
  *
  * ## 字體
  * 棒次、背號、守位縮寫的窄黑體來自**全站的預設字體**（`main.css` 的 body
@@ -67,9 +67,9 @@ const props = withDefaults(
     time: string
     /** 比賽地點。截圖流出去之後，「在哪裡打」和「幾點打」一樣重要。 */
     venue?: string
-    pitchers?: PitcherEntry[]
+    startingPitcher?: StartingPitcher | null
   }>(),
-  { bench: () => [], teamLogoUrl: '', opponentLogoUrl: '', venue: '', pitchers: () => [] },
+  { bench: () => [], teamLogoUrl: '', opponentLogoUrl: '', venue: '', startingPitcher: null },
 )
 
 /**
@@ -80,11 +80,10 @@ const props = withDefaults(
  * 剛好在最常見的情況下消失了。打序裡的守位雖然會標 `P`，那是「第幾棒守投手」，
  * 和「今天誰先發」不是同一件事，而且要一列一列找。
  *
- * ⚠️ **只取名字與背號，`note` 不放上來** —— 見下面那一段。
+ * ⚠️ **只有名字與背號**。以前的投手紀錄還帶一句賽後成績（「6 局 2 失分」），
+ * 那是賽後才有的東西，而這張卡在賽前就被截圖丟進群組了 —— 見下面那一段。
  */
-const startingPitcher = computed(
-  () => props.pitchers.find((pitcher) => pitcher.role === 'starter') ?? null,
-)
+const startingPitcher = computed(() => props.startingPitcher)
 
 /** `#7 張志豪`；沒有背號就只有名字，不留一個孤零零的井字號。 */
 function displayName(person: { number?: string; name: string }): string {
@@ -232,7 +231,7 @@ function onShare() {
                 class="flex min-w-0 flex-col items-center justify-center rounded-lg border-l-4 border-l-accent-500 bg-white/95 px-3 py-2 text-center text-ink-deep transition hover:bg-white"
               >
                 <!--
-                  ⚠️ 只有名字，**不顯示投手紀錄的 `note`**（「6 局 2 失分」那種）。
+                  ⚠️ 只有名字，不放任何賽後的成績。
                   理由見 `<script>` 開頭的「這張卡上不放賽後的成績」。
                 -->
                 <span class="min-w-0 max-w-full truncate text-fluid-lg font-bold">

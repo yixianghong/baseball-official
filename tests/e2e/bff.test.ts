@@ -307,6 +307,8 @@ describe('後台權限：所有寫入都需要登入', () => {
     ['POST', '/api/admin/ai/parse-scoreboard'],
     ['POST', '/api/admin/ai/parse-roster'],
     ['POST', '/api/admin/ai/parse-attendance'],
+    ['POST', '/api/admin/ai/parse-plays'],
+    ['PUT', '/api/admin/games/g1/plays'],
   ])('未登入時 %s %s 回傳 401', async (method, path) => {
     const response = await fetch(path, {
       method,

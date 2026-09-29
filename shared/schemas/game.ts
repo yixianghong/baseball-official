@@ -2,6 +2,18 @@ import { z } from 'zod'
 import { patchSchemaOf } from './common'
 import { citySchema } from './weather'
 import { positionSchema } from './player'
+import { gameHalfSchema, homeAwaySchema } from './half-inning'
+import { MAX_PLAYS_PER_GAME, playSchema } from './play'
+
+/**
+ * 半局的座標與推導（`battingSide()`、`scoreboardSides()`、`HALF_LABELS`…）
+ * 住在 `half-inning.ts`，因為 `play.ts` 也要用而 `game.ts` 又要用 `play.ts`
+ * —— 留在這個檔案裡就是一個循環 import。
+ *
+ * 這一行讓它們**照樣從 `#shared/schemas/game` 匯入得到**，全站既有的
+ * import 路徑一個都不用改。搬家不該是一次跨越幾十個檔案的改動。
+ */
+export * from './half-inning'
 
 /**
  * 賽程／比賽的共用契約。
@@ -51,60 +63,6 @@ export const GAME_FLOW_STATUSES = ['scheduled', 'live', 'finished'] as const
 
 /** 岔出去的狀態：這一天沒有打成。 */
 export const GAME_EXCEPTION_STATUSES = ['postponed', 'canceled'] as const
-
-/** 主客場。 */
-export const homeAwaySchema = z.enum(['home', 'away'])
-export type HomeAway = z.infer<typeof homeAwaySchema>
-
-/**
- * 上半局／下半局。
- *
- * ## 為什麼這裡存 `top`／`bottom`，而計分板存 `our`／`opponent`
- * 看起來矛盾，但兩者記的是不同的事實：
- *
- * - 計分板記的是「**我隊**這局得幾分」——「幾分」天生屬於某一隊，
- *   上下半局是由 `homeAway` 推導出來的呈現方式（見 `scoreboardSchema`）。
- * - 錄影片段記的是「這段影片拍的是**第幾局的哪半局**」——那是拍攝當下的
- *   物理事實，和誰在打擊無關。
- *
- * 這個差別在 `homeAway` 填錯又改回來的時候才看得出來：存 `our`／`opponent`
- * 的計分板會跟著修正（正確），而存 `top`／`bottom` 的影片標籤不會跟著變
- * （也正確 —— 你當時拍的就是上半局）。反過來存的話兩邊都會錯。
- */
-export const gameHalfSchema = z.enum(['top', 'bottom'])
-export type GameHalf = z.infer<typeof gameHalfSchema>
-
-export const HALF_LABELS: Record<GameHalf, string> = {
-  top: '上',
-  bottom: '下',
-}
-
-/** 依比賽順序。要把一局展開成兩個半局時用它，不要各處自己寫陣列。 */
-export const GAME_HALVES = ['top', 'bottom'] as const
-
-/**
- * 這半局是哪一隊在打擊。**客隊先攻**，所以上半局打擊的是客隊。
- *
- * 前台與後台都要講得出「第 3 局上」是誰在攻 —— 在球場邊按錄影按鈕的人
- * 看的是場上，而不是記得自己是主場還是客場。
- */
-export function battingSide(half: GameHalf, homeAway: HomeAway): 'our' | 'opponent' {
-  return (half === 'top') === (homeAway === 'away') ? 'our' : 'opponent'
-}
-
-/**
- * 計分板由上而下的兩列。**上面那列是先攻**，也就是打上半局的那一方。
- *
- * 資料層存的是「我隊／對手」，不存上下半局（見這個檔案開頭的說明），
- * 所以要呈現成計分板的時候得自己排。**前台與後台一定要用同一支函式**：
- * 各寫各的結果是後台永遠「我隊在上」、前台依主客場換位，同一場比賽兩邊
- * 長得不一樣 —— 而計分板正是要拿來核對的東西，看起來像資料被改過。
- *
- * 直接由 `battingSide()` 推導，連「客隊先攻」這條規則也只寫在一個地方。
- */
-export function scoreboardSides(homeAway: HomeAway): ['our' | 'opponent', 'our' | 'opponent'] {
-  return [battingSide('top', homeAway), battingSide('bottom', homeAway)]
-}
 
 /** 出席狀態。`pending` 是「還沒回覆」，與明確回答「不出席」不同。 */
 export const attendanceStatusSchema = z.enum(['yes', 'no', 'maybe', 'pending'])
@@ -281,43 +239,58 @@ export function clipThumbnailUrl(videoId: string): string {
   return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
 }
 
-/** 投手紀錄。 */
-export const pitcherEntrySchema = z.object({
+/**
+ * 先發投手。
+ *
+ * ## 為什麼只剩先發，而不是一份投手紀錄
+ * 這裡原本是 `pitchers`（先發／中繼／終結 + 一句純文字成績）與 `batters`
+ * （每個打者一句「4 打數 2 安打」）兩份賽後紀錄。逐打席紀錄上線之後，
+ * 誰投了幾局、誰打了什麼都由打席推導（`box-score.ts`），那兩份純文字就成了
+ * **第二個來源** —— 兩邊寫的不一樣時，前台沒有辦法知道該信哪一個。
+ *
+ * 先發投手留下來，因為它是**賽前**的資訊：出賽名單圖卡要印、DH 制下的候補
+ * 名單要排除他（見 `deriveBench()`），而那時候還沒有任何打席可以推導。
+ * 中繼與終結投手是比賽中才出現的，記在打席的 `pitcher` 上。
+ *
+ * 舊文件上的 `pitchers`／`batters` 在讀取時被 schema 丟掉（Firestore 上的鍵
+ * 還在，只是沒有程式碼看它），先發投手由 `migrateLegacyGame()` 從舊的
+ * `pitchers` 裡撈出來，所以舊比賽的出賽名單圖卡不受影響。
+ */
+export const startingPitcherSchema = z.object({
   playerId: z.string().default(''),
   name: z.string().min(1),
   number: z.string().default(''),
-  role: z.enum(['starter', 'relief', 'closer']).default('starter'),
-  note: z.string().max(100).default(''),
 })
 
-export type PitcherEntry = z.infer<typeof pitcherEntrySchema>
+export type StartingPitcher = z.infer<typeof startingPitcherSchema>
 
 /**
- * 打擊紀錄。
+ * 把舊格式的比賽文件轉成現在的形狀。**在 schema 驗證之前**呼叫（repository）。
  *
- * ## ⚠️ `note` 是純文字，不是數據
- * 裡面寫的是「4 打數 2 安打 1 打點」這種句子，**系統不解析也不加總**。
- * 這是刻意的：拆成打數／安打／打點幾個數字欄位之後，一場要填 9～12 個人
- * 乘以好幾格，而登錄的人是在賽後用手機打的 —— 欄位越多，實際發生的事
- * 不是「資料更完整」而是「整段沒人填」。
+ * 目前只處理一件事：舊文件沒有 `startingPitcher`，但 `pitchers` 裡有一筆
+ * `role: 'starter'`。不轉的話，所有舊比賽的出賽名單圖卡都會少掉先發投手，
+ * 而 DH 制的場次會把他重新列進候補（那正是 `deriveBench()` 修過的 bug）。
  *
- * 另一個理由是**別讓它看起來像可以算的東西**。有了數字欄位，下一步必然是
- * 打擊率、季賽累計、排行榜，而那需要每一場都完整且正確地登錄 ——
- * 這個球隊沒有記錄員。一個少登三場的 `.412` 比沒有數字糟糕得多。
- * 真的要做季賽統計時，該補的是結構化的欄位加上「這場有沒有完整登錄」的旗標，
- * 而不是回頭去解析這些句子。
- *
- * 和 `pitcherEntrySchema` 的差別只有少一個 `role`：投手分先發／中繼／終結，
- * 打者沒有對應的分類（棒次在 `lineup` 裡，是另一份資料）。
+ * 只在 `startingPitcher` **完全不存在**時才轉：存過一次之後它就是 `null` 或
+ * 一個人，使用者清空的先發投手不能被舊資料偷偷補回來。
  */
-export const batterEntrySchema = z.object({
-  playerId: z.string().default(''),
-  name: z.string().min(1),
-  number: z.string().default(''),
-  note: z.string().max(100).default(''),
-})
+export function migrateLegacyGame(raw: Record<string, unknown>): Record<string, unknown> {
+  if (raw.startingPitcher !== undefined || !Array.isArray(raw.pitchers)) return raw
 
-export type BatterEntry = z.infer<typeof batterEntrySchema>
+  const starter = (raw.pitchers as Array<Record<string, unknown>>).find(
+    (pitcher) => pitcher?.role === 'starter' && typeof pitcher.name === 'string' && pitcher.name,
+  )
+  return {
+    ...raw,
+    startingPitcher: starter
+      ? {
+          playerId: String(starter.playerId ?? ''),
+          name: String(starter.name),
+          number: String(starter.number ?? ''),
+        }
+      : null,
+  }
+}
 
 /**
  * 單局得分。`null` 代表「沒打這半局」——例如主隊領先時九下不用打，
@@ -384,7 +357,8 @@ export function sumInnings(scoreboard: Scoreboard): { our: number; opponent: num
  * 外包給使用者記得按；沒按的下場是計分板上逐局是 3:1、R 欄寫著 0:0，
  * 而前台的比數、勝敗、戰績全部讀 R。
  *
- * H／E 沒有逐局欄位可以加總，所以它們維持人工輸入。
+ * H／E 沒有逐局欄位可以加總；它們在逐打席涵蓋整隊時由打席推導
+ * （`applyPlayDerivedScores()`），否則人工輸入。
  */
 export function withSummedRuns(scoreboard: Scoreboard): Scoreboard {
   const sums = sumInnings(scoreboard)
@@ -561,12 +535,8 @@ export const gameInputSchema = z.object({
    * 已結束就是「當天打線」。同一份資料，兩種說法。
    */
   lineup: z.array(lineupEntrySchema).max(15).default([]),
-  pitchers: z.array(pitcherEntrySchema).max(10).default([]),
-  /**
-   * 打擊紀錄。上限比打線寬（15）—— 一場可能換人代打，登錄的是「誰打過」
-   * 而不是「誰先發」，兩者不必一致。
-   */
-  batters: z.array(batterEntrySchema).max(25).default([]),
+  /** 先發投手。為什麼只剩它，見 `startingPitcherSchema`。 */
+  startingPitcher: startingPitcherSchema.nullable().default(null),
   scoreboard: scoreboardSchema.default(emptyScoreboard()),
 })
 
@@ -599,6 +569,20 @@ export const gameSchema = gameInputSchema.extend({
    * 漏帶一次就等於把整場的影片清空。
    */
   clips: z.array(gameClipSchema).max(40).default([]),
+  /**
+   * 逐打席紀錄（見 `shared/schemas/play.ts`）。
+   *
+   * **和 `clips`、`remindersSent` 一樣刻意不放進 `gameInputSchema`**，而且
+   * 這一份的後果最嚴重：後台的編輯表單是自動儲存的，放進 input schema
+   * 之後，光是改一個場地名稱就會把整場兩百筆打席重送一次，漏帶一次就是
+   * 整場的紀錄清空。它走自己的端點（`PUT /admin/games/[id]/plays`），
+   * 以「第幾局的哪半局」為鍵覆蓋，和影片完全同一套。
+   *
+   * 內嵌在比賽文件裡而不是另開子集合：一場約 100 筆、36KB，遠小於
+   * Firestore 單文件 1MB 的上限，而「看一場比賽只要一次讀取」這件事
+   * 對前台的比賽頁與 box score 都成立。
+   */
+  plays: z.array(playSchema).max(MAX_PLAYS_PER_GAME).default([]),
 })
 
 export type Game = z.infer<typeof gameSchema>
@@ -665,7 +649,7 @@ export function hasScore(game: Pick<Game, 'status'>): boolean {
  * 候補名單 —— 確定出席、但**今天沒有上場**的人。
  *
  * ## 為什麼是推導出來的，不另外存一份
- * 候補完全由「出席」「打線」「投手」三份既有資料決定，多存一份就多一份會
+ * 候補完全由「出席」「打線」「先發投手」「打席」幾份既有資料決定，多存一份就多一份會
  * 不同步的東西：把人排進打線卻忘了從候補移除，畫面上就會出現同一個人既先發
  * 又候補。推導不可能對不上，也不需要任何資料遷移。
  *
@@ -674,11 +658,12 @@ export function hasScore(game: Pick<Game, 'status'>): boolean {
  * 出賽名單圖卡上就會同時出現「先發投手 #28」和「候補 #28」，同一個人被說成
  * 今天最先發的和坐板凳的。實際發生過，見這個函式的測試。
  *
- * 所以要排除的是**打線 ∪ 投手紀錄**。投手紀錄裡的中繼與終結是賽後才登錄的，
- * 賽前不影響；賽後把他們排除也是對的 —— 他們上場投球了，不是板凳上的人。
+ * 所以要排除的是**打線 ∪ 先發投手 ∪ 打席上出現過的人**。最後一項是比賽中
+ * 才有的：代打的人（打席的 `batter`）與中繼、終結投手（打席的 `pitcher`）。
+ * 賽前沒有打席，不影響；賽後把他們排除也是對的 —— 他們上場了，不是板凳上的人。
  *
  * ## 比對方式
- * 以 `playerId` 為主，姓名為輔。打線與投手紀錄都允許 `playerId` 為空
+ * 以 `playerId` 為主，姓名為輔。打線、先發投手、打席都允許 `playerId` 為空
  * （臨時來支援的球友不在名單裡，但名單上要寫得出他），而且後台可以直接
  * 手打名字而不從清單挑 —— 少了姓名比對，這種情況下已經上場的人會被誤判成
  * 還坐在板凳上。
@@ -688,9 +673,13 @@ export function hasScore(game: Pick<Game, 'status'>): boolean {
  * - 已結束：這些人當天有到，但沒有上場
  */
 export function deriveBench(
-  game: Pick<Game, 'attendance' | 'lineup' | 'pitchers'>,
+  game: Pick<Game, 'attendance' | 'lineup' | 'startingPitcher'> & { plays?: Game['plays'] },
 ): AttendanceEntry[] {
-  const playing = [...game.lineup, ...game.pitchers]
+  const playing = [
+    ...game.lineup,
+    ...(game.startingPitcher ? [game.startingPitcher] : []),
+    ...(game.plays ?? []).flatMap((play) => [play.batter, play.pitcher]),
+  ]
   const playingIds = new Set(playing.map((entry) => entry.playerId).filter(Boolean))
   const playingNames = new Set(
     playing.map((entry) => entry.name.trim()).filter((name) => name.length > 0),

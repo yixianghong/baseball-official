@@ -100,7 +100,7 @@ function toDraftInput(draft: DraftMatch): GameInput {
     coverImageUrl: '',
     attendance: [],
     lineup: [],
-    pitchers: [],
+    startingPitcher: null,
     scoreboard: emptyScoreboard(0),
   }
 }
@@ -156,7 +156,7 @@ async function submitManual() {
     coverImageUrl: '',
     attendance: [],
     lineup: [],
-    pitchers: [],
+    startingPitcher: null,
     scoreboard: emptyScoreboard(0),
   })
   await navigateTo(`/admin/games/${created.id}`)

@@ -116,10 +116,10 @@ describe('GameCard 的狀態色條', () => {
     opponentLogoUrl: '',
     remindersSent: [],
     clips: [],
+    plays: [],
     attendance: [],
     lineup: [],
-    pitchers: [],
-    batters: [],
+    startingPitcher: null,
     scoreboard: emptyScoreboard(0),
     createdAt: '',
     updatedAt: '',
@@ -259,17 +259,11 @@ describe('GameLineupCard', () => {
    * 業餘棒球多半沒有 DH，投手自己也要打擊 —— 於是最該被看到的那個資訊
    * 剛好在最常見的情況下消失了。
    */
-  const starter = {
-    playerId: 'p5',
-    name: '王建民',
-    number: '18',
-    role: 'starter' as const,
-    note: '',
-  }
+  const starter = { playerId: 'p5', name: '王建民', number: '18' }
 
   it('列出先發投手，標示為 SP 並附中文全名', async () => {
     const component = await mountSuspended(GameLineupCard, {
-      props: { ...baseProps, pitchers: [starter] },
+      props: { ...baseProps, startingPitcher: starter },
     })
 
     expect(component.text()).toContain('先發投手')
@@ -288,19 +282,11 @@ describe('GameLineupCard', () => {
       position: 'P' as const,
     }
     const component = await mountSuspended(GameLineupCard, {
-      props: { ...baseProps, entries: [...entries, batting], pitchers: [starter] },
+      props: { ...baseProps, entries: [...entries, batting], startingPitcher: starter },
     })
 
     expect(component.text()).toContain('先發投手')
     expect(component.text()).toContain('SP')
-  })
-
-  it('只有中繼投手時不顯示先發投手那一段', async () => {
-    const component = await mountSuspended(GameLineupCard, {
-      props: { ...baseProps, pitchers: [{ ...starter, role: 'relief' as const }] },
-    })
-
-    expect(component.text()).not.toContain('先發投手')
   })
 
   it('沒有投手資料時不顯示那一段', async () => {
@@ -324,7 +310,7 @@ describe('GameLineupCard', () => {
       position: 'P' as const,
     }
     const component = await mountSuspended(GameLineupCard, {
-      props: { ...baseProps, entries: [...entries, batting], pitchers: [starter] },
+      props: { ...baseProps, entries: [...entries, batting], startingPitcher: starter },
     })
 
     const text = component.text()
@@ -344,23 +330,6 @@ describe('GameLineupCard', () => {
 
     expect(component.text()).not.toContain('人名單')
     expect(component.text()).not.toContain('DH')
-  })
-
-  /**
-   * ⚠️ 這張卡上**不放賽後的成績**。
-   *
-   * 它是賽前的名單，而且會在賽前就被截圖丟進群組。投手紀錄的 `note`
-   * （「6 局 2 失分」）是賽後才填得出來的東西 —— 混進來之後，同一張卡
-   * 在不同時間點長得不一樣，看到舊截圖的人會以為名單被改過。
-   * 成績在單場比賽頁的「本場紀錄」。
-   */
-  it('先發投手只顯示名字，不帶投手紀錄的備註', async () => {
-    const component = await mountSuspended(GameLineupCard, {
-      props: { ...baseProps, pitchers: [{ ...starter, note: '6 局 2 失分' }] },
-    })
-
-    expect(component.text()).toContain('#18 王建民')
-    expect(component.text()).not.toContain('6 局 2 失分')
   })
 
   /*
@@ -470,10 +439,10 @@ describe('ScoreBanner 的最新比數', () => {
     opponentLogoUrl: '',
     remindersSent: [],
     clips: [],
+    plays: [],
     attendance: [],
     lineup: [],
-    pitchers: [],
-    batters: [],
+    startingPitcher: null,
     scoreboard: {
       innings: [],
       totals: { our: { r: 6, h: 0, e: 0 }, opponent: { r: 3, h: 0, e: 0 } },
@@ -631,10 +600,10 @@ describe('GameCalendar', () => {
     opponentLogoUrl: '',
     remindersSent: [],
     clips: [],
+    plays: [],
     attendance: [],
     lineup: [],
-    pitchers: [],
-    batters: [],
+    startingPitcher: null,
     scoreboard: {
       innings: [],
       totals: { our: { r: 6, h: 0, e: 0 }, opponent: { r: 3, h: 0, e: 0 } },

@@ -1,0 +1,1125 @@
+<script setup lang="ts">
+import type { GameClip, LineupEntry, Scoreboard, StartingPitcher } from '#shared/schemas/game'
+import type { HomeAway } from '#shared/schemas/half-inning'
+import { POSITION_LABELS, type Player, type Position } from '#shared/schemas/player'
+import type { BatSide, BattedType, FieldPoint, Play, PlayResult } from '#shared/schemas/play'
+import {
+  defaultBatted,
+  nearestFielder,
+  needsBattedType,
+  needsFielder,
+  NO_LANDING_RESULTS,
+  zoneOf,
+  ZONE_LABELS,
+} from '#shared/schemas/field'
+import { clipEmbedUrl } from '#shared/schemas/game'
+import { LOW_CONFIDENCE_THRESHOLD } from '#shared/schemas/ai'
+import {
+  GAME_HALVES,
+  halfInningLabel,
+  halfInningOrder,
+  battingSide,
+} from '#shared/schemas/half-inning'
+import { battingOrderAt, slotOfBatter } from '#shared/schemas/batting-order'
+import {
+  COMMON_PLAY_RESULTS,
+  adjustRuns,
+  clampRbi,
+  defaultRbi,
+  defaultRuns,
+  describeBatter,
+  halfInningOuts,
+  halfInningRuns,
+  halfInningStatus,
+  MAX_PLAYS_PER_HALF_INNING,
+  PLAY_RESULTS,
+  playResultSchema,
+  playsOf,
+  sortPlays,
+} from '#shared/schemas/play'
+
+/**
+ * 逐局逐打席的登錄介面。
+ *
+ * ## 為什麼是「以半局為單位」
+ * 半局是這個專案裡**三份資料共用的身分**：計分板的一格、一段錄影、一批
+ * 打席。既然影片已經是一個半局一段，登錄介面切成同樣的單位之後，賽後就
+ * 可以**對著那半局的片段登錄** —— 影片在上面、打席在下面，暫停重看都在
+ * 同一個畫面上。
+ *
+ * ## ⚠️ 打者自動帶下一棒是這個功能的成敗關鍵
+ * 當初刻意不做結構化的打擊數據，第一個理由就是「欄位越多，實際發生的事
+ * 不是資料更完整，而是整段沒人填」（見 `play.ts` 開頭）。輪轉打線讓
+ * 多數打席只要**按一個結果鍵**就完成 —— 這不是可有可無的便利，
+ * **拿掉它，那個理由就立刻回來**。
+ *
+ * ## 出局數不是輸入項
+ * 出局數由結果推導（`PLAY_RESULTS[result].outs`），所以「這半局登完了沒」
+ * 是算出來的，不是人宣告的。畫面上那個「3／3」是結果，不是一個欄位。
+ */
+const props = defineProps<{
+  plays: Play[]
+  homeAway: HomeAway
+  lineup: LineupEntry[]
+  startingPitcher: StartingPitcher | null
+  players: Player[]
+  clips: GameClip[]
+  scoreboard: Scoreboard
+  ourName: string
+  opponentName: string
+  /** 還沒同步到伺服器的半局數。 */
+  pendingCount?: number
+}>()
+
+const emit = defineEmits<{
+  save: [inning: number, half: (typeof GAME_HALVES)[number], plays: Play[]]
+  retry: []
+}>()
+
+// ── 半局選擇器 ──────────────────────────────────────────────────
+
+/**
+ * 這場有幾局。
+ *
+ * 跟著計分板走（延長賽會更多），至少七局 —— 和錄影頁的局數按鈕同一條規則，
+ * 兩邊的格子數量對不上會讓人以為漏了幾段。
+ */
+const totalInnings = computed(() => Math.max(props.scoreboard.innings.length, 7))
+
+const halfInnings = computed(() =>
+  Array.from({ length: totalInnings.value }, (_, i) => i + 1).flatMap((inning) =>
+    GAME_HALVES.map((half) => {
+      const plays = playsOf(props.plays, inning, half)
+      return {
+        key: `${inning}-${half}`,
+        inning,
+        half,
+        side: battingSide(half, props.homeAway),
+        plays,
+        runs: halfInningRuns(plays),
+        outs: halfInningOuts(plays),
+        status: halfInningStatus(plays),
+        hasClip: props.clips.some((clip) => clip.inning === inning && clip.half === half),
+      }
+    }),
+  ),
+)
+
+type HalfInningCell = (typeof halfInnings.value)[number]
+
+const selectedKey = ref('1-top')
+
+/**
+ * 預設停在「第一個還沒登錄完的半局」。
+ *
+ * 不是第 1 局上 —— 登錄是一次做一點的，每次回到這一頁都要重新捲到上次的
+ * 位置，那是十幾次點擊。和錄影頁的 `resumePosition()` 同一個道理。
+ */
+onMounted(() => {
+  const next = halfInnings.value.find((cell) => cell.status !== 'complete')
+  if (next) selectedKey.value = next.key
+})
+
+const selected = computed<HalfInningCell>(
+  () => halfInnings.value.find((cell) => cell.key === selectedKey.value) ?? halfInnings.value[0]!,
+)
+
+/** 這半局是我隊在打擊嗎（決定要不要輪轉打線、要不要顯示投手欄）。 */
+const ourAtBat = computed(() => selected.value.side === 'our')
+
+const selectedClip = computed(() =>
+  props.clips.find(
+    (clip) => clip.inning === selected.value.inning && clip.half === selected.value.half,
+  ),
+)
+
+/** 播放器只在按下之後才建立 —— `autoplay=1` 要靠那次點擊才有效。 */
+const playingClip = ref('')
+watch(selectedKey, () => (playingClip.value = ''))
+
+function cellClass(cell: HalfInningCell): string {
+  if (cell.key === selectedKey.value) return 'border-brand-600 bg-brand-600 text-white'
+  if (cell.status === 'complete') return 'border-brand-600/40 text-content'
+  if (cell.status === 'partial') return 'border-warning text-warning'
+  return 'border-border text-content-muted'
+}
+
+// ── 這半局的打席 ────────────────────────────────────────────────
+
+const rows = computed(() => selected.value.plays)
+
+function commit(next: Play[]): void {
+  emit('save', selected.value.inning, selected.value.half, next)
+}
+
+function removeAt(index: number): void {
+  commit(rows.value.filter((_, i) => i !== index))
+}
+
+function updateAt(index: number, patch: Partial<Play>): void {
+  commit(rows.value.map((play, i) => (i === index ? { ...play, ...patch } : play)))
+}
+
+/**
+ * 列表上的得分／打點 ＋／－。
+ *
+ * 改得分時打點跟著動（除非打點被手動改過），規則在 `adjustRuns()`；
+ * 打點不能超過得分（`clampRbi()`）。
+ */
+function nextValue(
+  play: Play,
+  field: 'runs' | 'rbi',
+  delta: number,
+): { runs: number; rbi: number } {
+  if (field === 'runs') return adjustRuns(play, play.runs + delta)
+  return { runs: play.runs, rbi: clampRbi(play, play.rbi + delta) }
+}
+
+function canStep(play: Play, field: 'runs' | 'rbi', delta: number): boolean {
+  const next = nextValue(play, field, delta)
+  return next.runs !== play.runs || next.rbi !== play.rbi
+}
+
+function step(index: number, field: 'runs' | 'rbi', delta: number): void {
+  const play = rows.value[index]
+  if (!play) return
+  updateAt(index, nextValue(play, field, delta))
+}
+
+// ── 打者：依打線輪轉 ────────────────────────────────────────────
+
+/**
+ * 打線在這個半局的狀態：每一棒現在是誰（含代打）、照打線輪到第幾棒。
+ *
+ * 由打席推導（`battingOrderAt()`），而且**只看這個半局為止的打席** ——
+ * 回頭修改前面的半局時，後面已登錄的打席不能算進來。
+ * ⚠️ 只有「打席」會換棒：跑者出局（盜壘失敗、牽制）時打擊區上的人還沒打完。
+ */
+const order = computed(() =>
+  battingOrderAt(
+    { plays: props.plays, homeAway: props.homeAway, lineup: props.lineup },
+    selected.value.inning,
+    selected.value.half,
+  ),
+)
+
+/** 使用者點了別的棒次。`null` 代表照打線輪。 */
+const chosenSlot = ref<number | null>(null)
+
+/** 這一個打席由第幾棒打。 */
+const selectedSlot = computed<number>({
+  get: () => chosenSlot.value ?? order.value.nextSlot ?? 0,
+  // 點回照打線應該輪到的那一棒，就等於回到「自動輪」
+  set: (slot) => (chosenSlot.value = slot === order.value.nextSlot ? null : slot),
+})
+
+/** 選好了、還沒登錄的代打。 */
+const pinch = ref<Play['batter'] | null>(null)
+
+/**
+ * 板凳：可以代打的人。已經站在打線上的不列；被代打換下的先發會出現
+ * （業餘聯賽常允許重新上場）。
+ */
+const bench = computed<Play['batter'][]>(() => {
+  const onField = new Set(order.value.slots.map((slot) => slot.current.playerId).filter(Boolean))
+  return props.players
+    .filter((player) => player.status !== 'inactive' && !onField.has(player.id))
+    .map((player) => ({ playerId: player.id, name: player.name, number: player.number }))
+})
+
+/** 對手打擊時只填背號 —— 我們沒有對手的名冊，名單上本來就只有背號。 */
+const opponentNumber = ref('')
+
+const currentBatter = computed<Play['batter']>(() => {
+  if (!ourAtBat.value) return { playerId: '', name: '', number: opponentNumber.value.trim() }
+  if (pinch.value) return { ...pinch.value }
+  const slot = order.value.slots.find((item) => item.slot === selectedSlot.value)
+  return slot ? { ...slot.current } : { playerId: '', name: '', number: '' }
+})
+
+const batterLabel = computed(() => {
+  const { name, number } = currentBatter.value
+  if (!name && !number) return ourAtBat.value ? '（打線是空的）' : '（請填背號）'
+  return number && name ? `#${number} ${name}` : number ? `#${number}` : name
+})
+
+// ── 投手 ────────────────────────────────────────────────────────
+
+/**
+ * 我隊防守時，這半局的投手。
+ *
+ * 預設接續上一筆打席的投手（一個半局多半是同一個人），換投時改一次就好。
+ * 投手記在**每一筆打席**上而不是半局上 —— 半局中間換人的話，記在半局上
+ * 就得把那半局拆開。
+ */
+const pitcherOverride = ref('')
+
+/**
+ * 這個半局之前最後一位投球的我隊投手。
+ *
+ * 看的是**整場到這個半局為止**，不是只看這個半局 —— 第 5 局換了中繼，
+ * 第 6 局上來的預設就該是他，而不是又跳回先發。中繼與終結只記在打席上
+ * （沒有另一份投手名單），所以這裡是唯一知道「現在誰在投」的地方。
+ */
+const lastPitcher = computed<Play['pitcher'] | null>(() => {
+  const limit = halfInningOrder(selected.value.inning, selected.value.half)
+  const earlier = sortPlays(props.plays).filter(
+    (play) =>
+      battingSide(play.half, props.homeAway) === 'opponent' &&
+      halfInningOrder(play.inning, play.half) <= limit &&
+      (play.pitcher.playerId || play.pitcher.name),
+  )
+  return earlier.at(-1)?.pitcher ?? null
+})
+
+/** 選單：先發投手、這場已經投過的人排前面，其餘是全隊名冊。 */
+const pitcherOptions = computed(() => {
+  const seen = new Map<string, Play['pitcher']>()
+  if (props.startingPitcher?.playerId)
+    seen.set(props.startingPitcher.playerId, props.startingPitcher)
+  for (const play of props.plays) {
+    if (play.pitcher.playerId) seen.set(play.pitcher.playerId, play.pitcher)
+  }
+  const label = (person: Play['pitcher']) =>
+    `${person.number ? `#${person.number} ` : ''}${person.name}`
+  return [
+    ...[...seen.values()].map((person) => ({ value: person.playerId, label: label(person) })),
+    ...props.players
+      .filter((player) => !seen.has(player.id))
+      .map((player) => ({
+        value: player.id,
+        label: label({ playerId: player.id, name: player.name, number: player.number }),
+      })),
+  ]
+})
+
+const currentPitcher = computed<Play['pitcher']>(() => {
+  if (ourAtBat.value) return { playerId: '', name: '', number: '' }
+
+  if (pitcherOverride.value) {
+    const player = props.players.find((item) => item.id === pitcherOverride.value)
+    if (player) return { playerId: player.id, name: player.name, number: player.number }
+  }
+
+  // 沒換投就沿用最後一位投球的人；整場都還沒投過就是先發投手
+  if (lastPitcher.value) return { ...lastPitcher.value }
+  const starter = props.startingPitcher
+  return starter
+    ? { playerId: starter.playerId, name: starter.name, number: starter.number }
+    : { playerId: '', name: '', number: '' }
+})
+
+// ── 新增一個打席 ────────────────────────────────────────────────
+
+const showAllResults = ref(false)
+
+const otherResults = computed(() =>
+  playResultSchema.options.filter(
+    (result) => !(COMMON_PLAY_RESULTS as readonly string[]).includes(result),
+  ),
+)
+
+const full = computed(() => rows.value.length >= MAX_PLAYS_PER_HALF_INNING)
+
+// ── 三出局之後鎖住 ──────────────────────────────────────────────
+
+/**
+ * 這個半局已經三出局了。
+ *
+ * **三出局之後不能再新增任何打席** —— 棒球的規則本身，不是介面的偏好。
+ * 已登錄的打席也一併鎖住：場邊登錄的人手一滑就會刪到上一局的紀錄，
+ * 而那種錯誤在畫面上很難發現。真的要修正時按「解鎖修改」，
+ * 換到別的半局就自動重新鎖上。
+ *
+ * 再見分的半局不會有三個出局，所以不會被鎖（那也是對的：比賽結束了，
+ * 但也沒有下一個打席可以登）。
+ */
+const complete = computed(() => selected.value.status === 'complete')
+const editUnlocked = ref(false)
+const rowsLocked = computed(() => complete.value && !editUnlocked.value)
+
+/** 這個半局還剩幾個出局可以用。 */
+const remainingOuts = computed(() => Math.max(0, 3 - selected.value.outs))
+
+/**
+ * 這個結果會不會讓出局數超過三。兩出局時不可能打出雙殺 ——
+ * 登得進去的話，這個半局的出局數就是 4，而完整性與投球局數都從它算。
+ */
+function exceedsOuts(result: PlayResult): boolean {
+  return PLAY_RESULTS[result].outs > remainingOuts.value
+}
+
+function goToNextHalf(): void {
+  const index = halfInnings.value.findIndex((cell) => cell.key === selectedKey.value)
+  const next = halfInnings.value[index + 1]
+  if (next) selectedKey.value = next.key
+}
+
+watch(selectedKey, () => {
+  editUnlocked.value = false
+  chosenSlot.value = null
+  pinch.value = null
+  // 換投是登錄到打席上才算數；換半局時回到「沿用最後一位投球的人」，
+  // 否則回頭改前面的半局時，會被後面才換上來的投手蓋掉
+  pitcherOverride.value = ''
+})
+
+const canAdd = computed(() => {
+  if (full.value || complete.value) return false
+  const { name, number } = currentBatter.value
+  return Boolean(name || number)
+})
+
+// ── 打者站哪邊打 ────────────────────────────────────────────────
+
+/**
+ * 左右開弓的打者這個打席站哪邊。只有他們需要問，其他人從名冊帶入。
+ * 預設右打：台灣業餘球員的左右開弓，多數時候是對右投站左邊、對左投站右邊，
+ * 這裡猜不到投手是哪一手，所以給一個固定的預設、讓人改。
+ */
+const switchSide = ref<BatSide>('R')
+
+const batterPlayer = computed(() =>
+  props.players.find((player) => player.id === currentBatter.value.playerId),
+)
+
+const isSwitchHitter = computed(() => ourAtBat.value && batterPlayer.value?.bats === 'S')
+
+/**
+ * 這個打席站哪邊打。對手是 `null` —— 對手沒有名冊，而多問一個每次都要點的
+ * 欄位，就是當初「欄位越多越沒人填」的那個理由。
+ */
+const currentBats = computed<BatSide | null>(() => {
+  if (!ourAtBat.value) return null
+  const bats = batterPlayer.value?.bats
+  if (!bats) return null
+  return bats === 'S' ? switchSide.value : bats
+})
+
+// ── 新增一個打席 ────────────────────────────────────────────────
+
+/** 剛放開、還在等選結果的落點。 */
+const pendingPoint = ref<FieldPoint | null>(null)
+
+interface Landing {
+  location: FieldPoint | null
+  fielder: Position | null
+  batted: BattedType | null
+}
+
+const NO_LANDING: Landing = { location: null, fielder: null, batted: null }
+
+/** 本壘旁那一排按鈕的字。一排五顆，「四壞球保送」放不下。 */
+const NO_LANDING_LABELS: Record<(typeof NO_LANDING_RESULTS)[number], string> = {
+  strikeout: '三振',
+  walk: '保送',
+  hitByPitch: '觸身',
+  runnerOut: '跑者出局',
+  other: '其他',
+}
+
+function addPlay(result: PlayResult, landing: Landing = NO_LANDING): void {
+  if (!canAdd.value || exceedsOuts(result)) return
+
+  const next: Play[] = [
+    ...rows.value,
+    {
+      inning: selected.value.inning,
+      half: selected.value.half,
+      batter: currentBatter.value,
+      pitcher: currentPitcher.value,
+      result,
+      runs: defaultRuns(result),
+      rbi: defaultRbi(result, defaultRuns(result)),
+      note: '',
+      transcript: '',
+      ...landing,
+      bats: currentBats.value,
+      battingSlot: ourAtBat.value ? selectedSlot.value || null : null,
+    },
+  ]
+  commit(next)
+
+  // 登完一筆就重置：打者回到「自動帶下一棒」，得分回到 0。
+  // 不重置的話，下一個打席會默默沿用上一個的得分。
+  chosenSlot.value = null
+  pinch.value = null
+  opponentNumber.value = ''
+  switchSide.value = 'R'
+  showAllResults.value = false
+  pendingPoint.value = null
+
+  // 第三個出局登錄完，直接跳到下一個半局 —— 下一筆一定是在那裡
+  if (halfInningOuts(next) >= 3) void nextTick(goToNextHalf)
+}
+
+// ── 在球場上拖曳 ────────────────────────────────────────────────
+
+/**
+ * 正在重新拖曳落點的那一筆（列表上點「改落點」）。有值的時候，下一次放開
+ * 改的是它的落點，而不是新增一個打席。
+ */
+const relocateIndex = ref<number | null>(null)
+
+/** 列表上點選、在球場上亮起來的那一筆。 */
+const activeIndex = ref<number | null>(null)
+
+watch(selectedKey, () => {
+  pendingPoint.value = null
+  relocateIndex.value = null
+  activeIndex.value = null
+})
+
+function onDrop(point: FieldPoint): void {
+  if (relocateIndex.value !== null) {
+    const index = relocateIndex.value
+    const play = rows.value[index]
+    if (play) {
+      updateAt(index, {
+        location: point,
+        // 換了落點，預選的處理者也跟著換；使用者原本就選了的話保留
+        fielder: needsFielder(play.result)
+          ? (play.fielder ?? nearestFielder(point).position)
+          : null,
+        batted: needsBattedType(play.result) ? (play.batted ?? defaultBatted(point)) : null,
+      })
+    }
+    relocateIndex.value = null
+    activeIndex.value = null
+    return
+  }
+  if (!canAdd.value) return
+  pendingPoint.value = point
+}
+
+function onLandingConfirm(payload: {
+  result: PlayResult
+  fielder: Position | null
+  batted: BattedType | null
+}): void {
+  addPlay(payload.result, {
+    location: pendingPoint.value,
+    fielder: payload.fielder,
+    batted: payload.batted,
+  })
+}
+
+function startRelocate(index: number): void {
+  pendingPoint.value = null
+  relocateIndex.value = index
+  activeIndex.value = index
+}
+
+/** 一筆打席的落點摘要，列表上用：「→ 游擊手」「→ 外野」。 */
+function landingText(play: Play): string {
+  if (!play.location) return ''
+  if (play.fielder) return `→ ${POSITION_LABELS[play.fielder]}`
+  return `→ ${ZONE_LABELS[zoneOf(play.location)]}`
+}
+
+// ── 語音登錄 ────────────────────────────────────────────────────
+
+/**
+ * 按住說話，放開之後辨識出幾個打席。
+ *
+ * ⚠️ **辨識結果不會自動寫進去。** 它先進下面那張暫存卡片，人看過、改過
+ * 才按「全部採用」—— 和另外四支 AI 辨識端點同一套紀律（回傳的是建議，
+ * 不是已經存好的資料）。語音在球場邊很容易聽錯一個背號，而錯的那一筆
+ * 會一路影響到打擊率。
+ */
+const voice = useVoicePlayInput()
+
+async function stopVoice(): Promise<void> {
+  await voice.stop({
+    inning: selected.value.inning,
+    half: selected.value.half,
+    batting: selected.value.side,
+    roster: props.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      number: player.number,
+    })),
+    existing: rows.value.map((play) => ({
+      number: play.batter.number,
+      result: PLAY_RESULTS[play.result].label,
+    })),
+  })
+}
+
+/** 把辨識出來的打席全部寫進這個半局。 */
+function acceptSuggestions(): void {
+  const pitcher = currentPitcher.value
+  commit([
+    ...rows.value,
+    ...voice.suggestions.value.map((item) => ({
+      inning: selected.value.inning,
+      half: selected.value.half,
+      batter: { playerId: item.playerId, name: item.name, number: item.number },
+      pitcher,
+      result: normalizeSuggestedResult(item.result),
+      runs: item.runs,
+      rbi: item.rbi,
+      note: '',
+      // 原話留著 —— 辨識錯的時候，看得到當初講了什麼才知道該改成什麼
+      transcript: item.sourceText,
+      // 語音刻意不產生落點：「游擊方向」猜出來的座標混進落點圖就會被當真。
+      // 要補落點的話，在列表上點「改落點」拖一次
+      ...NO_LANDING,
+      bats: null,
+      battingSlot:
+        selected.value.side === 'our'
+          ? slotOfBatter(order.value.slots, {
+              playerId: item.playerId,
+              name: item.name,
+              number: item.number,
+            })
+          : null,
+    })),
+  ])
+  voice.clear()
+}
+
+function dropSuggestion(index: number): void {
+  voice.suggestions.value = voice.suggestions.value.filter((_, i) => i !== index)
+}
+
+/**
+ * 後端已經把結果收斂成列舉值了，這裡只是型別上的最後一道防線 ——
+ * 萬一送來一個列舉外的字串，寧可標成「其他」也不要讓整張表算錯。
+ */
+function normalizeSuggestedResult(value: string): PlayResult {
+  return (playResultSchema.options as readonly string[]).includes(value)
+    ? (value as PlayResult)
+    : 'other'
+}
+</script>
+
+<template>
+  <div class="space-y-5">
+    <!-- ══ 半局選擇器 ══════════════════════════════════════════ -->
+    <div>
+      <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="text-fluid-lg font-bold">逐局紀錄</h2>
+        <p v-if="pendingCount" class="text-fluid-sm text-warning">
+          {{ pendingCount }} 個半局還沒同步
+          <button type="button" class="ml-2 underline underline-offset-4" @click="emit('retry')">
+            重試
+          </button>
+        </p>
+      </div>
+
+      <!--
+        橫向捲動而不是換行：十四格排成兩三列的話，「現在在第幾局」這件事
+        要掃視整塊才看得出來。和錄影頁的局數按鈕是同一個語彙。
+      -->
+      <div class="-mx-1 overflow-x-auto px-1 pb-2">
+        <div class="flex gap-1.5" role="tablist" aria-label="半局">
+          <button
+            v-for="cell in halfInnings"
+            :key="cell.key"
+            type="button"
+            role="tab"
+            :aria-selected="cell.key === selectedKey"
+            class="min-h-14 shrink-0 rounded-xl border px-3 text-center transition"
+            :class="cellClass(cell)"
+            @click="selectedKey = cell.key"
+          >
+            <span class="block text-xs whitespace-nowrap">
+              {{ cell.inning }}{{ cell.half === 'top' ? '上' : '下' }}
+            </span>
+            <span class="block text-fluid-sm font-bold whitespace-nowrap">
+              <!-- 還沒登錄的半局顯示 — 而不是 0：那兩者意思完全不同 -->
+              {{ cell.status === 'empty' ? '—' : cell.runs }}
+              <span v-if="cell.hasClip" aria-label="有影片">🎬</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <p class="text-fluid-sm text-content-muted">
+        邊框顏色代表登錄程度：灰＝還沒登、<span class="text-warning">黃＝還沒滿三出局</span
+        >、綠＝這半局登完了。
+      </p>
+    </div>
+
+    <!-- ══ 選到的半局 ══════════════════════════════════════════ -->
+    <section class="space-y-4 rounded-2xl border border-border bg-surface p-4">
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 class="text-fluid-lg font-bold">
+          {{ halfInningLabel(selected.inning, selected.half) }}
+          <span class="ml-2 text-fluid-sm font-normal text-content-muted">
+            {{ ourAtBat ? ourName : opponentName }} 進攻
+          </span>
+        </h3>
+        <p class="text-fluid-sm tabular-nums text-content-muted">
+          {{ selected.runs }} 分 · {{ selected.outs }}／3 出局
+          <span v-if="selected.status === 'complete'" class="ml-1 text-brand-600">✓</span>
+        </p>
+      </div>
+
+      <!--
+        這半局的影片。賽後對著它登錄就是整個「逐局維護」的用意 ——
+        暫停、重看、登錄都在同一個畫面上。
+      -->
+      <div v-if="selectedClip" class="overflow-hidden rounded-xl bg-ink">
+        <div class="relative aspect-video">
+          <iframe
+            v-if="playingClip === selectedClip.videoId"
+            :src="clipEmbedUrl(selectedClip.videoId)"
+            :title="halfInningLabel(selected.inning, selected.half)"
+            class="absolute inset-0 size-full"
+            allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+          />
+          <button
+            v-else
+            type="button"
+            class="absolute inset-0 grid size-full place-items-center text-white"
+            @click="playingClip = selectedClip.videoId"
+          >
+            <span class="rounded-full bg-danger px-5 py-2 text-fluid-sm font-bold">
+              ▶ 播放這半局
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 我隊防守的半局才問投手：對手的投手我們沒有名冊，記了也推不出東西 -->
+      <UiBaseSelect
+        v-if="!ourAtBat && !complete && pitcherOptions.length"
+        v-model="pitcherOverride"
+        label="我隊投手"
+        class="sm:max-w-xs"
+        :options="pitcherOptions"
+        :placeholder="
+          currentPitcher.name
+            ? `沿用 #${currentPitcher.number} ${currentPitcher.name}`
+            : '— 尚未指定 —'
+        "
+        hint="換投時改這裡，之後登錄的打席就會記到新的投手身上。"
+      />
+
+      <!-- ── 已登錄的打席 ──────────────────────────────────── -->
+      <ol v-if="rows.length" class="space-y-1.5">
+        <li
+          v-for="(play, index) in rows"
+          :key="index"
+          class="space-y-1.5 rounded-lg px-3 py-2 text-fluid-sm transition"
+          :class="activeIndex === index ? 'bg-danger/10' : 'bg-surface-muted'"
+          @click="activeIndex = activeIndex === index ? null : index"
+        >
+          <!--
+            固定兩列：上面是這個打席是什麼（＋改落點、刪除），下面是得分與打點。
+            讓 ＋／－ 在每一筆都落在同一個位置 —— 一整列 flex-wrap 的話，有沒有
+            「改落點」那顆按鈕會讓它們在不同筆之間跳來跳去，連點時很容易點錯。
+          -->
+          <div class="flex items-center gap-2">
+            <span class="w-5 shrink-0 tabular-nums text-content-muted">{{ index + 1 }}.</span>
+            <p class="min-w-0 flex-1">
+              <!--
+                跑者出局記在當時打擊中的人身上（他還沒打完），但出局的不是他。
+                寫成「#9 李承翰 跑者出局」會被讀成 9 號出局了。
+              -->
+              <template v-if="PLAY_RESULTS[play.result].plateAppearance">
+                <span class="font-bold">{{ describeBatter(play) }}</span>
+                {{ PLAY_RESULTS[play.result].label }}
+              </template>
+              <template v-else>
+                <span class="font-bold">{{ PLAY_RESULTS[play.result].label }}</span>
+                <span class="text-content-muted">（{{ describeBatter(play) }} 打擊中）</span>
+              </template>
+              <span v-if="landingText(play)" class="ml-1 text-content-muted">
+                {{ landingText(play) }}</span
+              >
+              <span v-if="PLAY_RESULTS[play.result].outs" class="text-content-muted">
+                · {{ PLAY_RESULTS[play.result].outs }} 出局</span
+              >
+            </p>
+
+            <!--
+              補落點／改落點：按下去之後，下一次在球場上放開改的是這一筆。
+              沒有落點的結果（三振、保送）不給這顆按鈕 —— 它們本來就沒有落點。
+            -->
+            <button
+              v-if="!rowsLocked && !(NO_LANDING_RESULTS as readonly string[]).includes(play.result)"
+              type="button"
+              class="min-h-8 shrink-0 rounded px-1 text-xs text-content-muted underline underline-offset-4 hover:text-brand-600"
+              @click.stop="startRelocate(index)"
+            >
+              {{ play.location ? '改落點' : '補落點' }}
+            </button>
+            <button
+              v-if="!rowsLocked"
+              type="button"
+              class="min-h-8 shrink-0 rounded px-2 text-content-muted hover:text-danger"
+              :aria-label="`移除第 ${index + 1} 個打席`"
+              @click.stop="removeAt(index)"
+            >
+              ✕
+            </button>
+          </div>
+
+          <!--
+            得分與打點都在這一筆上調，登錄之後隨時回頭改（三出局後要先解鎖）。
+            得分＝這個打席有幾人跑回本壘（計分板用），打點＝其中算在打者身上的。
+            用 ＋／－ 而不是數字輸入框：手機上點一下比叫出鍵盤快，也不會打出 5。
+          -->
+          <div class="flex items-center gap-5 pl-7" @click.stop>
+            <div
+              v-for="field in (['runs', 'rbi'] as const).filter(
+                (f) => f === 'runs' || PLAY_RESULTS[play.result].plateAppearance,
+              )"
+              :key="field"
+              class="flex items-center gap-1 text-xs"
+              role="group"
+              :aria-label="`第 ${index + 1} 個打席的${field === 'runs' ? '得分' : '打點'}`"
+            >
+              <span class="text-content-muted">{{ field === 'runs' ? '得分' : '打點' }}</span>
+              <button
+                v-if="!rowsLocked"
+                type="button"
+                class="size-8 rounded border border-border bg-surface text-fluid-sm disabled:opacity-30"
+                :disabled="!canStep(play, field, -1)"
+                :aria-label="`${field === 'runs' ? '得分' : '打點'}減一`"
+                @click="step(index, field, -1)"
+              >
+                −
+              </button>
+              <span
+                class="w-5 text-center text-fluid-sm font-bold"
+                :class="field === 'runs' && play.runs ? 'text-brand-600 dark:text-brand-300' : ''"
+              >
+                {{ play[field] }}
+              </span>
+              <button
+                v-if="!rowsLocked"
+                type="button"
+                class="size-8 rounded border border-border bg-surface text-fluid-sm disabled:opacity-30"
+                :disabled="!canStep(play, field, 1)"
+                :aria-label="`${field === 'runs' ? '得分' : '打點'}加一`"
+                @click="step(index, field, 1)"
+              >
+                ＋
+              </button>
+            </div>
+          </div>
+        </li>
+      </ol>
+
+      <p
+        v-else
+        class="rounded-lg bg-surface-muted px-3 py-4 text-center text-fluid-sm text-content-muted"
+      >
+        這個半局還沒有紀錄。
+      </p>
+
+      <!--
+        ── 三出局：鎖住 ──
+        三出局之後不能再新增打席（棒球規則本身）。已登錄的也一併鎖住，
+        避免場邊手滑刪到上一局；要修正時才解鎖，換半局自動重新鎖上。
+      -->
+      <div
+        v-if="complete"
+        class="flex flex-wrap items-center gap-3 rounded-xl bg-brand-600/10 px-3 py-3 text-fluid-sm"
+        role="status"
+      >
+        <p v-if="!editUnlocked" class="min-w-0 flex-1 text-brand-700 dark:text-brand-300">
+          ✓ 這個半局已經三出局，登錄已鎖住。
+        </p>
+        <p v-else class="min-w-0 flex-1 text-warning">
+          解鎖中：可以修改或刪除這個半局的打席，但不能再新增（已經三出局）。
+        </p>
+
+        <template v-if="!editUnlocked">
+          <UiBaseButton size="sm" @click="goToNextHalf">前往下一個半局</UiBaseButton>
+          <UiBaseButton variant="ghost" size="sm" @click="editUnlocked = true"
+            >解鎖修改</UiBaseButton
+          >
+        </template>
+        <UiBaseButton
+          v-else
+          variant="secondary"
+          size="sm"
+          @click="((editUnlocked = false), (relocateIndex = null), (activeIndex = null))"
+        >
+          完成，重新鎖上
+        </UiBaseButton>
+      </div>
+
+      <!-- ── 新增打席 ──────────────────────────────────────── -->
+      <div
+        v-if="!complete || editUnlocked"
+        class="space-y-3 rounded-xl border border-dashed border-border p-3"
+      >
+        <!--
+          ⚠️ 我隊進攻時**預設帶下一棒**，所以多數打席只要按一個結果鍵。
+          這是整個功能能不能被實際使用的關鍵，不是可有可無的便利。
+          打線整份列出來、輪到的亮起來；代打在亮起來的那一棒上按。
+        -->
+        <template v-if="!complete">
+          <AdminBattingOrder
+            v-if="ourAtBat && order.slots.length && order.nextSlot !== null"
+            v-model:slot="selectedSlot"
+            v-model:pinch="pinch"
+            :slots="order.slots"
+            :next-slot="order.nextSlot"
+            :bench="bench"
+          />
+        </template>
+
+        <!--
+          上下排而不是並排：背號框在寬螢幕上會被撐得很長，得分按鈕被擠到最右邊，
+          視線要左右跳。上下排之後兩個欄位都在左邊對齊，由上往下填。
+        -->
+        <div v-if="!complete" class="flex flex-col items-start gap-3">
+          <div v-if="!ourAtBat" class="w-full max-w-xs">
+            <UiBaseInput
+              v-model="opponentNumber"
+              label="對手打者背號"
+              digits
+              :maxlength="3"
+              placeholder="例如 24"
+              hint="對手沒有名冊，記背號就夠了。"
+            />
+          </div>
+
+          <!-- 左右開弓的人每個打席可能站不同邊，只有他們需要問 -->
+          <div v-if="isSwitchHitter">
+            <span class="mb-1 block text-fluid-sm font-medium">這個打席站</span>
+            <div class="flex gap-1" role="group" aria-label="這個打席站哪邊打">
+              <button
+                v-for="side in ['L', 'R'] as const"
+                :key="side"
+                type="button"
+                class="min-h-11 rounded-lg border px-3 text-fluid-sm transition"
+                :class="
+                  switchSide === side
+                    ? 'border-brand-600 bg-brand-600 text-white'
+                    : 'border-border text-content-muted hover:bg-surface-muted'
+                "
+                :aria-pressed="switchSide === side"
+                @click="switchSide = side"
+              >
+                {{ side === 'L' ? '左打' : '右打' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!--
+          ⚾ 主要的登錄方式：從本壘的球拖到落點，放開後在選單上點結果。
+          常見的情況是「拖一次、點一次」。落點會存進資料庫，前台畫成落點圖。
+        -->
+        <div class="mx-auto max-w-lg">
+          <p v-if="relocateIndex !== null" class="mb-2 text-fluid-sm text-danger">
+            把球拖到第 {{ relocateIndex + 1 }} 個打席的新落點。
+            <button
+              type="button"
+              class="ml-2 underline underline-offset-4"
+              @click="((relocateIndex = null), (activeIndex = null))"
+            >
+              取消
+            </button>
+          </p>
+
+          <AdminFieldPicker
+            :plays="rows"
+            :active-index="activeIndex"
+            :bats="currentBats"
+            :disabled="relocateIndex === null && !canAdd"
+            @drop="onDrop"
+          />
+
+          <p
+            v-if="complete && relocateIndex === null"
+            class="mt-2 text-fluid-sm text-content-muted"
+          >
+            在列表上按「改落點」，再把球拖到新的位置。
+          </p>
+
+          <!--
+            沒有落點的結果放在本壘旁邊，點一下就好，不用拖。
+            三振與保送佔一場打席的三成以上，而「投手前滾地」是真的會拖到
+            投手身上的情況 —— 兩者混在同一個選單裡很容易點錯。
+          -->
+          <div
+            v-if="!complete"
+            class="mt-2 grid grid-cols-5 gap-1.5"
+            role="group"
+            aria-label="沒有落點的結果"
+          >
+            <button
+              v-for="result in NO_LANDING_RESULTS"
+              :key="result"
+              type="button"
+              class="min-h-11 rounded-lg border border-border px-0.5 text-xs font-bold whitespace-nowrap transition hover:bg-surface-muted disabled:opacity-40"
+              :disabled="!canAdd || exceedsOuts(result)"
+              @click="addPlay(result)"
+            >
+              {{ NO_LANDING_LABELS[result] }}
+            </button>
+          </div>
+        </div>
+
+        <AdminLandingSheet
+          v-if="pendingPoint"
+          :point="pendingPoint"
+          :batter-label="batterLabel"
+          :remaining-outs="remainingOuts"
+          @confirm="onLandingConfirm"
+          @cancel="pendingPoint = null"
+        />
+
+        <!--
+          其他輸入方式：語音與結果按鈕。拖不了的時候（鍵盤操作、手抖、
+          只知道結果不知道落點）的退路，登錄出來的打席沒有落點。
+        -->
+        <details v-if="!complete" class="rounded-lg bg-surface-muted/50 p-2">
+          <summary class="min-h-11 cursor-pointer py-2 text-fluid-sm text-content-muted">
+            其他輸入方式（語音、按鈕，不記落點）
+          </summary>
+          <div class="mt-2 space-y-3">
+            <!--
+          🎤 按住說話。一次可以連著講三四個打席（「24 號三壘安打、56 號三振」），
+          模型自己斷句。辨識結果進下面的暫存卡片，確認過才寫進去。
+          瀏覽器錄不出東西時整顆不顯示 —— 一顆按了沒反應的按鈕比沒有更糟。
+        -->
+            <div v-if="voice.supported.value" class="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                class="min-h-12 rounded-full border px-5 text-fluid-sm font-bold transition select-none"
+                :class="
+                  voice.status.value === 'recording'
+                    ? 'border-danger bg-danger text-white'
+                    : 'border-border hover:bg-surface-muted'
+                "
+                :disabled="voice.status.value === 'parsing'"
+                @pointerdown.prevent="voice.start"
+                @pointerup.prevent="stopVoice"
+                @pointerleave="voice.status.value === 'recording' && stopVoice()"
+              >
+                {{
+                  voice.status.value === 'recording'
+                    ? '🔴 錄音中…放開就辨識'
+                    : voice.status.value === 'parsing'
+                      ? '辨識中…'
+                      : '🎤 按住說話'
+                }}
+              </button>
+              <span class="text-xs text-content-muted">
+                例如「24 號三壘安打、56 號三振、18 號雙殺打」
+              </span>
+            </div>
+
+            <p v-if="voice.error.value" class="text-fluid-sm text-danger">
+              {{ voice.error.value }}
+            </p>
+
+            <!-- 辨識結果：**確認過才寫進去**，不自動採用 -->
+            <div
+              v-if="voice.suggestions.value.length"
+              class="space-y-2 rounded-xl border border-brand-600/40 bg-brand-600/5 p-3"
+            >
+              <p class="text-fluid-sm font-bold">聽到這些打席，確認後再採用：</p>
+              <p v-if="voice.transcript.value" class="text-xs text-content-muted">
+                原話：{{ voice.transcript.value }}
+              </p>
+
+              <ul class="space-y-1">
+                <li
+                  v-for="(item, index) in voice.suggestions.value"
+                  :key="index"
+                  class="flex flex-wrap items-center gap-2 text-fluid-sm"
+                >
+                  <span class="font-bold">
+                    {{ item.name ? `#${item.number} ${item.name}` : `#${item.number || '？'}` }}
+                  </span>
+                  <span>{{ PLAY_RESULTS[normalizeSuggestedResult(item.result)].label }}</span>
+                  <span v-if="item.runs" class="text-brand-600 dark:text-brand-300">
+                    得 {{ item.runs }} 分
+                  </span>
+                  <!-- 把握度低的要講出來，不要讓它混在確定的那幾筆裡 -->
+                  <UiBaseBadge
+                    v-if="item.confidence < LOW_CONFIDENCE_THRESHOLD"
+                    tone="warning"
+                    size="sm"
+                  >
+                    請確認
+                  </UiBaseBadge>
+                  <button
+                    type="button"
+                    class="ml-auto min-h-8 rounded px-2 text-content-muted hover:text-danger"
+                    :aria-label="`不要這一筆：${item.sourceText || item.result}`"
+                    @click="dropSuggestion(index)"
+                  >
+                    ✕
+                  </button>
+                </li>
+              </ul>
+
+              <p
+                v-for="warning in voice.warnings.value"
+                :key="warning"
+                class="text-xs text-warning"
+              >
+                {{ warning }}
+              </p>
+
+              <div class="flex flex-wrap gap-2">
+                <UiBaseButton size="sm" @click="acceptSuggestions">全部採用</UiBaseButton>
+                <UiBaseButton variant="ghost" size="sm" @click="voice.clear">丟棄</UiBaseButton>
+              </div>
+            </div>
+
+            <div>
+              <span class="mb-1 block text-fluid-sm font-medium">結果（按下去就登錄一個打席）</span>
+              <div class="grid grid-cols-4 gap-1.5 sm:grid-cols-8">
+                <button
+                  v-for="result in COMMON_PLAY_RESULTS"
+                  :key="result"
+                  type="button"
+                  class="min-h-12 rounded-lg border border-border px-1 text-xs font-bold transition hover:bg-surface-muted disabled:opacity-40"
+                  :disabled="!canAdd || exceedsOuts(result)"
+                  @click="addPlay(result)"
+                >
+                  {{ PLAY_RESULTS[result].label }}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                class="mt-2 min-h-11 text-fluid-sm text-content-muted underline underline-offset-4"
+                :aria-expanded="showAllResults"
+                @click="showAllResults = !showAllResults"
+              >
+                {{ showAllResults ? '收起' : '更多結果' }}
+              </button>
+
+              <div v-if="showAllResults" class="mt-2 grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+                <button
+                  v-for="result in otherResults"
+                  :key="result"
+                  type="button"
+                  class="min-h-11 rounded-lg border border-border px-1 text-xs transition hover:bg-surface-muted disabled:opacity-40"
+                  :disabled="!canAdd || exceedsOuts(result)"
+                  @click="addPlay(result)"
+                >
+                  {{ PLAY_RESULTS[result].label }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <p v-if="full" class="text-fluid-sm text-warning">
+          這個半局已經有 {{ MAX_PLAYS_PER_HALF_INNING }} 個打席了，再多八成是登錯半局。
+        </p>
+        <p v-else-if="!canAdd && !complete" class="text-fluid-sm text-content-muted">
+          {{
+            ourAtBat ? '先到「打線」分頁排好先發陣容，這裡才輪得到人。' : '請先填對手打者的背號。'
+          }}
+        </p>
+      </div>
+    </section>
+  </div>
+</template>

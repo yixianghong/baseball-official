@@ -187,3 +187,57 @@ describe('AdminRowMenu', () => {
     expect(menuItems()[1]!.textContent?.trim()).toBe('刪除')
   })
 })
+
+describe('UiBaseInput 的 digits／inputmode', () => {
+  async function mountDigits() {
+    let value = ''
+    const wrapper = await mountSuspended(BaseInput, {
+      props: {
+        label: '背號',
+        modelValue: '',
+        'onUpdate:modelValue': (next: string) => {
+          value = next
+          void wrapper.setProps({ modelValue: next })
+        },
+        digits: true,
+        maxlength: 3,
+      },
+    })
+    return { wrapper, current: () => value }
+  }
+
+  it('inputmode 掛在 input 上，不是外層的 div', async () => {
+    // 沒宣告成 prop 時它會落到 div 上，手機一直跳出一般鍵盤，畫面上看不出異常
+    const wrapper = await mountSuspended(BaseInput, {
+      props: { label: '背號', modelValue: '', inputmode: 'numeric' },
+    })
+    expect(wrapper.find('input').attributes('inputmode')).toBe('numeric')
+    expect(wrapper.attributes('inputmode')).toBeUndefined()
+  })
+
+  it('digits 預設帶數字鍵盤', async () => {
+    const { wrapper } = await mountDigits()
+    expect(wrapper.find('input').attributes('inputmode')).toBe('numeric')
+  })
+
+  it('非數字在輸入當下就被拿掉，畫面上也看不到', async () => {
+    const { wrapper, current } = await mountDigits()
+    const input = wrapper.find('input')
+    await input.setValue('2a4')
+    expect(current()).toBe('24')
+    expect((input.element as HTMLInputElement).value).toBe('24')
+  })
+
+  it('只打了一個字母時也清得掉（model 沒變，Vue 不會自己重畫）', async () => {
+    const { wrapper } = await mountDigits()
+    const input = wrapper.find('input')
+    await input.setValue('a')
+    expect((input.element as HTMLInputElement).value).toBe('')
+  })
+
+  it('貼上超過長度的內容時截到 maxlength', async () => {
+    const { wrapper, current } = await mountDigits()
+    await wrapper.find('input').setValue('#12345')
+    expect(current()).toBe('123')
+  })
+})

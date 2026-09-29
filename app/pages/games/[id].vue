@@ -109,7 +109,7 @@ watchEffect(() => {
 })
 
 /**
- * 候補：確定出席、但今天沒有上場的人（不在打線也不在投手紀錄上）。
+ * 候補：確定出席、但今天沒有上場的人（不在打線、不是先發投手、沒出現在任何打席上）。
  * 推導而來，不是另外存的欄位 —— 理由見 `deriveBench()`。
  */
 const bench = computed(() => (game.value ? deriveBench(game.value) : []))
@@ -334,98 +334,25 @@ useHead({
             :date="game.date"
             :time="game.time"
             :venue="game.venue"
-            :pitchers="game.pitchers"
+            :starting-pitcher="game.startingPitcher"
           />
           <UiBaseEmpty v-else title="尚未登錄出賽名單" icon="📋" />
         </section>
 
         <!--
-          ══ 本場紀錄 ══
-          投手與打擊是同一件事的兩面（這一場我們打得怎麼樣），所以收在同一個
-          標題底下，各自用 `<h3>` 分開 —— 而不是兩個平行的 `<h2>`，那會讓
-          目錄上出現兩個看起來不相干的區塊。
-
-          **上下排而不是左右並排**：投手通常一到三個人，打者九到十二個。
-          並排的話左欄兩列、右欄十二列，中間空一大塊，看起來像壞掉了。
-
-          兩種紀錄的成績都是後台一個字一個字打進去的純文字
-          （`batterEntrySchema` 說明了為什麼不是數字欄位），
-          所以這裡照原樣顯示，不做任何解析或加總。
+          ══ 成績表 ══
+          有逐打席紀錄時才出現，由它推導（`shared/schemas/box-score.ts`）。
+          **登錄不完整的場次不顯示打擊率** —— 理由寫在 `GameBoxScore` 上。
         -->
-        <section
-          v-if="game.pitchers.length || game.batters.length"
-          aria-labelledby="records-heading"
-          class="space-y-6"
-        >
-          <h2 id="records-heading" class="text-fluid-xl font-bold">本場紀錄</h2>
+        <GameBoxScore :game="game" :our-name="teamName" :opponent-name="game.opponent" />
 
-          <div v-if="game.pitchers.length">
-            <h3 class="mb-3 text-fluid-base font-bold text-content-muted">投手</h3>
-            <ul class="grid gap-2 sm:grid-cols-2">
-              <li
-                v-for="pitcher in game.pitchers"
-                :key="`${pitcher.playerId}-${pitcher.name}`"
-                class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-surface-raised px-4 py-3"
-              >
-                <UiBaseBadge tone="brand" size="sm">
-                  {{
-                    pitcher.role === 'starter'
-                      ? '先發'
-                      : pitcher.role === 'closer'
-                        ? '終結'
-                        : '中繼'
-                  }}
-                </UiBaseBadge>
-                <NuxtLink
-                  v-if="pitcher.playerId"
-                  :to="`/players/${pitcher.playerId}`"
-                  class="font-medium hover:text-brand-600"
-                >
-                  <span v-if="pitcher.number" class="mr-1 text-content-muted tabular-nums">
-                    #{{ pitcher.number }}
-                  </span>
-                  {{ pitcher.name }}
-                </NuxtLink>
-                <span v-else class="font-medium">{{ pitcher.name }}</span>
-                <span v-if="pitcher.note" class="text-fluid-sm text-content-muted">
-                  {{ pitcher.note }}
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          <div v-if="game.batters.length">
-            <h3 class="mb-3 text-fluid-base font-bold text-content-muted">打擊</h3>
-            <ul class="grid gap-2 sm:grid-cols-2">
-              <li
-                v-for="batter in game.batters"
-                :key="`${batter.playerId}-${batter.name}`"
-                class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-border bg-surface-raised px-4 py-3"
-              >
-                <NuxtLink
-                  v-if="batter.playerId"
-                  :to="`/players/${batter.playerId}`"
-                  class="font-medium hover:text-brand-600"
-                >
-                  <span v-if="batter.number" class="mr-1 text-content-muted tabular-nums">
-                    #{{ batter.number }}
-                  </span>
-                  {{ batter.name }}
-                </NuxtLink>
-                <!-- 名冊上沒有的人（臨時支援）不連到球員頁 —— 那一頁不存在 -->
-                <span v-else class="font-medium">
-                  <span v-if="batter.number" class="mr-1 text-content-muted tabular-nums">
-                    #{{ batter.number }}
-                  </span>
-                  {{ batter.name }}
-                </span>
-                <span v-if="batter.note" class="text-fluid-sm text-content-muted">
-                  {{ batter.note }}
-                </span>
-              </li>
-            </ul>
-          </div>
-        </section>
+        <!-- 有落點的打席才出現（逐局紀錄在球場上拖曳登錄的那些） -->
+        <GameSprayChart
+          :plays="game.plays"
+          :home-away="game.homeAway"
+          :our-name="teamName"
+          :opponent-name="game.opponent"
+        />
       </template>
 
       <!-- ══ 未來：出席 + 先發陣容 ═════════════════════════════ -->
@@ -456,7 +383,7 @@ useHead({
               :date="game.date"
               :time="game.time"
               :venue="game.venue"
-              :pitchers="game.pitchers"
+              :starting-pitcher="game.startingPitcher"
             />
             <UiBaseEmpty
               v-else
@@ -494,7 +421,7 @@ useHead({
         沒有可顯示的片段時 `GameClips` 自己整塊不渲染（私人影片也會被濾掉），
         所以延賽／取消的場次不會多出一個空標題。
       -->
-      <GameClips :clips="game.clips" :finished="isFinished" />
+      <GameClips :clips="game.clips" :finished="isFinished" :plays="game.plays" />
     </div>
   </div>
 </template>

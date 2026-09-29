@@ -28,8 +28,7 @@ const game = (id: string, date: string, extra: Partial<Game> = {}): Game =>
     remindersSent: [],
     attendance: [],
     lineup: [],
-    pitchers: [],
-    batters: [],
+    startingPitcher: null,
     scoreboard: {
       innings: [],
       totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },
