@@ -22,8 +22,8 @@ import {
 } from '#shared/schemas/half-inning'
 import { battingOrderAt, slotOfBatter } from '#shared/schemas/batting-order'
 import {
-  COMMON_PLAY_RESULTS,
   adjustRuns,
+  BATTED_LABELS,
   clampRbi,
   defaultRbi,
   defaultRuns,
@@ -33,7 +33,6 @@ import {
   halfInningStatus,
   MAX_PLAYS_PER_HALF_INNING,
   PLAY_RESULTS,
-  playResultSchema,
   playsOf,
   sortPlays,
 } from '#shared/schemas/play'
@@ -311,14 +310,6 @@ const currentPitcher = computed<Play['pitcher']>(() => {
 
 // ── 新增一個打席 ────────────────────────────────────────────────
 
-const showAllResults = ref(false)
-
-const otherResults = computed(() =>
-  playResultSchema.options.filter(
-    (result) => !(COMMON_PLAY_RESULTS as readonly string[]).includes(result),
-  ),
-)
-
 const full = computed(() => rows.value.length >= MAX_PLAYS_PER_HALF_INNING)
 
 // ── 三出局之後鎖住 ──────────────────────────────────────────────
@@ -446,7 +437,6 @@ function addPlay(result: PlayResult, landing: Landing = NO_LANDING): void {
   pinch.value = null
   opponentNumber.value = ''
   switchSide.value = 'R'
-  showAllResults.value = false
   pendingPoint.value = null
 
   // 第三個出局登錄完，直接跳到下一個半局 —— 下一筆一定是在那裡
@@ -546,51 +536,100 @@ async function stopVoice(): Promise<void> {
   })
 }
 
-/** 把辨識出來的打席全部寫進這個半局。 */
+type Suggestion = (typeof voice.suggestions.value)[number]
+
+/**
+ * 暫存卡片上每一筆的問題。有任何一筆有問題就不能「全部採用」——
+ * 刪掉那一筆重講，或改用球場登錄。
+ */
+function suggestionProblem(item: Suggestion): string {
+  if (!item.result) return '聽不出結果'
+  if (!item.batter.number && !item.batter.name) return '聽不出打者'
+  return ''
+}
+
+/** 採用之後這個半局會有幾個出局。超過三就不能採用（和手動登錄同一條規則）。 */
+const suggestedOuts = computed(() =>
+  voice.suggestions.value.reduce(
+    (sum, item) => sum + (item.result ? PLAY_RESULTS[item.result].outs : 0),
+    0,
+  ),
+)
+
+const acceptBlocker = computed(() => {
+  if (complete.value) return '這個半局已經三出局了。'
+  const problems = voice.suggestions.value.filter((item) => suggestionProblem(item)).length
+  if (problems) return `有 ${problems} 筆需要處理（刪掉重講，或改用球場登錄）。`
+  if (suggestedOuts.value > remainingOuts.value) {
+    return `這幾筆共 ${suggestedOuts.value} 個出局，但這個半局只剩 ${remainingOuts.value} 個。`
+  }
+  return ''
+})
+
+/**
+ * 把辨識出來的打席寫進這個半局。
+ *
+ * 語音沒講到的欄位（`null`）在這裡才補上 —— 用的是和手動登錄**同一套**預設：
+ * 得分依結果（`defaultRuns()`），打點依得分（`defaultRbi()`），投手是現在在投的
+ * 那一位，左右打與第幾棒看名冊與打線。落點永遠是空的（要落點就「補落點」）。
+ */
 function acceptSuggestions(): void {
+  if (acceptBlocker.value) return
+
   const pitcher = currentPitcher.value
-  commit([
-    ...rows.value,
-    ...voice.suggestions.value.map((item) => ({
+  const added: Play[] = voice.suggestions.value.map((item) => {
+    const result = item.result!
+    const batter = {
+      playerId: item.batter.playerId ?? '',
+      name: item.batter.name ?? '',
+      number: item.batter.number ?? '',
+    }
+    const runs = Math.max(item.runs ?? defaultRuns(result), defaultRuns(result))
+    const rbi = item.rbi === null ? defaultRbi(result, runs) : clampRbi({ runs }, item.rbi)
+    const player = props.players.find((candidate) => candidate.id === batter.playerId)
+    const ours = selected.value.side === 'our'
+
+    return {
       inning: selected.value.inning,
       half: selected.value.half,
-      batter: { playerId: item.playerId, name: item.name, number: item.number },
+      batter,
       pitcher,
-      result: normalizeSuggestedResult(item.result),
-      runs: item.runs,
-      rbi: item.rbi,
+      result,
+      runs,
+      rbi,
       note: '',
       // 原話留著 —— 辨識錯的時候，看得到當初講了什麼才知道該改成什麼
       transcript: item.sourceText,
-      // 語音刻意不產生落點：「游擊方向」猜出來的座標混進落點圖就會被當真。
-      // 要補落點的話，在列表上點「改落點」拖一次
-      ...NO_LANDING,
-      bats: null,
-      battingSlot:
-        selected.value.side === 'our'
-          ? slotOfBatter(order.value.slots, {
-              playerId: item.playerId,
-              name: item.name,
-              number: item.number,
-            })
-          : null,
-    })),
-  ])
+      location: null,
+      fielder: item.fielder,
+      batted: item.batted,
+      // 左右開弓的人語音沒講站哪邊，就不記（不猜）
+      bats: ours && player?.bats && player.bats !== 'S' ? player.bats : null,
+      battingSlot: ours ? slotOfBatter(order.value.slots, batter) : null,
+    }
+  })
+
+  const next = [...rows.value, ...added]
+  commit(next)
   voice.clear()
+  if (halfInningOuts(next) >= 3) void nextTick(goToNextHalf)
 }
 
 function dropSuggestion(index: number): void {
   voice.suggestions.value = voice.suggestions.value.filter((_, i) => i !== index)
 }
 
-/**
- * 後端已經把結果收斂成列舉值了，這裡只是型別上的最後一道防線 ——
- * 萬一送來一個列舉外的字串，寧可標成「其他」也不要讓整張表算錯。
- */
-function normalizeSuggestedResult(value: string): PlayResult {
-  return (playResultSchema.options as readonly string[]).includes(value)
-    ? (value as PlayResult)
-    : 'other'
+/** 暫存卡片上一筆的摘要：「#24 張志豪 三壘安打 · 游擊 · 滾地 · 得 1 分」。 */
+function suggestionText(item: Suggestion): string {
+  const who = item.batter.number
+    ? `#${item.batter.number}${item.batter.name ? ` ${item.batter.name}` : ''}`
+    : (item.batter.name ?? '（打者？）')
+  const parts = [who, item.result ? PLAY_RESULTS[item.result].label : '（結果？）']
+  if (item.fielder) parts.push(POSITION_LABELS[item.fielder])
+  if (item.batted) parts.push(BATTED_LABELS[item.batted])
+  if (item.runs !== null) parts.push(`得 ${item.runs} 分`)
+  if (item.rbi !== null) parts.push(`${item.rbi} 打點`)
+  return parts.join(' · ')
 }
 </script>
 
@@ -971,145 +1010,110 @@ function normalizeSuggestedResult(value: string): PlayResult {
         />
 
         <!--
-          其他輸入方式：語音與結果按鈕。拖不了的時候（鍵盤操作、手抖、
-          只知道結果不知道落點）的退路，登錄出來的打席沒有落點。
-        -->
-        <details v-if="!complete" class="rounded-lg bg-surface-muted/50 p-2">
-          <summary class="min-h-11 cursor-pointer py-2 text-fluid-sm text-content-muted">
-            其他輸入方式（語音、按鈕，不記落點）
-          </summary>
-          <div class="mt-2 space-y-3">
-            <!--
-          🎤 按住說話。一次可以連著講三四個打席（「24 號三壘安打、56 號三振」），
-          模型自己斷句。辨識結果進下面的暫存卡片，確認過才寫進去。
-          瀏覽器錄不出東西時整顆不顯示 —— 一顆按了沒反應的按鈕比沒有更糟。
-        -->
-            <div v-if="voice.supported.value" class="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                class="min-h-12 rounded-full border px-5 text-fluid-sm font-bold transition select-none"
-                :class="
-                  voice.status.value === 'recording'
-                    ? 'border-danger bg-danger text-white'
-                    : 'border-border hover:bg-surface-muted'
-                "
-                :disabled="voice.status.value === 'parsing'"
-                @pointerdown.prevent="voice.start"
-                @pointerup.prevent="stopVoice"
-                @pointerleave="voice.status.value === 'recording' && stopVoice()"
-              >
-                {{
-                  voice.status.value === 'recording'
-                    ? '🔴 錄音中…放開就辨識'
-                    : voice.status.value === 'parsing'
-                      ? '辨識中…'
-                      : '🎤 按住說話'
-                }}
-              </button>
-              <span class="text-xs text-content-muted">
-                例如「24 號三壘安打、56 號三振、18 號雙殺打」
-              </span>
-            </div>
+          ── 語音登錄（常駐）──
+          球場拖曳之外唯一的輸入方式。一次可以連著講三四個打席
+          （「24 號三壘安打、56 號三振」），模型自己斷句；講到的欄位
+          （守備位置、滾地／平飛／高飛、得分、打點）都會帶進來，沒講的留空。
+          辨識結果進暫存卡片，**確認過才寫進去**。語音登錄的打席沒有落點，
+          要落點就在列表上「補落點」。
 
-            <p v-if="voice.error.value" class="text-fluid-sm text-danger">
-              {{ voice.error.value }}
+          原本的結果按鈕格拿掉了：它和球場拖曳做的是同一件事，卻不記落點，
+          留著只會讓人不知道該用哪一個。
+          瀏覽器錄不出聲音時整塊不顯示 —— 一顆按了沒反應的按鈕比沒有更糟。
+        -->
+        <section
+          v-if="!complete && voice.supported.value"
+          class="space-y-2 rounded-xl border border-border bg-surface p-3"
+          aria-label="語音登錄"
+        >
+          <div class="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              class="min-h-12 rounded-full border px-5 text-fluid-sm font-bold transition select-none"
+              :class="
+                voice.status.value === 'recording'
+                  ? 'border-danger bg-danger text-white'
+                  : 'border-border hover:bg-surface-muted'
+              "
+              :disabled="voice.status.value === 'parsing'"
+              @pointerdown.prevent="voice.start"
+              @pointerup.prevent="stopVoice"
+              @pointerleave="voice.status.value === 'recording' && stopVoice()"
+            >
+              {{
+                voice.status.value === 'recording'
+                  ? '🔴 錄音中…放開就辨識'
+                  : voice.status.value === 'parsing'
+                    ? '辨識中…'
+                    : '🎤 按住說話'
+              }}
+            </button>
+            <span class="text-xs text-content-muted">
+              例如「24 號游擊方向滾地球出局、18 號左外野平飛安打得一分」
+            </span>
+          </div>
+
+          <p v-if="voice.error.value" class="text-fluid-sm text-danger">
+            {{ voice.error.value }}
+          </p>
+
+          <!-- 辨識結果：**確認過才寫進去**，不自動採用 -->
+          <div
+            v-if="voice.suggestions.value.length"
+            class="space-y-2 rounded-lg border border-brand-600/40 bg-brand-600/5 p-3"
+          >
+            <p class="text-fluid-sm font-bold">聽到這些打席，確認後再採用：</p>
+            <p v-if="voice.transcript.value" class="text-xs text-content-muted">
+              原話：{{ voice.transcript.value }}
             </p>
 
-            <!-- 辨識結果：**確認過才寫進去**，不自動採用 -->
-            <div
-              v-if="voice.suggestions.value.length"
-              class="space-y-2 rounded-xl border border-brand-600/40 bg-brand-600/5 p-3"
-            >
-              <p class="text-fluid-sm font-bold">聽到這些打席，確認後再採用：</p>
-              <p v-if="voice.transcript.value" class="text-xs text-content-muted">
-                原話：{{ voice.transcript.value }}
-              </p>
-
-              <ul class="space-y-1">
-                <li
-                  v-for="(item, index) in voice.suggestions.value"
-                  :key="index"
-                  class="flex flex-wrap items-center gap-2 text-fluid-sm"
-                >
-                  <span class="font-bold">
-                    {{ item.name ? `#${item.number} ${item.name}` : `#${item.number || '？'}` }}
-                  </span>
-                  <span>{{ PLAY_RESULTS[normalizeSuggestedResult(item.result)].label }}</span>
-                  <span v-if="item.runs" class="text-brand-600 dark:text-brand-300">
-                    得 {{ item.runs }} 分
-                  </span>
-                  <!-- 把握度低的要講出來，不要讓它混在確定的那幾筆裡 -->
-                  <UiBaseBadge
-                    v-if="item.confidence < LOW_CONFIDENCE_THRESHOLD"
-                    tone="warning"
-                    size="sm"
-                  >
-                    請確認
-                  </UiBaseBadge>
-                  <button
-                    type="button"
-                    class="ml-auto min-h-8 rounded px-2 text-content-muted hover:text-danger"
-                    :aria-label="`不要這一筆：${item.sourceText || item.result}`"
-                    @click="dropSuggestion(index)"
-                  >
-                    ✕
-                  </button>
-                </li>
-              </ul>
-
-              <p
-                v-for="warning in voice.warnings.value"
-                :key="warning"
-                class="text-xs text-warning"
+            <ul class="space-y-1">
+              <li
+                v-for="(item, index) in voice.suggestions.value"
+                :key="index"
+                class="flex flex-wrap items-center gap-2 text-fluid-sm"
               >
-                {{ warning }}
-              </p>
-
-              <div class="flex flex-wrap gap-2">
-                <UiBaseButton size="sm" @click="acceptSuggestions">全部採用</UiBaseButton>
-                <UiBaseButton variant="ghost" size="sm" @click="voice.clear">丟棄</UiBaseButton>
-              </div>
-            </div>
-
-            <div>
-              <span class="mb-1 block text-fluid-sm font-medium">結果（按下去就登錄一個打席）</span>
-              <div class="grid grid-cols-4 gap-1.5 sm:grid-cols-8">
-                <button
-                  v-for="result in COMMON_PLAY_RESULTS"
-                  :key="result"
-                  type="button"
-                  class="min-h-12 rounded-lg border border-border px-1 text-xs font-bold transition hover:bg-surface-muted disabled:opacity-40"
-                  :disabled="!canAdd || exceedsOuts(result)"
-                  @click="addPlay(result)"
+                <span>{{ suggestionText(item) }}</span>
+                <UiBaseBadge v-if="suggestionProblem(item)" tone="danger" size="sm">
+                  {{ suggestionProblem(item) }}
+                </UiBaseBadge>
+                <!-- 把握度低的要講出來，不要讓它混在確定的那幾筆裡 -->
+                <UiBaseBadge
+                  v-else-if="item.confidence < LOW_CONFIDENCE_THRESHOLD"
+                  tone="warning"
+                  size="sm"
                 >
-                  {{ PLAY_RESULTS[result].label }}
-                </button>
-              </div>
-
-              <button
-                type="button"
-                class="mt-2 min-h-11 text-fluid-sm text-content-muted underline underline-offset-4"
-                :aria-expanded="showAllResults"
-                @click="showAllResults = !showAllResults"
-              >
-                {{ showAllResults ? '收起' : '更多結果' }}
-              </button>
-
-              <div v-if="showAllResults" class="mt-2 grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+                  請確認
+                </UiBaseBadge>
                 <button
-                  v-for="result in otherResults"
-                  :key="result"
                   type="button"
-                  class="min-h-11 rounded-lg border border-border px-1 text-xs transition hover:bg-surface-muted disabled:opacity-40"
-                  :disabled="!canAdd || exceedsOuts(result)"
-                  @click="addPlay(result)"
+                  class="ml-auto min-h-8 rounded px-2 text-content-muted hover:text-danger"
+                  :aria-label="`不要這一筆：${item.sourceText || suggestionText(item)}`"
+                  @click="dropSuggestion(index)"
                 >
-                  {{ PLAY_RESULTS[result].label }}
+                  ✕
                 </button>
-              </div>
+              </li>
+            </ul>
+
+            <p class="text-xs text-content-muted">
+              沒講到的欄位採用時才補：得分依結果（全壘打 1 分、其餘 0）、打點依得分，
+              投手是現在在投的那一位。可以在列表上再調。
+            </p>
+
+            <p v-for="warning in voice.warnings.value" :key="warning" class="text-xs text-warning">
+              {{ warning }}
+            </p>
+            <p v-if="acceptBlocker" class="text-xs text-danger">{{ acceptBlocker }}</p>
+
+            <div class="flex flex-wrap gap-2">
+              <UiBaseButton size="sm" :disabled="Boolean(acceptBlocker)" @click="acceptSuggestions">
+                全部採用
+              </UiBaseButton>
+              <UiBaseButton variant="ghost" size="sm" @click="voice.clear">丟棄</UiBaseButton>
             </div>
           </div>
-        </details>
+        </section>
 
         <p v-if="full" class="text-fluid-sm text-warning">
           這個半局已經有 {{ MAX_PLAYS_PER_HALF_INNING }} 個打席了，再多八成是登錯半局。

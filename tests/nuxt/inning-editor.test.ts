@@ -52,6 +52,15 @@ function mount(overrides: Record<string, unknown> = {}) {
   })
 }
 
+/**
+ * 讓球場元件送出一次 `drop`。拖曳本身（Pointer Events、SVG 座標）在 happy-dom
+ * 裡沒有真的版面，那部分用無頭 Chrome 驗；這裡守的是放開之後的流程。
+ */
+async function dropOnField(component: Awaited<ReturnType<typeof mount>>, x: number, y: number) {
+  component.findComponent({ name: 'AdminFieldPicker' }).vm.$emit('drop', { x, y })
+  await nextTick()
+}
+
 /** 打線列表上亮起來（輪到打擊）的那一棒。 */
 function currentBatter(component: Awaited<ReturnType<typeof mount>>): string {
   return component.find('[aria-label="打線"] [aria-current="true"]').text()
@@ -125,20 +134,29 @@ describe('AdminInningEditor', () => {
     expect(currentBatter(component)).toContain('#7 張志豪')
   })
 
-  it('按一個結果鍵就登錄一個打席', async () => {
-    // ⚠️ 這是整個功能能不能被實際使用的關鍵：多數打席只要按一下。
+  it('拖一次、點一次就登錄一個打席', async () => {
+    // ⚠️ 這是整個功能能不能被實際使用的關鍵：多數打席只要一個動作加一下點擊。
     // 要是變成「選打者 → 選結果 → 按新增」，一場十四個半局就沒人會登
     const component = await mount()
     await component.findAll('[aria-label="半局"] [role="tab"]')[1]?.trigger('click')
-    await resultButton(component, '三壘安打')?.trigger('click')
+    await dropOnField(component, -0.13, 0.42)
+    await resultButton(component, '滾地球出局')?.trigger('click')
 
     const saved = component.emitted('save')
     expect(saved).toHaveLength(1)
     expect(saved?.[0]?.[0]).toBe(1)
     expect(saved?.[0]?.[1]).toBe('bottom')
     expect(saved?.[0]?.[2]).toMatchObject([
-      { result: 'triple', batter: { playerId: 'p4', number: '7' }, runs: 0 },
+      { result: 'groundout', batter: { playerId: 'p4', number: '7' }, runs: 0 },
     ])
+  })
+
+  it('結果按鈕格已經拿掉，球場之外只剩語音', async () => {
+    // 按鈕格和球場拖曳做的是同一件事、卻不記落點，留著只會讓人不知道該用哪一個
+    const component = await mount()
+    await component.findAll('[aria-label="半局"] [role="tab"]')[1]?.trigger('click')
+    expect(component.text()).not.toContain('其他輸入方式')
+    expect(component.text()).not.toContain('更多結果')
   })
 
   it('登錄時不問得分：全壘打預設 1 分，其他 0 分', async () => {
@@ -147,6 +165,7 @@ describe('AdminInningEditor', () => {
     await component.findAll('[aria-label="半局"] [role="tab"]')[1]?.trigger('click')
     expect(component.find('[aria-label="這個打席得幾分"]').exists()).toBe(false)
 
+    await dropOnField(component, 0, 1.08) // 牆外
     await resultButton(component, '全壘打')?.trigger('click')
     expect(component.emitted('save')?.[0]?.[2]).toMatchObject([{ runs: 1, rbi: 1 }])
   })
@@ -193,7 +212,12 @@ describe('AdminInningEditor', () => {
     await component.findAll('[aria-label="半局"] [role="tab"]')[1]?.trigger('click')
 
     expect(component.text()).toContain('先到「打線」分頁排好先發陣容')
-    expect(resultButton(component, '三壘安打')?.attributes('disabled')).toBeDefined()
+    expect(
+      component
+        .find('[aria-label="沒有落點的結果"]')
+        .findAll('button')
+        .every((button) => button.attributes('disabled') !== undefined),
+    ).toBe(true)
   })
 
   it('對手半局還沒填背號時不讓人登錄', async () => {

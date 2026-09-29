@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   normalizeDate,
+  normalizeBatted,
+  normalizeFielder,
   normalizeJerseyNumber,
   normalizePlayResult,
   normalizeTime,
+  toParsedPlay,
 } from '../../server/utils/gemini'
 
 /**
@@ -122,12 +125,12 @@ describe('normalizePlayResult（語音講的說法 → 列舉值）', () => {
     expect(normalizePlayResult('  三 振  ')).toBe('strikeout')
   })
 
-  it('認不得的一律是「其他」，不猜', () => {
+  it('認不得的回 null，不猜（也不當成「其他」）', () => {
     // 猜一個結果填進去的話，出局數與打擊率都會跟著錯，而畫面上看起來正常。
-    // 寧可標成「其他」等人確認
-    expect(normalizePlayResult('不知道在說什麼')).toBe('other')
-    expect(normalizePlayResult('')).toBe('other')
-    expect(normalizePlayResult(undefined)).toBe('other')
+    // null 讓暫存卡片把它標出來，確認前不能採用
+    expect(normalizePlayResult('不知道在說什麼')).toBeNull()
+    expect(normalizePlayResult('')).toBeNull()
+    expect(normalizePlayResult(undefined)).toBeNull()
   })
 })
 
@@ -144,5 +147,126 @@ describe('normalizeJerseyNumber', () => {
 
   it('最多三碼（背號不會更長，多的是雜訊）', () => {
     expect(normalizeJerseyNumber('123456')).toBe('123')
+  })
+})
+
+describe('normalizeFielder（語音講的守備位置）', () => {
+  it.each([
+    ['游擊', 'SS'],
+    ['游擊方向', 'SS'],
+    ['游擊手', 'SS'],
+    ['中外野', 'CF'],
+    ['左外', 'LF'],
+    ['右外野手', 'RF'],
+    ['投手前', 'P'],
+    ['捕手', 'C'],
+    ['一壘', '1B'],
+    ['二壘手', '2B'],
+    ['三壘方向', '3B'],
+  ])('「%s」→ %s', (spoken, expected) => {
+    expect(normalizeFielder(spoken)).toBe(expected)
+  })
+
+  it('沒講或認不得回 null（不猜）', () => {
+    expect(normalizeFielder('')).toBeNull()
+    expect(normalizeFielder('不知道')).toBeNull()
+    expect(normalizeFielder(undefined)).toBeNull()
+  })
+})
+
+describe('normalizeBatted（語音講的擊球類型）', () => {
+  it.each([
+    ['滾地', 'ground'],
+    ['滾地球', 'ground'],
+    ['平飛', 'line'],
+    ['平飛球', 'line'],
+    ['高飛', 'fly'],
+    ['小飛球', 'fly'],
+  ])('「%s」→ %s', (spoken, expected) => {
+    expect(normalizeBatted(spoken)).toBe(expected)
+  })
+
+  it('沒講回 null', () => {
+    expect(normalizeBatted('')).toBeNull()
+  })
+})
+
+/**
+ * 模型的一筆輸出 → 打席欄位。**語音沒講到的一律是 null**，不在這一層猜。
+ *
+ * 模型對「沒講」的約定是字串填空字串、數字填 -1（responseSchema 的 nullable
+ * 不穩定），這裡把它們轉成 null；預設值是採用那一刻才補的。
+ */
+describe('toParsedPlay', () => {
+  const roster = [{ id: 'p4', name: '張志豪', number: '24' }]
+  const blank = { number: '', result: '', fielder: '', batted: '', runs: -1, rbi: -1 }
+
+  it('只講「24 號三壘安打」時，其他欄位都是 null', () => {
+    const play = toParsedPlay(
+      { ...blank, number: '24', result: '三壘安打', confidence: 0.9 },
+      { ourAtBat: true, roster },
+    )
+    expect(play).toMatchObject({
+      batter: { playerId: 'p4', name: '張志豪', number: '24' },
+      result: 'triple',
+      runs: null,
+      rbi: null,
+      location: null,
+      fielder: null,
+      batted: null,
+    })
+  })
+
+  it('講到的欄位都帶進來：守備位置、擊球類型、得分、打點', () => {
+    const play = toParsedPlay(
+      { number: '24', result: '一壘安打', fielder: '', batted: '平飛', runs: 1, rbi: 1 },
+      { ourAtBat: true, roster },
+    )
+    expect(play).toMatchObject({ result: 'single', batted: 'line', runs: 1, rbi: 1 })
+  })
+
+  it('出局的處理者照講的記；擊球類型從結果推導，所以存 null', () => {
+    const play = toParsedPlay(
+      { ...blank, number: '24', result: '滾地球出局', fielder: '游擊', batted: '滾地' },
+      { ourAtBat: true, roster },
+    )
+    expect(play).toMatchObject({ result: 'groundout', fielder: 'SS', batted: null })
+  })
+
+  it('安打不記處理的人（穿越的球沒有人處理）', () => {
+    const play = toParsedPlay(
+      { ...blank, number: '24', result: '二壘安打', fielder: '左外野', batted: '平飛' },
+      { ourAtBat: true, roster },
+    )
+    expect(play).toMatchObject({ fielder: null, batted: 'line' })
+  })
+
+  it('「沒有得分」是 0，不是 null', () => {
+    const play = toParsedPlay(
+      { ...blank, number: '24', result: '一壘安打', runs: 0 },
+      { ourAtBat: true, roster },
+    )
+    expect(play.runs).toBe(0)
+  })
+
+  it('落點永遠是 null（猜出來的座標混進落點圖會被當真）', () => {
+    const play = toParsedPlay(
+      { ...blank, number: '24', result: '飛球出局', fielder: '中外野' },
+      { ourAtBat: true, roster },
+    )
+    expect(play.location).toBeNull()
+  })
+
+  it('對手打擊時不對我隊名冊（兩隊的背號會撞）', () => {
+    const play = toParsedPlay(
+      { ...blank, number: '24', result: '三振' },
+      { ourAtBat: false, roster },
+    )
+    expect(play.batter).toEqual({ playerId: null, name: null, number: '24' })
+  })
+
+  it('聽不出結果時 result 是 null', () => {
+    const play = toParsedPlay({ ...blank, number: '24', result: '嗯' }, { ourAtBat: true, roster })
+    expect(play.result).toBeNull()
   })
 })

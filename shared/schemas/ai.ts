@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { attendanceStatusSchema, homeAwaySchema, inningScoreSchema, sideTotalsSchema } from './game'
 import { handSchema, positionSchema } from './player'
+import { battedTypeSchema, playResultSchema } from './play'
 
 /**
  * Gemini 圖片辨識的共用契約。
@@ -215,23 +216,42 @@ export const parsePlaysRequestSchema = z.object({
 export type ParsePlaysRequest = z.infer<typeof parsePlaysRequestSchema>
 
 /**
- * 辨識出的一個打席。
+ * 辨識出的一個打席 —— **形狀對應 `playSchema` 的欄位**，語音裡沒講到的一律是 `null`。
  *
- * `result` 已經由後端**用程式碼**收斂成 `playResultSchema` 的列舉值
- * （`normalizePlayResult()`），不是模型自由發揮的字串 —— 格式收斂靠程式碼
- * 而不是提示詞叮嚀，是這個專案既有的紀律，而且只有這樣才測得到。
- * 收不進列舉的一律變成 `other` 並附一句 warning。
+ * ## 為什麼是 `null` 而不是預設值
+ * 「沒講」和「講了 0」是兩件事：沒講得分時，採用的那一刻才依結果帶預設值
+ * （全壘打 1 分、其餘 0，見 `defaultRuns()`）；講了「沒有得分」就是 0。
+ * 在這一層就填上預設值的話，後面分不出哪些是聽到的、哪些是猜的 ——
+ * 而暫存卡片正是要讓人看清楚「系統聽到了什麼」。
+ *
+ * ## 各欄位的來源
+ * | 欄位 | 來源 |
+ * | --- | --- |
+ * | `batter` | 語音講的背號，我隊打擊時對到名冊（對不上就只有背號） |
+ * | `result` | 語音講的結果，由 `normalizePlayResult()` **用程式碼**收斂成列舉值；收不進去是 `null` |
+ * | `runs`／`rbi` | 講了才有值 |
+ * | `fielder` | 講了「游擊方向」「中外野」才有值，而且只在結果需要處理的人時保留（安打是 `null`） |
+ * | `batted` | 講了「滾地」「平飛」「高飛」才有值，而且只在安打／失誤時保留（出局從結果推導） |
+ * | `location` | **永遠是 `null`** —— 「游擊方向」猜出來的座標混進落點圖就會被當真；要落點就到列表上「補落點」 |
+ *
+ * 投手、左右打、第幾棒不在這裡：它們由登錄當下的狀態決定（現在誰在投、名冊、
+ * 打線），和手動登錄走同一條路。
  */
 export const parsedPlaySchema = z.object({
-  /** 對應到的我隊球員 id。對不上或是對手打者時為空字串。 */
-  playerId: z.string().default(''),
-  number: z.string().default(''),
-  name: z.string().default(''),
-  result: z.string().default('other'),
-  runs: z.number().int().min(0).max(4).default(0),
-  rbi: z.number().int().min(0).max(4).default(0),
+  batter: z.object({
+    /** 對應到的我隊球員 id。對不上或是對手打者時為 `null`。 */
+    playerId: z.string().nullable().default(null),
+    name: z.string().nullable().default(null),
+    number: z.string().nullable().default(null),
+  }),
+  result: playResultSchema.nullable().default(null),
+  runs: z.number().int().min(0).max(4).nullable().default(null),
+  rbi: z.number().int().min(0).max(4).nullable().default(null),
+  location: z.null().default(null),
+  fielder: positionSchema.nullable().default(null),
+  batted: battedTypeSchema.nullable().default(null),
   confidence: z.number().min(0).max(1).default(0),
-  /** 這一筆對應到語音裡的哪一句，供人工核對。 */
+  /** 這一筆對應到語音裡的哪一句，供人工核對（採用後存進打席的 `transcript`）。 */
   sourceText: z.string().default(''),
 })
 

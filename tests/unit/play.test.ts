@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   adjustRuns,
   clampRbi,
-  COMMON_PLAY_RESULTS,
   defaultRbi,
   defaultRuns,
   describeBatter,
@@ -100,13 +99,6 @@ describe('PLAY_RESULTS（結果屬性表）', () => {
     expect(PLAY_RESULTS.triple.aliases).not.toContain('三振')
     expect(PLAY_RESULTS.strikeout.aliases).not.toContain('三壘安打')
     expect(PLAY_RESULTS.strikeout.aliases).not.toContain('三安')
-  })
-
-  it('常用的八顆快捷鍵都是合法的結果', () => {
-    for (const result of COMMON_PLAY_RESULTS) {
-      expect(PLAY_RESULTS[result], result).toBeDefined()
-    }
-    expect(COMMON_PLAY_RESULTS).toHaveLength(8)
   })
 })
 

@@ -303,23 +303,6 @@ export const PLAY_RESULTS: Record<PlayResult, PlayResultMeta> = {
   },
 }
 
-/**
- * 登錄介面上最常按的八顆大按鈕，依這個順序排。
- *
- * 其餘的收在「更多」裡 —— 一排二十顆按鈕等於沒有快捷鍵，而場邊或賽後
- * 登錄的人是單手在用手機。
- */
-export const COMMON_PLAY_RESULTS = [
-  'single',
-  'double',
-  'triple',
-  'homerun',
-  'walk',
-  'strikeout',
-  'groundout',
-  'flyout',
-] as const
-
 /** 一個人的身分快照。球員改名不影響歷史紀錄，和打線、出席同一套做法。 */
 const personSchema = z.object({
   /** 我隊球員有值；對手打者與臨時支援的球友沒有。 */

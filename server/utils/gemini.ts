@@ -5,9 +5,11 @@ import {
   LOW_CONFIDENCE_THRESHOLD,
   parseAttendanceResponseSchema,
   parseRosterResponseSchema,
+  parsedPlaySchema,
   parsePlaysResponseSchema,
   parseScheduleResponseSchema,
   parseScoreboardResponseSchema,
+  type ParsedPlay,
   type ParsePlaysRequest,
   type ParsePlaysResponse,
   type ParseAttendanceRequest,
@@ -20,7 +22,8 @@ import {
   type ParseScoreboardResponse,
 } from '../../shared/schemas/ai'
 import { POSITIONS, type Hand, type Position } from '../../shared/schemas/player'
-import { defaultRbi, PLAY_RESULTS, type PlayResult } from '../../shared/schemas/play'
+import { PLAY_RESULTS, type BattedType, type PlayResult } from '../../shared/schemas/play'
+import { needsBattedType, needsFielder } from '../../shared/schemas/field'
 
 /**
  * Gemini 圖片辨識。
@@ -62,6 +65,15 @@ interface GenerateContentResponse {
     finishReason?: string
   }>
   promptFeedback?: { blockReason?: string }
+  /** 這一次呼叫用掉多少 token —— 計費的依據，每次都記進日誌。 */
+  usageMetadata?: {
+    promptTokenCount?: number
+    candidatesTokenCount?: number
+    /** 思考用掉的 token。**以輸出的價格計費**，而且不會出現在回應內容裡。 */
+    thoughtsTokenCount?: number
+    totalTokenCount?: number
+    promptTokensDetails?: Array<{ modality?: string; tokenCount?: number }>
+  }
 }
 
 /** Gemini 的 responseSchema 採 OpenAPI 子集，型別名稱用大寫。 */
@@ -613,6 +625,13 @@ export function normalizeAttendanceStatus(input: unknown): 'yes' | 'no' | 'maybe
   return 'pending'
 }
 
+/**
+ * 模型的輸出格式。
+ *
+ * 沒講到的欄位：**字串填空字串、數字填 -1**。Gemini 的 responseSchema 對
+ * nullable 的支援不穩定（見檔案開頭），所以和計分板一樣用哨兵值，再由程式碼
+ * 轉成 `null`。每個欄位都是「照說話的人講的原樣」，收斂成列舉值是程式碼的事。
+ */
 const PLAYS_RESPONSE_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -621,17 +640,27 @@ const PLAYS_RESPONSE_SCHEMA = {
       items: {
         type: 'OBJECT',
         properties: {
-          number: { type: 'STRING', description: '打者的背號，只要數字。聽不出來填空字串' },
+          number: { type: 'STRING', description: '打者的背號，只要數字。沒講或聽不出來填空字串' },
           result: {
             type: 'STRING',
             description:
               '這個打席的結果，照說話的人講的原樣輸出，例如「三壘安打」「三振」「雙殺打」',
           },
-          runs: { type: 'INTEGER', description: '這個打席隊伍得了幾分，沒講就填 0' },
+          fielder: {
+            type: 'STRING',
+            description:
+              '球打向哪個守備位置、或由誰處理，照原樣輸出，例如「游擊」「中外野」「投手」。沒講填空字串',
+          },
+          batted: {
+            type: 'STRING',
+            description: '擊球類型，照原樣輸出，例如「滾地」「平飛」「高飛」。沒講填空字串',
+          },
+          runs: { type: 'INTEGER', description: '這個打席隊伍得了幾分。沒講填 -1' },
+          rbi: { type: 'INTEGER', description: '打點。明確講了才填，沒講填 -1' },
           sourceText: { type: 'STRING', description: '這一筆對應到語音裡的哪一句' },
           confidence: { type: 'NUMBER', description: '對這一筆的把握程度，0 到 1' },
         },
-        required: ['number', 'result', 'confidence'],
+        required: ['number', 'result', 'fielder', 'batted', 'runs', 'rbi', 'confidence'],
       },
     },
     transcript: { type: 'STRING', description: '整段語音的逐字稿' },
@@ -682,14 +711,19 @@ export async function parsePlayAudio(
     ...(ourAtBat && rosterLines ? ['我隊球員的背號對照：', rosterLines, ''] : []),
     '請把語音中提到的**每一個打席**各輸出一筆，依照講的順序。',
     '',
-    '每一筆請輸出：',
-    '- number：打者的背號，只要數字（「二十四號」請輸出 24）。聽不出來就填空字串。',
-    '- result：這個打席的結果，**照說話的人講的原樣輸出**，不要換成別的說法，',
-    '  也不要翻成英文。例如「三壘安打」「三振」「雙殺打」「四壞」「滾地球出局」。',
-    '- runs：這個打席**隊伍**得了幾分。講「得一分」就是 1，沒提到就填 0。',
-    '  全壘打如果沒講得幾分，就照壘上有幾個人推算；推算不出來填 1。',
+    '每一筆的欄位，**一律照說話的人講的原樣輸出，不要換成別的說法、不要翻成英文**：',
+    '- number：打者的背號，只要數字（「二十四號」請輸出 24）。',
+    '- result：打席結果，例如「三壘安打」「三振」「雙殺打」「四壞」「滾地球出局」。',
+    '- fielder：球打向哪裡、或由誰處理，例如「游擊」「中外野」「投手」。',
+    '- batted：擊球類型，例如「滾地」「平飛」「高飛」。「滾地球出局」這種結果本身',
+    '  就帶著類型的，batted 也照樣填「滾地」。',
+    '- runs：這個打席**隊伍**得了幾分。講「得一分」就是 1、講「沒有得分」就是 0。',
+    '- rbi：打點。只有明確講了「幾分打點」才填。',
     '- sourceText：這一筆對應到語音裡的哪一句，讓人可以核對。',
     '- confidence：你對這一筆的把握程度，0 到 1。',
+    '',
+    '⚠️ **沒有講到的欄位不要猜**：字串填空字串、數字填 -1。',
+    '例如只講「24 號三壘安打」，fielder、batted 就是空字串，runs、rbi 就是 -1。',
     '',
     '另外輸出 transcript：整段語音的逐字稿。',
     '',
@@ -705,35 +739,34 @@ export async function parsePlayAudio(
     plays?: Array<Record<string, unknown>>
     transcript?: string
     warnings?: string[]
-  }>(event, prompt, request.audioBase64, request.mimeType, PLAYS_RESPONSE_SCHEMA)
+  }>(event, prompt, request.audioBase64, request.mimeType, PLAYS_RESPONSE_SCHEMA, {
+    label: 'parse-plays',
+    // ⚠️ 刻意**不關掉思考**。實測（2026-09，gemini-2.5-flash，四段 5～9 秒的錄音）：
+    //
+    // | 設定         | 正確 | 延遲    | 每次約    |
+    // | ------------ | ---- | ------- | --------- |
+    // | 不思考（0）  | 2/4  | 3.4～3.8 秒 | US$0.001 |
+    // | 上限 512     | 3/4  | 5.3～5.8 秒 | US$0.002 |
+    // | 預設         | 4/4  | 6.1～8.8 秒 | US$0.003～0.004 |
+    //
+    // 不思考時漏掉的那兩筆，一筆是「打成雙殺」被聽成滾地球出局 —— **出局數
+    // 少一個，而且畫面上不會有任何警告**。成本差距一場比賽只有幾塊台幣，
+    // 靜悄悄的錯誤才是貴的那一個。
+  })
 
   const warnings = [...(raw.warnings ?? []).map(String)]
-  const byNumber = new Map(
-    request.roster.filter((player) => player.number).map((player) => [player.number, player]),
-  )
 
   const plays = (raw.plays ?? []).map((entry) => {
-    const spoken = String(entry.result ?? '').trim()
-    const result = normalizePlayResult(spoken)
-    if (result === 'other' && spoken) {
-      warnings.push(`「${spoken}」不在可選的結果裡，已標成「其他」，請手動改。`)
+    const play = toParsedPlay(entry, { ourAtBat, roster: request.roster })
+    if (!play.result) {
+      const spoken = String(entry.result ?? '').trim()
+      warnings.push(
+        spoken
+          ? `「${spoken}」不在可選的結果裡，請刪掉那一筆重講，或改用球場登錄。`
+          : '有一筆聽不出結果，請刪掉重講。',
+      )
     }
-
-    const number = normalizeJerseyNumber(entry.number)
-    // 對手打擊時不要去對我隊名冊 —— 兩隊的背號會撞，對上了反而更糟
-    const player = ourAtBat ? byNumber.get(number) : undefined
-    const runs = clampRuns(entry.runs)
-
-    return {
-      playerId: player?.id ?? '',
-      number,
-      name: player?.name ?? '',
-      result,
-      runs,
-      rbi: defaultRbi(result, runs),
-      confidence: clamp01(Number(entry.confidence ?? 0)),
-      sourceText: String(entry.sourceText ?? '').trim(),
-    }
+    return play
   })
 
   if (plays.length === 0 && warnings.length === 0) {
@@ -748,7 +781,42 @@ export async function parsePlayAudio(
 }
 
 /**
- * 把模型聽到的說法收斂成 `playResultSchema` 的列舉值。
+ * 模型的一筆輸出 → `parsedPlaySchema` 的形狀。**語音沒講到的一律是 `null`**。
+ *
+ * 獨立成純函式是為了測得到：「沒講就是 null、不猜」這條規則全在這裡。
+ *
+ * - 背號對我隊名冊只在**我隊打擊**時做：兩隊的背號會撞，對上了反而更糟。
+ * - `fielder` 只在結果需要處理的人（出局、失誤、野選）時保留，
+ *   `batted` 只在安打／失誤時保留 —— 和手動登錄同一套規則：出局的類型
+ *   從結果推導，安打沒有人「處理」，資料層不存會和結果對不上的東西。
+ * - `location` 永遠是 `null`（「游擊方向」猜出來的座標混進落點圖會被當真）。
+ */
+export function toParsedPlay(
+  entry: Record<string, unknown>,
+  context: { ourAtBat: boolean; roster: ParsePlaysRequest['roster'] },
+): ParsedPlay {
+  const result = normalizePlayResult(entry.result)
+  const number = normalizeJerseyNumber(entry.number) || null
+  const player =
+    context.ourAtBat && number
+      ? context.roster.find((candidate) => candidate.number === number)
+      : undefined
+
+  return parsedPlaySchema.parse({
+    batter: { playerId: player?.id ?? null, name: player?.name ?? null, number },
+    result,
+    runs: optionalCount(entry.runs),
+    rbi: optionalCount(entry.rbi),
+    location: null,
+    fielder: result && needsFielder(result) ? normalizeFielder(entry.fielder) : null,
+    batted: result && needsBattedType(result) ? normalizeBatted(entry.batted) : null,
+    confidence: clamp01(Number(entry.confidence ?? 0)),
+    sourceText: String(entry.sourceText ?? '').trim(),
+  })
+}
+
+/**
+ * 把模型聽到的說法收斂成 `playResultSchema` 的列舉值。**認不得回 `null`**。
  *
  * ## 為什麼用程式碼而不是叫模型直接輸出列舉值
  * 這個專案既有的紀律：格式收斂用程式碼處理，不靠提示詞叮嚀 —— 只有這樣
@@ -756,13 +824,13 @@ export async function parsePlayAudio(
  * 正式環境發生一次，之後再也重現不了。
  *
  * ## ⚠️ 比對的順序是「長的別名優先」
- * 「三壘安打」含有「三」，而「三振」也是。如果照列舉的順序比對，
- * 「三壘安打」可能先撞上某個更短的別名。所以一律**先試完全相符**，
- * 再依別名長度由長到短做包含比對。`tests/unit/gemini-normalize.test.ts`
- * 直接守著「三振」不可以變成三壘安打這一條。
+ * 「三壘安打」裡含有「安打」（一壘安打的別名）。照列舉順序比對的話，三壘
+ * 安打會被當成一壘安打。所以一律**先試完全相符**，再依別名長度由長到短
+ * 做包含比對。`tests/unit/gemini-normalize.test.ts` 直接守著這一條，
+ * 也守著「三振」不可以變成三壘安打。
  *
- * 認不得的一律回 `other` —— 猜一個結果填進去，出局數與打擊率都會跟著錯，
- * 而畫面上看起來完全正常。寧可讓那一筆標成「其他」等人確認。
+ * 認不得的回 `null` 而不是猜一個 —— 猜錯的話出局數與打擊率都會跟著錯，
+ * 而畫面上看起來完全正常。暫存卡片會把它標出來，確認前不能採用。
  */
 const RESULT_ALIASES: Array<{ alias: string; result: PlayResult }> = Object.entries(PLAY_RESULTS)
   .flatMap(([result, meta]) =>
@@ -770,19 +838,58 @@ const RESULT_ALIASES: Array<{ alias: string; result: PlayResult }> = Object.entr
   )
   .sort((a, b) => b.alias.length - a.alias.length)
 
-export function normalizePlayResult(input: unknown): PlayResult {
+export function normalizePlayResult(input: unknown): PlayResult | null {
+  return matchAlias(input, RESULT_ALIASES)
+}
+
+/** 守備位置的講法。長的在前（「三壘手」要比「三壘」先試）。 */
+const FIELDER_ALIASES: Array<{ alias: string; result: Position }> = (
+  [
+    ['P', ['投手', '投手前', '投']],
+    ['C', ['捕手', '捕']],
+    ['1B', ['一壘手', '一壘', '一壘方向']],
+    ['2B', ['二壘手', '二壘', '二壘方向']],
+    ['SS', ['游擊手', '游擊', '游擊方向', '游']],
+    ['3B', ['三壘手', '三壘', '三壘方向']],
+    ['LF', ['左外野手', '左外野', '左外', '左野', '左邊']],
+    ['CF', ['中外野手', '中外野', '中外', '中間']],
+    ['RF', ['右外野手', '右外野', '右外', '右野', '右邊']],
+  ] as const
+)
+  .flatMap(([position, aliases]) =>
+    aliases.map((alias) => ({ alias, result: position as Position })),
+  )
+  .sort((a, b) => b.alias.length - a.alias.length)
+
+/** 模型聽到的守備位置 → `Position`。沒講或認不得回 `null`（不猜）。 */
+export function normalizeFielder(input: unknown): Position | null {
+  return matchAlias(input, FIELDER_ALIASES)
+}
+
+const BATTED_ALIASES: Array<{ alias: string; result: BattedType }> = (
+  [
+    ['ground', ['滾地球', '滾地', '地滾']],
+    ['line', ['平飛球', '平飛', '平射', '強襲']],
+    ['fly', ['高飛球', '高飛', '飛球', '小飛球']],
+  ] as const
+)
+  .flatMap(([type, aliases]) => aliases.map((alias) => ({ alias, result: type as BattedType })))
+  .sort((a, b) => b.alias.length - a.alias.length)
+
+/** 模型聽到的擊球類型 → `BattedType`。沒講或認不得回 `null`。 */
+export function normalizeBatted(input: unknown): BattedType | null {
+  return matchAlias(input, BATTED_ALIASES)
+}
+
+/** 先試完全相符，再依長度由長到短做包含比對。 */
+function matchAlias<T>(input: unknown, aliases: Array<{ alias: string; result: T }>): T | null {
   const text = String(input ?? '')
     .trim()
     .replace(/\s+/g, '')
-  if (!text) return 'other'
-
-  // 完全相符優先：語音多半就是講一個完整的詞
-  const exact = RESULT_ALIASES.find((entry) => entry.alias === text)
+  if (!text) return null
+  const exact = aliases.find((entry) => entry.alias === text)
   if (exact) return exact.result
-
-  // 其次才是包含比對，而且長的別名先試
-  const partial = RESULT_ALIASES.find((entry) => text.includes(entry.alias))
-  return partial?.result ?? 'other'
+  return aliases.find((entry) => text.includes(entry.alias))?.result ?? null
 }
 
 /** 背號只留數字。「二十四號」由模型轉成 24，這裡只負責把雜訊清掉。 */
@@ -792,10 +899,11 @@ export function normalizeJerseyNumber(input: unknown): string {
     .slice(0, 3)
 }
 
-function clampRuns(input: unknown): number {
-  const value = Math.round(Number(input ?? 0))
-  if (!Number.isFinite(value)) return 0
-  return Math.min(Math.max(value, 0), 4)
+/** 得分／打點：-1 或沒給是「沒講」→ `null`；其餘夾在 0～4。 */
+function optionalCount(input: unknown): number | null {
+  const value = Math.round(Number(input))
+  if (input === undefined || input === null || !Number.isFinite(value) || value < 0) return null
+  return Math.min(value, 4)
 }
 
 /**
@@ -813,6 +921,18 @@ async function generate<T>(
   mediaBase64: string,
   mimeType: string,
   responseSchema: unknown,
+  options: {
+    /** 記進日誌的名稱，看成本時用來分辨是哪一種辨識。 */
+    label?: string
+    /**
+     * 思考預算（token）。不給就用模型的預設（2.5 Flash 預設會思考）。
+     *
+     * ⚠️ 思考 token **以輸出的價格計費**（2.5 Flash 是文字輸入的 8 倍），而且會
+     * 拉長回應時間。但關掉之前要先量準確度 —— 語音轉打席實測關掉之後會出現
+     * 沒有警告的錯誤，所以那一支保留預設（數字見 `parsePlayAudio()`）。
+     */
+    thinkingBudget?: number
+  } = {},
 ): Promise<T> {
   const config = useRuntimeConfig(event)
 
@@ -842,11 +962,32 @@ async function generate<T>(
           temperature: 0,
           responseMimeType: 'application/json',
           responseSchema,
+          ...(options.thinkingBudget !== undefined
+            ? { thinkingConfig: { thinkingBudget: options.thinkingBudget } }
+            : {}),
         },
       },
       retries: 0,
     },
   )
+
+  // 每次呼叫都記下用量：成本只能從這裡看，Google 的帳單不會分出是哪一種辨識
+  const usage = response.usageMetadata
+  if (usage) {
+    event.context.logger?.info(
+      {
+        label: options.label ?? 'gemini',
+        model: config.gemini.model,
+        promptTokens: usage.promptTokenCount ?? 0,
+        promptByModality: Object.fromEntries(
+          (usage.promptTokensDetails ?? []).map((d) => [d.modality ?? '?', d.tokenCount ?? 0]),
+        ),
+        outputTokens: usage.candidatesTokenCount ?? 0,
+        thoughtsTokens: usage.thoughtsTokenCount ?? 0,
+      },
+      'gemini usage',
+    )
+  }
 
   if (response.promptFeedback?.blockReason) {
     event.context.logger?.warn(
