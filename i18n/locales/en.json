@@ -10,7 +10,8 @@
     "news": "News",
     "primary": "Primary navigation",
     "mobile": "Mobile navigation",
-    "toggleMenu": "Toggle menu"
+    "toggleMenu": "Toggle menu",
+    "wsBracket": "Pick'em"
   },
   "theme": {
     "toggle": "Toggle dark mode"

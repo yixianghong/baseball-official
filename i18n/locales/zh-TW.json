@@ -10,7 +10,8 @@
     "news": "公告",
     "primary": "主要導覽",
     "mobile": "行動版導覽",
-    "toggleMenu": "開啟或關閉選單"
+    "toggleMenu": "開啟或關閉選單",
+    "wsBracket": "冠軍預測"
   },
   "theme": {
     "toggle": "切換深色或亮色模式"

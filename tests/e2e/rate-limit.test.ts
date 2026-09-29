@@ -25,6 +25,8 @@ process.env.NUXT_FIREBASE_PRIVATE_KEY = ''
 process.env.NUXT_FIREBASE_STORAGE_BUCKET = ''
 process.env.NUXT_FIREBASE_WEB_API_KEY = ''
 process.env.NUXT_GEMINI_API_KEY = ''
+// MLB 的公開端點沒有金鑰可清，要清的是基底網址（見 docs/ws-bracket.md）
+process.env.NUXT_MLB_BASE_URL = ''
 process.env.ALLOW_MEMORY_STORE = 'true'
 
 /**

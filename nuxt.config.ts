@@ -126,6 +126,20 @@ export default defineNuxtConfig({
       apiKey: '',
     },
 
+    // --- MLB 季後賽樹狀圖（限期活動，見 docs/ws-bracket.md）---
+    mlb: {
+      /**
+       * statsapi 的基底網址。**不需要金鑰**，所以預設值就是正式端點，
+       * 部署時不必設定任何東西。
+       *
+       * 存在的理由只有一個：**讓它可以被關掉。** e2e 會把它清成空字串
+       * （`tests/e2e/bff.test.ts`），否則跑一次測試就真的去打 MLB 一次 ——
+       * 測試不該依賴外部服務的可用性，也不該替別人消耗流量。
+       * 空字串時 `getBracket()` 直接回一張全空的樹，頁面照樣渲染得出來。
+       */
+      baseUrl: 'https://statsapi.mlb.com/api/v1',
+    },
+
     // --- 推播（Web Push / VAPID）---
     /**
      * VAPID 是「我們是誰」的簽章，推送服務用它驗證發送方。
@@ -219,6 +233,25 @@ export default defineNuxtConfig({
        * 前端的訂閱按鈕會整個不顯示。
        */
       vapidPublicKey: '',
+
+      /**
+       * 「預測世界大賽冠軍」小遊戲（限期活動，見 `docs/ws-bracket.md`）。
+       *
+       * ⚠️ **這一組設定是整包可拆的。** 下注資料存在一個獨立的
+       * Firebase Realtime Database，和正式資料（Firestore）完全沒有交集 ——
+       * 活動結束時把這一段、`app/pages/ws-bracket.vue` 與相關檔案一起刪掉，
+       * 主站不受任何影響。
+       *
+       * `databaseUrl` **留空代表整個下注功能關閉**（樹狀圖與戰績照樣顯示），
+       * 不是「不用設定」—— 比照 VAPID 與天氣，功能自己消失，不要半開著。
+       *
+       * 這個值本來就會送到瀏覽器，所以放 `public` 是正確的：
+       * RTDB 的防線是安全規則（`database.rules.json`），不是把網址藏起來。
+       */
+      wsBracket: {
+        /** 例：`https://xxx-default-rtdb.asia-southeast1.firebasedatabase.app` */
+        databaseUrl: '',
+      },
     },
   },
 
@@ -309,6 +342,18 @@ export default defineNuxtConfig({
       '/players': { headers: { 'cache-control': PUBLIC_CACHE } },
       '/players/**': { headers: { 'cache-control': PUBLIC_CACHE } },
       '/games/**': { headers: { 'cache-control': PUBLIC_CACHE } },
+
+      /*
+       * 「預測世界大賽冠軍」（限期活動）。
+       *
+       * 頁面本身可以快取 —— 它的 SSR 輸出不含任何個人狀態，下注資料是
+       * 瀏覽器連上 Realtime Database 之後才填進去的。
+       *
+       * 端點（`/api/ws-bracket`）刻意**不快取**：前台靠輪詢它更新戰績，
+       * 套上共用快取只會讓所有人一起看到同一份過期資料。真正的節流在
+       * `server/utils/mlb.ts` 的伺服器端快取，它擋的是打向 MLB 的請求。
+       */
+      '/ws-bracket': { headers: { 'cache-control': PUBLIC_CACHE } },
     },
   },
 

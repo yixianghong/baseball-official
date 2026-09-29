@@ -47,6 +47,8 @@ const navLinks = computed(() => [
   { to: '/results', label: t('nav.results') },
   { to: '/players', label: t('nav.players') },
   { to: '/news', label: t('nav.news') },
+  // 限期活動「預測世界大賽冠軍」。拆掉時刪這一行就好（見 docs/ws-bracket.md）
+  { to: '/ws-bracket', label: t('nav.wsBracket') },
 ])
 
 useHead({

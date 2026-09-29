@@ -47,6 +47,23 @@ env:
       - BUILD
       - RUNTIME
 
+  # 「預測世界大賽冠軍」的 Realtime Database（限期活動，見 docs/ws-bracket.md）。
+  #
+  # 這個值**本來就該公開** —— 它會進前端 bundle，而防線是 database.rules.json
+  # 的安全規則（任何人都能新增、沒有人能刪改），不是把網址藏起來。所以用
+  # value 而不是 secret。
+  #
+  # ⚠️ RUNTIME 不能省：server/middleware/10.security-headers.ts 在執行期讀它
+  # 來決定 CSP 的 connect-src 例外。沒有這個例外的話瀏覽器連不上資料庫，
+  # 而症狀是畫面永遠顯示「共 0 注」，看起來就像沒有人下注。
+  #
+  # 活動結束時連同這一段一起刪掉。
+  - variable: NUXT_PUBLIC_WS_BRACKET_DATABASE_URL
+    value: https://hg-baseball-default-rtdb.asia-southeast1.firebasedatabase.app
+    availability:
+      - BUILD
+      - RUNTIME
+
   # ── Firebase ────────────────────────────────────────────────────
   # 只需要專案 ID：憑證用執行環境的身分（ADC）
   - variable: NUXT_FIREBASE_PROJECT_ID

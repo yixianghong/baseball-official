@@ -952,6 +952,25 @@ SPA 導覽（`pwa.client.ts`）。元件的 `onBeforeRouteLeave`（上傳中的�
 自動儲存的 flush）在全域守衛之前跑，不受影響。第一次安裝時的 `claim()` 也會觸發
 `controllerchange`（從沒有 SW 變成有），那不是換版，要跳過。
 
+## 預測世界大賽冠軍（限期活動）
+
+前台 `/ws-bracket`，導覽列的「冠軍預測」。MLB 季後賽樹狀圖上把自己的頭像拖到
+看好的球隊底下就算一注，一注 $200。**完整說明在 `docs/ws-bracket.md`，包含拆除清單。**
+
+⚠️ **這個功能刻意違反「前端完全不載入 Firebase SDK」那條紀律，而且只違反它。**
+下注資料由瀏覽器直接讀寫一個**獨立的 Realtime Database**（`database.rules.json`），
+樹狀圖與 MLB 戰績仍然照規矩走 BFF（`/api/ws-bracket` → `server/utils/mlb.ts`）。
+理由是「要真的即時」「資料要跟正式資料完全分家」「沒有前台登入系統，走 BFF
+也只能無條件放行」—— 三個缺一個都不會這樣做。`package.json` 裡的 `firebase`
+（用戶端 SDK）只為了這一頁而存在，而且是動態 `import()` 的，不進主 bundle。
+
+安全規則就是遊戲規則：**任何人都能新增，沒有人能修改或刪除**。沒有登入系統時，
+「能刪」就代表任何人都能刪掉別人的注。
+
+⚠️ MLB 的公開端點**沒有金鑰可以清**，所以 e2e 隔離外部服務時要清的是
+`NUXT_MLB_BASE_URL`（留空 = 整個外部呼叫關閉）。新增這類「不用金鑰的外部服務」時，
+記得它躲得過「清掉所有 `*_API_KEY`」那條檢查。
+
 ## 部署
 
 Firebase App Hosting（`apphosting.yaml`），推 `main` 自動建置部署。

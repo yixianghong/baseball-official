@@ -42,6 +42,13 @@ process.env.NUXT_CWA_API_KEY = ''
 process.env.NUXT_YOUTUBE_CLIENT_ID = ''
 process.env.NUXT_YOUTUBE_CLIENT_SECRET = ''
 process.env.NUXT_YOUTUBE_REFRESH_TOKEN = ''
+// 「預測世界大賽冠軍」的 Realtime Database（限期活動，見 docs/ws-bracket.md）。
+// 它決定 CSP 的 connect-src 與前台要不要顯示下注列 —— 留著本機的值就會變成
+// 「本機全過、CI 掛」而且完全重現不了
+process.env.NUXT_PUBLIC_WS_BRACKET_DATABASE_URL = ''
+// MLB 的公開端點不需要金鑰，所以「清掉金鑰」擋不住它 —— 要清的是基底網址。
+// 留著的話跑一次 e2e 就真的去打 MLB 一次
+process.env.NUXT_MLB_BASE_URL = ''
 
 /*
  * 限流額度也要用環境變數設，不能只寫在下面的 `nuxtConfig` 裡。
@@ -942,7 +949,18 @@ describe('SSR', () => {
    * 看不出來。這幾條測試就是守在這裡。
    */
   describe('CDN 快取', () => {
-    const publicPaths = ['/', '/schedule', '/results', '/news', '/players', '/privacy', '/games/g3']
+    const publicPaths = [
+      '/',
+      '/schedule',
+      '/results',
+      '/news',
+      '/players',
+      '/privacy',
+      '/games/g3',
+      // 限期活動（見 docs/ws-bracket.md）。它的 SSR 輸出同樣不含任何個人狀態 ——
+      // 下注資料是瀏覽器連上 Realtime Database 之後才填進去的
+      '/ws-bracket',
+    ]
 
     it.each(publicPaths)('%s 帶著可被 CDN 快取的 cache-control', async (path) => {
       const response = await fetch(path)

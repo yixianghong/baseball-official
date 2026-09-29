@@ -24,6 +24,41 @@ const isProduction = process.env.NODE_ENV === 'production'
  * 若你的專案是純靜態內容站、不需要 hydration，可以直接移除 `'unsafe-inline'`
  * 取得更強的 XSS 防護。
  */
+/**
+ * 「預測世界大賽冠軍」小遊戲的 Realtime Database（限期活動，見 `docs/ws-bracket.md`）。
+ *
+ * ⚠️ 這是唯一一個**由設定決定**的 CSP 例外，而不是寫死的來源。這樣做是為了
+ * 讓它自己清乾淨：活動結束、環境變數一拿掉，這條例外就跟著消失，
+ * 不會留下一條沒有人記得為什麼在的規則。
+ *
+ * 要開 `wss:` 是因為 RTDB 的即時推送走 WebSocket；只開 `https:` 的話
+ * SDK 會退回長輪詢（**能動**，但每幾十秒一次請求，等於把即時性弄丟了），
+ * 而且畫面上完全看不出差別 —— 只有 console 裡一行被擋掉的連線。
+ */
+export function wsBracketOrigins(url: string | undefined): string[] {
+  if (!url) return []
+  try {
+    const { origin, host } = new URL(url)
+
+    /*
+     * ⚠️ **SDK 連的不只是設定裡的那個主機。**
+     *
+     * RTDB 會把連線導到同一個區域的分片主機，例如
+     * `s-gke-apse1-nssi4-7.asia-southeast1.firebasedatabase.app` ——
+     * 主機名是 Google 動態決定的，列不出來。只開設定裡那一個的話，
+     * 連線會**有時候成功、有時候被擋**，而被擋的樣子是畫面永遠顯示
+     * 「共 0 注」，跟「真的沒有人下注」完全分不出來。
+     *
+     * 所以放寬到同一個區域的萬用字元（把主機名的第一段換成 `*`）。
+     * 它仍然只涵蓋 Firebase 自己的網域，不是 `https:` 全開。
+     */
+    const suffix = host.split('.').slice(1).join('.')
+    return [origin, `wss://${host}`, `https://*.${suffix}`, `wss://*.${suffix}`]
+  } catch {
+    return []
+  }
+}
+
 function buildCsp(): string {
   const directives: Record<string, string[]> = {
     'default-src': ["'self'"],
@@ -49,7 +84,11 @@ function buildCsp(): string {
      * 只開 `googleapis.com`，不是整個 `https:` —— 這條規則的價值就在於
      * 「前端不能把資料送去任意地方」，開太寬等於沒開。
      */
-    'connect-src': ["'self'", 'https://www.googleapis.com'],
+    'connect-src': [
+      "'self'",
+      'https://www.googleapis.com',
+      ...wsBracketOrigins(process.env.NUXT_PUBLIC_WS_BRACKET_DATABASE_URL),
+    ],
     /*
      * 只開一個來源：YouTube 的嵌入播放器（賽事錄影，見
      * `docs/game-recording-plan.md`）。

@@ -1,0 +1,91 @@
+// 「預測世界大賽冠軍」小遊戲的資料（限期活動，見 docs/ws-bracket.md）。
+//
+// 這是這個資料庫唯一開放的節點，而且規則就是遊戲規則本身：
+//
+//   1. 沒鎖盤的時候，任何人都能新增一筆，也能移除任何一筆。
+//   2. **沒有人能修改已經存在的那一筆**（只能加、只能刪，不能改）。
+//   3. **同一個人在同一隊最多一筆，同一個人全部加起來最多兩筆。**
+//   4. 鎖盤之後，連新增與移除都寫不進去。
+//
+// 網站沒有前台登入系統，所以沒有辦法分辨「是不是本人」—— 與其假裝擋得住，
+// 不如讓新增與移除對稱：都是純信任。按錯的注自己拿掉就好。
+//
+// ⚠️ **第 3 條的「最多兩筆」是用兩個固定命名的子節點（`slot1`／`slot2`）
+// 擋住的，不是靠數兒女個數。** RTDB 的規則語言**沒有 `numChildren()`**——
+// 這是實測 `firebase deploy` 才確認的，官方文件列出的方法清單裡其實沒有它，
+// 之前憑印象以為有。沒有這個方法，「這個人底下最多兩個子節點」唯一擋得住的
+// 寫法就是「只允許兩個叫得出名字的子節點存在，其餘一律拒絕」——
+// 也就是下面的 `slot1` / `slot2` / `$other: false`。
+//
+// ⚠️ **「同一隊只能一筆」因此也不能再靠路徑鍵是球隊代碼來保證**
+// （slot1／slot2 的鍵是固定的兩個字，不是球隊代碼），改成寫入時互相比對：
+// 寫 `slot1` 要檢查 `slot2` 現在存的隊伍代碼是不是同一支，反過來也一樣。
+// `root` 在規則裡看到的永遠是**這次寫入完成後**的樹，所以這個比對抓得到
+// 「兩格押同一隊」，但抓不到「跟已經移除的舊紀錄比」——那本來就不需要擋，
+// 移除之後那個位置就是空的，再押一次是新的一注。
+//
+// ⚠️ 鎖盤的時間存在 config/lockAt，**只有 service account 改得了**
+// （它不受規則限制）。後台的鎖盤頁走 BFF，所以前台再怎麼改都動不到它。
+//
+// ⚠️ 欄位改動要同時改 shared/schemas/ws-bracket.ts 的 wsBetSchema。規則是真正
+// 擋得住亂寫的那一層，schema 只擋得住我們自己寫錯。
+//
+// ⚠️ 註解只能用 `//`，不能寫成 `"//": "..."` 的鍵 —— 那會被當成一個叫 `//`
+// 的路徑，而它的值必須是規則物件，部署時直接語法錯誤。
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "ws-bracket": {
+      // 讀取放在這一層，兩個子節點都涵蓋到 —— 前台用一個 onValue 就同時拿到
+      // 下注與鎖盤狀態，兩者永遠是同一個瞬間的快照。
+      ".read": true,
+
+      // 鎖盤設定。沒有 .write，所以前台怎麼打都寫不進去。
+      "config": {
+        ".write": false
+      },
+
+      "bets": {
+        "$playerId": {
+          // slot1 與 slot2 的規則幾乎一樣，只有互相比對的對象（另一格）不同。
+          // RTDB 規則語言沒有巨集／共用片段可以引用，重複兩份是唯一的寫法。
+          "slot1": {
+            ".write": "(!data.exists() || !newData.exists()) && (!root.child('ws-bracket/config/lockAt').exists() || now < root.child('ws-bracket/config/lockAt').val())",
+
+            ".validate": "newData.hasChildren(['playerId', 'playerName', 'team', 'createdAt']) && newData.child('playerId').val() == $playerId && newData.child('team').val() != root.child('ws-bracket/bets/' + $playerId + '/slot2/team').val()",
+
+            "playerId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+            "playerName": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 20"
+            },
+            "playerNumber": { ".validate": "newData.isString() && newData.val().length <= 3" },
+            "team": { ".validate": "newData.isString() && newData.val().matches(/^[A-Z]{2,4}$/)" },
+            "createdAt": { ".validate": "newData.isNumber() && newData.val() == now" },
+            "$other": { ".validate": false }
+          },
+
+          "slot2": {
+            ".write": "(!data.exists() || !newData.exists()) && (!root.child('ws-bracket/config/lockAt').exists() || now < root.child('ws-bracket/config/lockAt').val())",
+
+            ".validate": "newData.hasChildren(['playerId', 'playerName', 'team', 'createdAt']) && newData.child('playerId').val() == $playerId && newData.child('team').val() != root.child('ws-bracket/bets/' + $playerId + '/slot1/team').val()",
+
+            "playerId": { ".validate": "newData.isString() && newData.val().length <= 64" },
+            "playerName": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 20"
+            },
+            "playerNumber": { ".validate": "newData.isString() && newData.val().length <= 3" },
+            "team": { ".validate": "newData.isString() && newData.val().matches(/^[A-Z]{2,4}$/)" },
+            "createdAt": { ".validate": "newData.isNumber() && newData.val() == now" },
+            "$other": { ".validate": false }
+          },
+
+          // 沒有宣告的節點（slot1／slot2 以外的任何鍵）一律拒絕 ——
+          // 這就是「最多兩筆」真正的防線。
+          "$other": { ".validate": false }
+        }
+      }
+    }
+  }
+}

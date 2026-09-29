@@ -26,6 +26,8 @@ const links = [
   { to: '/admin/players', label: '球員名單', icon: '🧢' },
   { to: '/admin/announcements', label: '公告', icon: '📣' },
   { to: '/admin/push', label: '推播通知', icon: '🔔' },
+  // 限期活動「預測世界大賽冠軍」。拆掉時刪這一行就好（見 docs/ws-bracket.md）
+  { to: '/admin/ws-bracket', label: '冠軍預測', icon: '🏆' },
   { to: '/admin/settings', label: '網站設定', icon: '⚙️' },
 ]
 
