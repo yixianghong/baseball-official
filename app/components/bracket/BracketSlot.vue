@@ -7,13 +7,7 @@ import { mlbLogo } from '~/utils/mlb-logos'
 /**
  * 一個下注位置：樹狀圖上的一支球隊（限期活動，見 `docs/ws-bracket.md`）。
  *
- * 這是拖曳的**落點**，所以整塊（菱形 + 代碼 + 頭像列）都是同一個按鈕，
- * 而不是只有菱形可以放 —— 手機上 80px 的斜菱形實際可命中的面積比看起來小，
- * 只認菱形的話會一直「放開了但沒反應」。
- *
- * `data-bet-team` / `data-bet-disabled` 是給 `useWsBetDrag()` 的
- * `elementFromPoint()` 認的。拖曳時浮在上面的頭像是 `pointer-events-none`，
- * 所以打得到這一層。
+ * 整塊（菱形 + 代碼 + 頭像列）都是同一個按鈕，讓手機上能輕鬆點選。
  */
 const props = defineProps<{
   spot: TeamSlotSpot
@@ -22,9 +16,7 @@ const props = defineProps<{
   tally: TeamTally | undefined
   /** `playerId → 照片網址`，從現役名冊即時查。 */
   photos: Record<string, string>
-  /** 拖曳中的頭像正懸在這一格上。 */
-  active: boolean
-  /** 有人被點選起來了（點兩下的下注模式）。 */
+  /** 有人被點選起來了，這一格可接受下注。 */
   armed: boolean
   /** 已鎖盤：整格不再是落點。 */
   locked: boolean
@@ -35,8 +27,7 @@ const emit = defineEmits<{ place: [] }>()
 const WIDTH = 108
 /**
  * 高度要**小於**座標表的列距（140），否則上面那格的點擊範圍會蓋住下面那格的
- * 頂端 —— `elementFromPoint()` 只回傳最上層的元素，於是在那條帶狀區域裡
- * 拖曳永遠放進錯的那一隊，而畫面上完全看不出為什麼。
+ * 頂端，否則兩個按鈕的可點選範圍會重疊。
  * `tests/unit/ws-bracket.test.ts` 的「沒有任何兩格重疊」守著這件事。
  */
 const HEIGHT = 136
@@ -46,9 +37,8 @@ const logo = computed(() => mlbLogo(team.value?.code))
 /**
  * 能不能當落點。
  *
- * ⚠️ `locked` 一定要算進來：`data-bet-disabled` 是拖曳判斷（`elementFromPoint`）
- * 唯一看的東西，漏了它的話，鎖盤之後拖上去仍然會亮起來、放開才失敗 ——
- * 而失敗的訊息來自安全規則，寫的是英文的 `PERMISSION_DENIED`。
+ * ⚠️ `locked` 一定要算進來，否則鎖盤後按鈕仍能點，最後只會收到安全規則的
+ * 英文 `PERMISSION_DENIED`。
  */
 const disabled = computed(() => !team.value || props.standing === 'eliminated' || props.locked)
 
@@ -76,15 +66,10 @@ const label = computed(() => {
 <template>
   <button
     type="button"
-    :data-bet-team="team?.code"
-    :data-bet-disabled="String(disabled)"
     :disabled="disabled"
     :aria-label="armed ? `下注給 ${label}` : label"
     class="absolute flex flex-col items-center rounded-2xl pt-2 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 disabled:cursor-not-allowed"
-    :class="[
-      armed && !disabled ? 'cursor-pointer bg-brand-500/10 ring-2 ring-brand-500/40' : '',
-      active ? 'bg-brand-500/20' : '',
-    ]"
+    :class="[armed && !disabled ? 'cursor-pointer bg-brand-500/10 ring-2 ring-brand-500/40' : '']"
     :style="{
       left: `${spot.cx - WIDTH / 2}px`,
       top: `${spot.cy - DIAMOND / 2 - 8}px`,
@@ -94,7 +79,7 @@ const label = computed(() => {
     @click="emit('place')"
   >
     <div class="relative">
-      <BracketDiamond :size="DIAMOND" :tone="tone" :active="active">
+      <BracketDiamond :size="DIAMOND" :tone="tone">
         <img
           v-if="logo"
           :src="logo"

@@ -1,6 +1,6 @@
 # 預測世界大賽冠軍（限期活動）
 
-球隊內部的小遊戲：MLB 季後賽樹狀圖上，把自己的頭像拖到看好的球隊底下就算下注，
+球隊內部的小遊戲：MLB 季後賽樹狀圖上，先點自己的頭像、再點看好的球隊就算下注，
 一注 $200。其中 $100 是球隊隊費（不參與分配），剩下 $100 進彩池，
 押中世界大賽冠軍的人平分彩池。**同一隊同一個人最多押一注，一個人全部加起來
 最多押兩注**（`MAX_BETS_PER_PLAYER`）。
@@ -135,20 +135,14 @@ SDK 是 `import()` 動態載入的（`useWsBracketBets()` 的 `onMounted` 裡）
 ## 畫面上幾個刻意的決定
 
 - **樹狀圖只有一套版面，橫向靠捲動。** 樹的形狀本身就是資訊 —— 手機上把它折成
-  一欄，「誰會碰到誰」這件事就沒了。拖曳到容器邊緣會自動捲（`useWsBetDrag`）。
+  一欄，「誰會碰到誰」這件事就沒了。
 - **排版不是照 MLB 宣傳圖一格一格複製的。** 官方那張把聯盟冠軍與世界大賽疊在
   中間的金色長條上，好看但看不出誰接誰；這裡改成標準的左右對開賽程樹，
   每一條連接線都對得上實際的晉級路徑。
-- **拖曳用 Pointer Events，不是 `draggable="true"`。** HTML5 拖放在 iOS Safari
-  上完全不會觸發，而球隊的人幾乎都用手機。同時支援「點頭像再點球隊」——
-  鍵盤使用者只有這條路。
-- **隊員列的 `touch-action` 是 `pan-x` 不是 `none`。** 那一列本身要橫向捲，
-  `none` 會把捲動一起吃掉，排在後面的隊員**永遠選不到**。
-- **拖曳中的頭像 teleport 到 `<body>`。** 它的起點在橫向捲動的隊員列裡，
-  留在原地會被容器裁掉；而且一定要 `pointer-events-none`，否則
-  `elementFromPoint()` 只打得到它自己。
-- **被淘汰的球隊不能再押**，灰階 + 刪除線。判斷同時做在拖曳（`data-bet-disabled`）
-  與下注函式裡 —— 點選模式與鍵盤走的是另一條路。
+- **下注一律「點頭像再點球隊」。** 這條路同時支援滑鼠、觸控與鍵盤，不依賴各手機
+  瀏覽器對拖曳與長按圖片的不同實作。
+- **被淘汰的球隊不能再押**，灰階 + 刪除線；下注函式還會再次確認，避免戰績輪詢
+  更新前後出現不一致。
 - **「押中可分」一定寫成預估。** 後面每多一注，已下注的人分到的就變少。
 - **分配算的是可分彩池，不是收到的總額。** 一注 $200 只有一半（$100）進彩池，
   另一半是隊費。`payoutPerBet()` 的分母是 `payoutPool` 不是 `pot` ——
@@ -167,7 +161,7 @@ SDK 是 `import()` 動態載入的（`useWsBracketBets()` 的 `onMounted` 裡）
   正是最可能在最後一刻想再押一注的人，而他看到的畫面如果停在「還沒鎖」，
   按下去就會收到一個沒頭沒腦的失敗。
 - **下注格的高度必須小於座標表的列距。** 大於的話上面那格的點擊範圍會蓋住
-  下面那格的頂端，在那條帶狀區域裡拖曳永遠放進錯的那一隊，而畫面上看不出原因。
+  下面那格的頂端，造成使用者點了預期的球隊卻選到另一格。
   `tests/unit/ws-bracket.test.ts` 的「沒有任何兩格重疊」守著它。
 
 ## 四個實測才抓得到的坑
@@ -196,15 +190,7 @@ WebSocket 連不上時，SDK 會自己改用長輪詢 —— 也就是動態插�
 （`wss://*.asia-southeast1.firebasedatabase.app`），
 `tests/unit/ws-bracket.test.ts` 守著這個推導。
 
-### 3. 自動捲動要用「看得見的範圍」，不是容器自己的矩形
-
-畫布有 780px 高、容器往往上下都超出視窗，而下緣還被隊員列蓋住一整條。
-拿容器的 `getBoundingClientRect()` 當判斷依據的話，**手指還停在隊員列裡**
-就已經被算成「拖到容器左緣了」—— 於是「拿起最左邊那個人」這個最常見的動作
-會讓整張賽程圖自己滑走，等拖到目的地時那一格早就被捲到別的位置。
-`visibleArea()` 把容器矩形和視窗、隊員列的上緣取交集，橫向與直向都以它為準。
-
-### 4. RTDB 的規則語言沒有 `numChildren()`
+### 3. RTDB 的規則語言沒有 `numChildren()`
 
 「一人最多兩注」原本想用 `newData.parent().numChildren() <= 2` 擋 ——
 語法檢查直接失敗：`No such method/property 'numChildren'`。用一個最小規則檔
@@ -216,13 +202,6 @@ WebSocket 連不上時，SDK 會自己改用長輪詢 —— 也就是動態插�
 教訓是：**RTDB 規則語言的方法清單比想像中短，寫任何非顯而易見的規則之前，
 先用一個十行內的最小規則檔單獨 `firebase deploy` 測語法**，不要等到套進
 完整規則檔才發現某個方法不存在 —— 那樣連錯誤訊息指到哪一行都要自己算。
-
-### 附帶：選取一定要綁 `click`，不能只靠 `pointerup`
-
-鍵盤按 Enter／空白鍵**只會發 `click`，一個指標事件都不會發**。選取寫在
-`pointerup` 裡的話，鍵盤使用者永遠選不起任何人 —— 而那是這個功能唯一
-不靠拖曳的路。代價是拖曳結束後瀏覽器補的那個 `click` 要自己吞掉
-（`draggedJustNow`），否則拖曳下注會順便把那個人選起來。
 
 ## 設定
 
@@ -286,7 +265,6 @@ https://hg-baseball-default-rtdb.asia-southeast1.firebasedatabase.app
 app/pages/ws-bracket.vue
 app/pages/admin/ws-bracket.vue
 app/components/bracket/
-app/composables/useWsBetDrag.ts
 app/composables/useWsBracketBets.ts
 app/composables/api/useWsBracketApi.ts
 app/utils/mlb-logos.ts

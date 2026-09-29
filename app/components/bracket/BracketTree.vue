@@ -18,15 +18,12 @@ import { mlbLogo } from '~/utils/mlb-logos'
  * 季後賽樹狀圖（限期活動，見 `docs/ws-bracket.md`）。
  *
  * 一張固定尺寸的畫布（座標表在 `app/utils/ws-bracket-layout.ts`），
- * **橫向捲動由外層負責** —— 拖曳到邊緣要自動捲，而捲動的容器必須是
- * 頁面拿得到的那一個（`useWsBetDrag()` 的 `scroller`）。
+ * **橫向捲動由外層負責**，手機使用者可左右查看完整賽程。
  */
 const props = defineProps<{
   bracket: Bracket
   tally: BetTally
   photos: Record<string, string>
-  /** 拖曳中的頭像正懸在哪一隊上。 */
-  hovered: string | null
   /** 有人被點選起來了，所有可下注的格子要亮起來。 */
   armed: boolean
   /** 已鎖盤：每一格都不再是落點。 */
@@ -77,7 +74,7 @@ const finalStatus = computed(() => describeSeries(props.bracket.series.W_1))
   >
     <!--
       連接線。`pointer-events-none` 不能省：它蓋在整張畫布上，少了這一行，
-      拖曳時 `elementFromPoint()` 永遠打到這層 SVG，一格都放不進去。
+      它蓋在整張畫布上，不能擋住底下球隊按鈕的點選。
     -->
     <svg
       class="pointer-events-none absolute inset-0"
@@ -150,7 +147,6 @@ const finalStatus = computed(() => describeSeries(props.bracket.series.W_1))
       :standing="slot.standing"
       :tally="slot.tally"
       :photos="photos"
-      :active="Boolean(slot.side.team) && hovered === slot.side.team!.code"
       :armed="armed"
       :locked="locked"
       @place="slot.side.team && emit('place', slot.side.team.code)"

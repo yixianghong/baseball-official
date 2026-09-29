@@ -37,7 +37,6 @@ describe('BracketRoster', () => {
         betCounts: { a: 1 },
         maxBetsPerPlayer: 2,
         selectedId: null,
-        draggingId: null,
         disabled: false,
       },
     })
@@ -46,14 +45,13 @@ describe('BracketRoster', () => {
     expect(wrapper.get('button').attributes('aria-label')).toBe('葉時安，已下 1 注')
   })
 
-  it('⚠️ 押滿之後整個頭像收起來，不是等拖到球隊上才被拒絕', async () => {
+  it('⚠️ 押滿之後整個頭像收起來，不是等點完球隊才被拒絕', async () => {
     const wrapper = await mountSuspended(BracketRoster, {
       props: {
         players: [player('a', '葉時安')],
         betCounts: { a: 2 },
         maxBetsPerPlayer: 2,
         selectedId: null,
-        draggingId: null,
         disabled: false,
       },
     })
@@ -70,7 +68,6 @@ describe('BracketRoster', () => {
         betCounts: {},
         maxBetsPerPlayer: 2,
         selectedId: null,
-        draggingId: null,
         disabled: false,
       },
     })
@@ -78,22 +75,21 @@ describe('BracketRoster', () => {
     expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
   })
 
-  it('拖曳來源會抑制圖片長按的原生選單，避免觸控拖曳收到 pointercancel', async () => {
+  it('點選頭像會送出選取的隊員', async () => {
     const wrapper = await mountSuspended(BracketRoster, {
       props: {
         players: [player('a', '葉時安')],
         betCounts: {},
         maxBetsPerPlayer: 2,
         selectedId: null,
-        draggingId: null,
         disabled: false,
       },
     })
 
     const button = wrapper.get('button')
-    expect(button.classes()).toContain('[-webkit-touch-callout:none]')
-    const event = new Event('contextmenu', { cancelable: true })
-    button.element.dispatchEvent(event)
-    expect(event.defaultPrevented).toBe(true)
+    await button.trigger('click')
+    expect(wrapper.emitted('select')?.[0]).toEqual([
+      { playerId: 'a', playerName: '葉時安', playerNumber: '1' },
+    ])
   })
 })

@@ -9,7 +9,6 @@ import {
   tallyBets,
   teamByCode,
 } from '#shared/schemas/ws-bracket'
-import type { BetDragSource } from '~/composables/useWsBetDrag'
 
 /**
  * 「預測世界大賽冠軍」—— 限期的小遊戲活動。
@@ -22,7 +21,7 @@ import type { BetDragSource } from '~/composables/useWsBetDrag'
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * ## 玩法
- * 一注 {@link BET_AMOUNT} 元，把自己的頭像拖到看好的球隊上就算一注。
+ * 一注 {@link BET_AMOUNT} 元，先點自己的頭像、再點看好的球隊就算一注。
  * **同一隊同一個人最多押一注，一個人全部加起來最多押 {@link MAX_BETS_PER_PLAYER} 注**
  * （不同隊）。下錯了可以在彩池表移除，鎖盤之後就不行 —— 沒有前台登入系統時，
  * 「新增」與「移除」都是純信任，唯一擋得住的是這兩條上限，靠安全規則
@@ -74,14 +73,6 @@ const lockLabel = computed(() =>
       }),
 )
 
-/** 樹狀圖的橫向捲動容器。拖曳到邊緣時要自動捲，所以 ref 由頁面持有。 */
-const scroller = ref<HTMLElement | null>(null)
-/**
- * 釘在畫面下緣的隊員列。傳給 `useWsBetDrag()` 當作「樹狀圖看得見的下界」——
- * 它蓋住的那一條不算可視範圍，理由見那支 composable。
- */
-const rosterBar = ref<HTMLElement | null>(null)
-
 const tally = computed(() => tallyBets(bets.value))
 
 /**
@@ -106,7 +97,27 @@ const betCounts = computed(() => {
 /** 送出中的那一注。連點兩下時擋住第二次 —— RTDB 是 push，重複送就是兩注。 */
 const submitting = ref(false)
 
-async function place(source: BetDragSource, code: string) {
+interface BetSource {
+  playerId: string
+  playerName: string
+  playerNumber: string
+}
+
+/** 點選的隊員；再點一支可下注球隊時才送出。 */
+const selected = ref<BetSource | null>(null)
+
+function toggle(next: BetSource) {
+  selected.value = selected.value?.playerId === next.playerId ? null : next
+}
+
+function placeSelected(code: string) {
+  if (!selected.value) return
+  const source = selected.value
+  selected.value = null
+  void place(source, code)
+}
+
+async function place(source: BetSource, code: string) {
   if (submitting.value) return
 
   const team = teamByCode(code)
@@ -115,8 +126,8 @@ async function place(source: BetDragSource, code: string) {
   /*
    * 鎖盤擋在這裡，不只擋在畫面上。
    *
-   * 畫面會在時間一到就把隊員列收起來，但點選模式已經選好的人、還沒放開的
-   * 拖曳都可能跨過那一刻 —— 而安全規則那一層丟出來的錯誤訊息是英文的
+   * 畫面會在時間一到就把隊員列收起來，但已經選好、尚未點到球隊的人
+   * 仍可能跨過那一刻 —— 而安全規則那一層丟出來的錯誤訊息是英文的
    * `PERMISSION_DENIED`，使用者看不懂發生了什麼事。
    */
   if (locked.value) {
@@ -151,8 +162,7 @@ async function place(source: BetDragSource, code: string) {
   /*
    * 淘汰的球隊擋在這裡，不只擋在畫面上。
    *
-   * `data-bet-disabled` 已經讓拖曳放不上去，但點選模式與鍵盤走的是另一條路，
-   * 而「哪些隊還活著」在輪詢之間會變 —— 兩條路各判斷一次遲早會有一條漏掉。
+   * 「哪些隊還活著」在輪詢之間會變，所以不能只靠按鈕的 disabled 狀態。
    */
   if (bracket.value?.eliminated.includes(code)) {
     toast.show({ message: `${team.name} 已經被淘汰了`, tone: 'info', key: 'ws-bet' })
@@ -212,12 +222,6 @@ async function remove(id: string, label: string) {
   }
 }
 
-const { selected, dragging, pointer, hovered, grab, toggle, placeSelected } = useWsBetDrag({
-  onPlace: place,
-  scroller,
-  keepClear: rosterBar,
-})
-
 const updatedAt = computed(() =>
   bracket.value?.fetchedAt
     ? new Date(bracket.value.fetchedAt).toLocaleTimeString('zh-Hant-TW', {
@@ -229,7 +233,7 @@ const updatedAt = computed(() =>
 
 useHead({
   title: '預測世界大賽冠軍',
-  meta: [{ name: 'description', content: '把自己的頭像拖到看好的球隊上，一注 200 元。' }],
+  meta: [{ name: 'description', content: '點選自己的頭像，再點選看好的球隊，一注 200 元。' }],
 })
 </script>
 
@@ -238,7 +242,7 @@ useHead({
     <CommonPageHero
       en="World Series Pick'em"
       zh="預測世界大賽冠軍"
-      :description="`把自己的頭像拖到看好的球隊上就算一注，一注 $${BET_AMOUNT}（其中 $${TEAM_DUES_PER_BET} 是隊費）。同一隊只能押一注，一個人最多押 ${MAX_BETS_PER_PLAYER} 注。`"
+      :description="`先點自己的頭像，再點看好的球隊就算一注，一注 $${BET_AMOUNT}（其中 $${TEAM_DUES_PER_BET} 是隊費）。同一隊只能押一注，一個人最多押 ${MAX_BETS_PER_PLAYER} 注。`"
     />
 
     <div class="container-content space-y-8 py-8">
@@ -294,20 +298,15 @@ useHead({
       而右半邊正好是整個國聯。全站的滿版區塊都是這樣做的，不要改用負 margin
       加 `100vw`：`100vw` 含垂直捲軸的寬度，會橫向溢出十幾像素。
 
-      ⚠️ 這裡也**不能**放任何絕對定位的浮動選單（CSS 規定只要有一軸不是
-      `visible`，另一軸就不會是 `visible`，見 CLAUDE.md）。拖曳中的頭像
-      是 teleport 到 `<body>` 的，所以不受影響。
     -->
     <section v-if="bracket" class="px-4">
       <div
-        ref="scroller"
         class="overflow-x-auto overscroll-x-contain rounded-2xl bg-surface-raised py-4 ring-1 ring-border"
       >
         <BracketTree
           :bracket="bracket"
           :tally="tally"
           :photos="photos"
-          :hovered="hovered"
           :armed="Boolean(selected) && !locked"
           :locked="locked"
           @place="(code) => placeSelected(code)"
@@ -362,47 +361,15 @@ useHead({
       反而被它擠到看不見的地方。收起來之後，頁面剩下的就是「結果」。
     -->
     <div v-if="configured && !locked" class="pb-40" />
-    <div v-if="configured && !locked" ref="rosterBar" class="fixed inset-x-0 bottom-0 z-30">
+    <div v-if="configured && !locked" class="fixed inset-x-0 bottom-0 z-30">
       <BracketRoster
         :players="players ?? []"
         :bet-counts="betCounts"
         :max-bets-per-player="MAX_BETS_PER_PLAYER"
         :selected-id="selected?.playerId ?? null"
-        :dragging-id="dragging?.playerId ?? null"
         :disabled="!ready || submitting"
-        @grab="grab"
         @select="toggle"
       />
     </div>
-
-    <!--
-      拖曳中的頭像。
-
-      teleport 到 `<body>` 並用 `position: fixed`：它的起點在橫向捲動的
-      隊員列裡，留在原地的話會被容器裁掉（`overflow-x-auto` 的兩軸都不是
-      `visible`）。`pointer-events-none` 同樣不能省 —— 這塊東西正好在手指
-      底下，會接事件的話 `elementFromPoint()` 永遠只打得到它自己。
-    -->
-    <Teleport to="body">
-      <div
-        v-if="dragging"
-        class="pointer-events-none fixed z-50"
-        :style="{ left: `${pointer.x}px`, top: `${pointer.y}px` }"
-      >
-        <!--
-          手指拖曳時球要畫在手指**上方**，不是正下方（比照逐局紀錄的球場拖曳）：
-          蓋在手指底下的東西看不到，而看不到就不知道現在會放進哪一格。
-        -->
-        <div class="-translate-x-1/2 -translate-y-[calc(100%+12px)] scale-125">
-          <BracketAvatar
-            :name="dragging.playerName"
-            :number="dragging.playerNumber"
-            :photo-url="dragging.photoUrl"
-            size="lg"
-            selected
-          />
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>

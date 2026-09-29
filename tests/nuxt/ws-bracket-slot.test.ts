@@ -10,7 +10,7 @@ import { TEAM_SLOTS } from '../../app/utils/ws-bracket-layout'
  * 「預測世界大賽冠軍」的兩個格子（限期活動，見 docs/ws-bracket.md）。
  *
  * 守的是三件在畫面上會安靜地出錯的事：
- * 1. 已淘汰的球隊不能再當落點（`data-bet-disabled`）。
+ * 1. 已淘汰的球隊不能再點選下注。
  * 2. **已經晉級但沒有隊徽檔的球隊不能畫成「?」** —— 那看起來像還沒打完，
  *    而底下那行「多倫多藍鳥 4–3 晉級」就跟菱形自相矛盾。
  * 3. 下注的頭像真的長在格子上，超過四個收成「+N」。
@@ -56,20 +56,17 @@ describe('BracketSlot', () => {
         standing: 'alive',
         tally: undefined,
         photos: {},
-        active: false,
         armed: false,
         locked: false,
       },
     })
 
     const button = wrapper.get('button')
-    expect(button.attributes('data-bet-team')).toBe('HOU')
-    expect(button.attributes('data-bet-disabled')).toBe('false')
+    expect(button.attributes('disabled')).toBeUndefined()
   })
 
   it('⚠️ 鎖盤之後整格不再是落點', () => {
-    // data-bet-disabled 是拖曳判斷（elementFromPoint）唯一看的東西。
-    // 漏了 locked 的話，鎖盤之後拖上去仍然會亮起來、放開才失敗 ——
+    // 漏了 locked 的話，鎖盤之後仍能點到最後才失敗 ——
     // 而失敗訊息來自安全規則，寫的是英文的 PERMISSION_DENIED。
     return mountSuspended(BracketSlot, {
       props: {
@@ -78,13 +75,11 @@ describe('BracketSlot', () => {
         standing: 'alive',
         tally: undefined,
         photos: {},
-        active: false,
         armed: false,
         locked: true,
       },
     }).then((wrapper) => {
       const button = wrapper.get('button')
-      expect(button.attributes('data-bet-disabled')).toBe('true')
       expect(button.attributes('disabled')).toBeDefined()
     })
   })
@@ -97,14 +92,12 @@ describe('BracketSlot', () => {
         standing: 'eliminated',
         tally: undefined,
         photos: {},
-        active: false,
         armed: false,
         locked: false,
       },
     })
 
     const button = wrapper.get('button')
-    expect(button.attributes('data-bet-disabled')).toBe('true')
     expect(button.attributes('disabled')).toBeDefined()
   })
 
@@ -126,7 +119,6 @@ describe('BracketSlot', () => {
         standing: 'alive',
         tally: tallyBets(bets).byTeam.HOU,
         photos: {},
-        active: false,
         armed: false,
         locked: false,
       },

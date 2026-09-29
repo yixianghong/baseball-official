@@ -6,7 +6,7 @@ import type { SeriesId } from '#shared/schemas/ws-bracket'
  * 用一組固定的設計座標 + 外層橫向捲動，**不用 CSS grid 也不隨螢幕改版面**。
  * 樹狀圖是一張「圖」，它的形狀本身就是資訊 —— 手機上把它折成一欄，
  * 「誰會碰到誰」這件事就沒了，而那正是這張圖唯一要講的事。
- * 所以只有一套版面，看不完的部分左右滑（拖曳到邊緣會自動捲，見 `useWsBetDrag`）。
+ * 所以只有一套版面，看不完的部分左右滑。
  *
  * ⚠️ 這裡的排版**不是**照 MLB 官方宣傳圖一格一格複製的。官方那張把聯盟冠軍
  * 與世界大賽疊在中間的金色長條上，好看但看不出誰接誰；這裡改成標準的
@@ -138,10 +138,8 @@ export const ROUND_TAGS: readonly { text: string; cx: number; cy: number }[] = [
 /**
  * 連接線。每一條是「從某一格的外緣，轉兩個直角，接到下一格的外緣」。
  *
- * 走 SVG 是因為它只是圖、不接任何手勢 —— CLAUDE.md 那條「Chrome 不理會
- * SVG 子元素上的 touch-action」的坑只發生在要在 SVG 上拖曳的時候。
- * 這一層蓋著 `pointer-events-none`，拖曳判斷靠 `elementFromPoint()` 打到
- * 底下的 HTML 格子。
+ * 走 SVG 是因為它只是圖、不接任何互動；這一層蓋著 `pointer-events-none`，
+ * 底下的 HTML 球隊按鈕才能收到點擊。
  */
 export function connectorPath(
   from: { cx: number; cy: number; size: number },

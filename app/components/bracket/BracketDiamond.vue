@@ -15,10 +15,8 @@ const props = withDefaults(
     size: number
     /** 外觀。`pending` 是還沒產生的晉級者（金色的「?」）。 */
     tone?: 'team' | 'pending' | 'advanced' | 'champion' | 'eliminated'
-    /** 拖曳中的頭像正懸在上面。 */
-    active?: boolean
   }>(),
-  { tone: 'team', active: false },
+  { tone: 'team' },
 )
 
 /** 旋轉後的外接方形要等於 size，所以邊長是 size / √2。 */
@@ -40,7 +38,7 @@ const TONES = {
   >
     <div
       class="absolute rounded-[22%] border-3 shadow-lg transition duration-150"
-      :class="[TONES[tone], active ? 'scale-115 border-brand-500 shadow-brand-500/40' : '']"
+      :class="TONES[tone]"
       :style="{
         width: `${side}px`,
         height: `${side}px`,
