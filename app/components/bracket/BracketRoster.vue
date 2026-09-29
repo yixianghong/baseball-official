@@ -13,6 +13,9 @@ import type { BetDragSource } from '~/composables/useWsBetDrag'
  * 結果是排在後面的人**永遠選不到**，畫面上看起來就是「名單只有這幾個」。
  * `pan-x` 讓瀏覽器保留橫向捲動、把上下方向的手勢留給我們，
  * 而拖去樹狀圖的動作本來就是往上的。
+ *
+ * ⚠️ 拖曳來源還要禁止圖片長按 callout。iOS 會把長按頭像接手成圖片預覽、
+ * Android 則可能開原生選單；兩者都會送 `pointercancel`，中斷我們的拖曳。
  */
 const props = defineProps<{
   players: Player[]
@@ -74,7 +77,7 @@ function toSource(player: Player): BetDragSource {
         <button
           type="button"
           :disabled="disabled || reachedMax(player.id)"
-          class="flex w-16 touch-pan-x flex-col items-center gap-1 rounded-xl p-1 transition select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 disabled:opacity-40"
+          class="flex w-16 touch-pan-x flex-col items-center gap-1 rounded-xl p-1 transition select-none [-webkit-touch-callout:none] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 disabled:opacity-40"
           :class="[
             selectedId === player.id ? 'bg-brand-500/15' : 'hover:bg-surface-muted',
             draggingId === player.id ? 'opacity-30' : '',
@@ -85,7 +88,8 @@ function toSource(player: Player): BetDragSource {
               ? `${player.name}，已經押滿 ${maxBetsPerPlayer} 注`
               : `${player.name}，已下 ${betCounts[player.id] ?? 0} 注`
           "
-          @pointerdown="emit('grab', $event, toSource(player))"
+          @pointerdown.prevent="emit('grab', $event, toSource(player))"
+          @contextmenu.prevent
           @click="emit('select', toSource(player))"
         >
           <BracketAvatar

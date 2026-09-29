@@ -77,4 +77,23 @@ describe('BracketRoster', () => {
 
     expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
   })
+
+  it('拖曳來源會抑制圖片長按的原生選單，避免觸控拖曳收到 pointercancel', async () => {
+    const wrapper = await mountSuspended(BracketRoster, {
+      props: {
+        players: [player('a', '葉時安')],
+        betCounts: {},
+        maxBetsPerPlayer: 2,
+        selectedId: null,
+        draggingId: null,
+        disabled: false,
+      },
+    })
+
+    const button = wrapper.get('button')
+    expect(button.classes()).toContain('[-webkit-touch-callout:none]')
+    const event = new Event('contextmenu', { cancelable: true })
+    button.element.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+  })
 })
