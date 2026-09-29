@@ -942,7 +942,7 @@ describe('SSR', () => {
    * 看不出來。這幾條測試就是守在這裡。
    */
   describe('CDN 快取', () => {
-    const publicPaths = ['/', '/schedule', '/results', '/news', '/players', '/privacy']
+    const publicPaths = ['/', '/schedule', '/results', '/news', '/players', '/privacy', '/games/g3']
 
     it.each(publicPaths)('%s 帶著可被 CDN 快取的 cache-control', async (path) => {
       const response = await fetch(path)
@@ -977,6 +977,27 @@ describe('SSR', () => {
       // 比對渲染出來的畫面。SSR payload 裡有 requestId 與時間戳，每次請求
       // 本來就不同（跟 cookie 無關），比對前先拿掉。
       expect(renderedMarkup(dark)).toBe(renderedMarkup(light))
+    })
+
+    /**
+     * ⚠️ 這一條守的是新加的「後台編輯」入口。
+     *
+     * 前台的單場比賽頁上有一個只給登入者看的後台連結。它**必須**在
+     * hydration 之後才出現 —— 在 SSR 就畫進去的話，管理者的那一份 HTML
+     * 會被 CDN 快取起來送給所有訪客（連結本身不是機密，但那代表 SSR 輸出
+     * 因人而異，快取就整個失去意義了）。
+     *
+     * 帶著 session cookie 的 SSR 輸出要和匿名的一模一樣。
+     */
+    it('帶著 session cookie 的比賽頁 SSR 輸出，和匿名訪客完全一樣', async () => {
+      const { cookie } = await login()
+
+      const anonymous = await $fetch<string>('/games/g3')
+      const admin = await $fetch<string>('/games/g3', { headers: { cookie } })
+
+      expect(anonymous).not.toContain('後台編輯這場')
+      expect(admin).not.toContain('後台編輯這場')
+      expect(renderedMarkup(admin)).toBe(renderedMarkup(anonymous))
     })
 
     it('配色的開機腳本有被注入（沒有它會閃一下白的）', async () => {

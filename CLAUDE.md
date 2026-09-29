@@ -245,6 +245,13 @@ production 缺少必要設定會在啟動時被 `server/plugins/00.env-validate.
   依 cookie 改渲染、把登入狀態畫進 HTML，都會默默破壞快取或把狀態送給別人，
   而且畫面上完全看不出來。詳見「部署」章節。
 
+  前台的單場比賽頁上有一個只給登入者看的「後台編輯這場」
+  （`CommonAdminEditLink`）。它之所以安全，是因為 `app/app.vue` 已經決定
+  「公開頁面的 SSR **一律**渲染成未登入」—— 連結在 SSR 與 hydration 的第一幀
+  都不存在，`/api/auth/me` 回來才補上。⚠️ **不要為了「少閃一下」而在 SSR
+  還原公開頁面的登入狀態**：那會讓管理者那一份 HTML 被快取起來送給所有訪客。
+  `tests/e2e/bff.test.ts` 直接比對「帶 session cookie 與匿名的 SSR 輸出一模一樣」。
+
 ### 天氣預報（`server/utils/cwa.ts`）
 
 中央氣象署 `F-D0047-091`（一週預報，實際回傳 22 個縣市）。**結構是打過真 API

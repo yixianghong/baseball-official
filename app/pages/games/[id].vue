@@ -156,12 +156,24 @@ useHead({
 
 <template>
   <div class="container-content py-10 md:py-14">
-    <NuxtLink
-      :to="isFinished ? '/results' : '/schedule'"
-      class="mb-6 inline-flex text-fluid-sm text-content-muted hover:text-brand-600"
-    >
-      ← 回到{{ isFinished ? '比賽結果' : '近期賽程' }}
-    </NuxtLink>
+    <!--
+      返回連結與後台入口排在同一列。後台入口**只有登入過的人看得到**，
+      而且是 hydration 之後才出現的（`CommonAdminEditLink` 說明了為什麼
+      這對 CDN 快取是安全的）。
+
+      放在這一列而不是標題卡裡：標題卡是給所有訪客看的比賽主視覺，
+      而這是一條只對管理者有意義的工具列連結。
+    -->
+    <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <NuxtLink
+        :to="isFinished ? '/results' : '/schedule'"
+        class="inline-flex text-fluid-sm text-content-muted hover:text-brand-600"
+      >
+        ← 回到{{ isFinished ? '比賽結果' : '近期賽程' }}
+      </NuxtLink>
+
+      <CommonAdminEditLink v-if="game" :to="`/admin/games/${game.id}`" label="後台編輯這場" />
+    </div>
 
     <UiBaseEmpty v-if="error" title="找不到這場比賽" description="它可能已經被刪除。" icon="🔍" />
 
