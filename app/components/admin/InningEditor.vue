@@ -510,7 +510,7 @@ function landingText(play: Play): string {
 // ── 語音登錄 ────────────────────────────────────────────────────
 
 /**
- * 按住說話，放開之後辨識出幾個打席。
+ * 按「開始錄音」，說完再按「停止並辨識」，辨識出幾個打席。
  *
  * ⚠️ **辨識結果不會自動寫進去。** 它先進下面那張暫存卡片，人看過、改過
  * 才按「全部採用」—— 和另外四支 AI 辨識端點同一套紀律（回傳的是建議，
@@ -518,6 +518,23 @@ function landingText(play: Play): string {
  * 會一路影響到打擊率。
  */
 const voice = useVoicePlayInput()
+
+/**
+ * 同一顆按鈕開始與停止。
+ *
+ * ⚠️ 綁的是 `click` 而不是 `pointerdown`／`pointerup`：鍵盤按 Enter／空白鍵
+ * 只會發 `click`，一個指標事件都不會發。
+ */
+function toggleVoice(): void {
+  if (voice.status.value === 'recording') void stopVoice()
+  else void voice.start(() => void stopVoice())
+}
+
+/** 錄音中的計時，給「到底有沒有在錄」一個看得見的答案。 */
+const elapsedLabel = computed(() => {
+  const total = Math.floor(voice.elapsedMs.value / 1000)
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+})
 
 async function stopVoice(): Promise<void> {
   await voice.stop({
@@ -1020,6 +1037,10 @@ function suggestionText(item: Suggestion): string {
           原本的結果按鈕格拿掉了：它和球場拖曳做的是同一件事，卻不記落點，
           留著只會讓人不知道該用哪一個。
           瀏覽器錄不出聲音時整塊不顯示 —— 一顆按了沒反應的按鈕比沒有更糟。
+
+          **按一下開始、再按一下停止**，不是按住說話：比賽中沒有那麼多時間
+          按著一顆按鈕。按鈕上帶計時，因為手指放開不再是「還在錄嗎」的答案；
+          錄到上限會自己停下來送辨識（見 `MAX_RECORDING_MS`）。
         -->
         <section
           v-if="!complete && voice.supported.value"
@@ -1036,16 +1057,14 @@ function suggestionText(item: Suggestion): string {
                   : 'border-border hover:bg-surface-muted'
               "
               :disabled="voice.status.value === 'parsing'"
-              @pointerdown.prevent="voice.start"
-              @pointerup.prevent="stopVoice"
-              @pointerleave="voice.status.value === 'recording' && stopVoice()"
+              @click="toggleVoice"
             >
               {{
                 voice.status.value === 'recording'
-                  ? '🔴 錄音中…放開就辨識'
+                  ? `⏹ 停止並辨識 ${elapsedLabel}`
                   : voice.status.value === 'parsing'
                     ? '辨識中…'
-                    : '🎤 按住說話'
+                    : '🎤 開始錄音'
               }}
             </button>
             <span class="text-xs text-content-muted">

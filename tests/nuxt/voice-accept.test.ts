@@ -1,5 +1,5 @@
 // @vitest-environment nuxt
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { ref, computed } from 'vue'
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import InningEditor from '../../app/components/admin/InningEditor.vue'
@@ -17,16 +17,21 @@ import type { Player } from '../../shared/schemas/player'
  */
 
 const suggestions = ref<ParsedPlay[]>([])
+/** 錄音狀態由測試操縱 —— 真的錄音在這個環境裡跑不起來。 */
+const status = ref<'idle' | 'recording' | 'parsing'>('idle')
+const elapsedMs = ref(0)
+const calls: string[] = []
 
 mockNuxtImport('useVoicePlayInput', () => () => ({
-  status: ref('idle'),
+  status,
   error: ref(''),
   suggestions,
   transcript: ref(''),
   warnings: ref<string[]>([]),
   supported: computed(() => true),
-  start: async () => {},
-  stop: async () => {},
+  elapsedMs,
+  start: async () => void calls.push('start'),
+  stop: async () => void calls.push('stop'),
   clear: () => (suggestions.value = []),
 }))
 
@@ -69,12 +74,56 @@ function acceptButton(component: Awaited<ReturnType<typeof mount>>) {
   return component.findAll('button').find((button) => button.text() === '全部採用')
 }
 
+function voiceButton(component: Awaited<ReturnType<typeof mount>>) {
+  return component.find('[aria-label="語音登錄"] button')
+}
+
 describe('語音登錄：常駐在頁面上', () => {
   it('不用展開就看得到語音按鈕', async () => {
     suggestions.value = []
     const component = await mount()
     expect(component.find('[aria-label="語音登錄"]').exists()).toBe(true)
-    expect(component.text()).toContain('按住說話')
+    expect(component.text()).toContain('開始錄音')
+  })
+})
+
+/**
+ * 錄音是「開始／停止」兩段式，不是按住說話 —— 比賽中沒有那麼多時間按著
+ * 一顆按鈕。⚠️ 一定要綁 `click`：鍵盤按 Enter 只會發 `click`，
+ * 一個指標事件都不會發，綁 `pointerdown`／`pointerup` 的話鍵盤完全不能用。
+ */
+describe('語音登錄：按一下開始、再按一下停止', () => {
+  beforeEach(() => {
+    suggestions.value = []
+    status.value = 'idle'
+    elapsedMs.value = 0
+    calls.length = 0
+  })
+
+  it('閒置時按一下開始錄音', async () => {
+    const component = await mount()
+    await voiceButton(component).trigger('click')
+    expect(calls).toEqual(['start'])
+  })
+
+  it('錄音中按一下停止並辨識，按鈕上帶著計時', async () => {
+    status.value = 'recording'
+    elapsedMs.value = 72_400
+    const component = await mount()
+
+    expect(voiceButton(component).text()).toContain('停止並辨識')
+    // 手指放開不再是「還在錄嗎」的答案，所以一定要看得到秒數
+    expect(voiceButton(component).text()).toContain('1:12')
+
+    await voiceButton(component).trigger('click')
+    expect(calls).toEqual(['stop'])
+  })
+
+  it('辨識中整顆按鈕停用，按了不會再開始一次', async () => {
+    status.value = 'parsing'
+    const component = await mount()
+
+    expect(voiceButton(component).attributes('disabled')).toBeDefined()
   })
 })
 

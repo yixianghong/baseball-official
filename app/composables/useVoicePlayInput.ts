@@ -2,7 +2,13 @@ import type { ParsePlaysRequest, ParsePlaysResponse } from '#shared/schemas/ai'
 import { blobToBase64, blobToWav } from '~/utils/wav'
 
 /**
- * 按住說話 → 放開 → 辨識出幾個打席。
+ * 按「開始錄音」→ 說話 → 按「停止並辨識」→ 辨識出幾個打席。
+ *
+ * ## 為什麼不是按住說話
+ * 原本要按住麥克風鈕、放開才辨識。比賽中沒有那麼多時間按著一顆按鈕 ——
+ * 場邊的人一邊看球一邊登錄，手上還有別的事，而按住的那幾秒裡他不能做
+ * 任何其他動作。兩段式的代價是「忘了按停止」變成可能發生的事，所以有
+ * `MAX_RECORDING_MS`（見下方）。
  *
  * ## ⚠️ 麥克風會和錄影頁搶
  * `useGameRecorder` 的兩處 `getUserMedia` 都帶 `audio: true`，所以
@@ -20,6 +26,23 @@ import { blobToBase64, blobToWav } from '~/utils/wav'
 /** mp4 排在 webm 前面：和錄影用的 `MIME_CANDIDATES` 同一個順序與理由。 */
 const MIME_CANDIDATES = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']
 
+/**
+ * 錄音上限。到了就**自動停下來並送辨識**，不是丟掉。
+ *
+ * ⚠️ 這是「開始／停止」才需要的東西。按住說話的版本結構上不可能錄太久 ——
+ * 手指放開就停了。改成兩段式之後「忘了按停止」變成很可能發生的事，而代價
+ * 不是錄得比較長，是**整段都送不上去**：16kHz 單聲道 WAV 每秒 32KB、
+ * base64 之後約 42KB，`maxUploadBytes`（8MB）在三分半左右就滿，而那時候
+ * 使用者已經講完一整局了，會拿到一個「辨識失敗」而不知道原因。自動停下來
+ * 至少講過的東西還在。
+ *
+ * 90 秒遠多於實際需要（一次講三四個打席約 5～9 秒），只是為了擋住忘記。
+ */
+export const MAX_RECORDING_MS = 90_000
+
+/** 計時器的間隔。只用來顯示秒數與判斷上限，不需要更細。 */
+const TICK_MS = 250
+
 export type VoiceStatus = 'idle' | 'recording' | 'parsing'
 
 export function useVoicePlayInput() {
@@ -32,9 +55,18 @@ export function useVoicePlayInput() {
   const transcript = ref('')
   const warnings = ref<string[]>([])
 
+  /** 已經錄了多久（毫秒）。按住說話時不需要，兩段式一定要看得到。 */
+  const elapsedMs = ref(0)
+
   let recorder: MediaRecorder | null = null
   let stream: MediaStream | null = null
   let chunks: Blob[] = []
+  let ticker: ReturnType<typeof setInterval> | null = null
+
+  function stopTicker(): void {
+    if (ticker !== null) clearInterval(ticker)
+    ticker = null
+  }
 
   /** 這個瀏覽器錄得出東西嗎。錄不出來就不要顯示那顆麥克風鈕。 */
   const supported = computed(
@@ -49,17 +81,25 @@ export function useVoicePlayInput() {
   }
 
   function release(): void {
+    stopTicker()
     stream?.getTracks().forEach((track) => track.stop())
     stream = null
     recorder = null
   }
 
-  async function start(): Promise<void> {
+  /**
+   * 開始錄音。
+   *
+   * `onLimit` 在錄到 `MAX_RECORDING_MS` 時被呼叫，由呼叫端接著呼叫
+   * `stop()` —— 辨識需要的 context（第幾局、哪半局、名單）只有它拿得到。
+   */
+  async function start(onLimit?: () => void): Promise<void> {
     if (status.value !== 'idle') return
     error.value = ''
     suggestions.value = []
     warnings.value = []
     chunks = []
+    elapsedMs.value = 0
 
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -79,10 +119,20 @@ export function useVoicePlayInput() {
     }
     recorder.start()
     status.value = 'recording'
+
+    const startedAt = Date.now()
+    ticker = setInterval(() => {
+      elapsedMs.value = Date.now() - startedAt
+      if (elapsedMs.value >= MAX_RECORDING_MS) {
+        // 先收掉計時器，否則 stop() 轉檔的那幾百毫秒裡會再觸發一次
+        stopTicker()
+        onLimit?.()
+      }
+    }, TICK_MS)
   }
 
   /**
-   * 放開麥克風鈕：停止錄音、轉檔、送辨識。
+   * 按下「停止並辨識」：停止錄音、轉檔、送辨識。
    *
    * ⚠️ 一定要等 `onstop` 才組 Blob —— 最後一塊資料是在 `stop()` 回來
    * **之後**才透過 `ondataavailable` 送到的（和錄影是同一個坑）。
@@ -95,6 +145,7 @@ export function useVoicePlayInput() {
     existing: ParsePlaysRequest['existing']
   }): Promise<void> {
     if (status.value !== 'recording' || !recorder) return
+    stopTicker()
 
     const active = recorder
     const recordedType = active.mimeType || 'audio/webm'
@@ -154,5 +205,16 @@ export function useVoicePlayInput() {
   /** 元件被卸載時一定要放掉麥克風 —— 否則手機上的錄音指示燈會一直亮著。 */
   onBeforeUnmount(release)
 
-  return { status, error, suggestions, transcript, warnings, supported, start, stop, clear }
+  return {
+    status,
+    error,
+    suggestions,
+    transcript,
+    warnings,
+    supported,
+    elapsedMs,
+    start,
+    stop,
+    clear,
+  }
 }
