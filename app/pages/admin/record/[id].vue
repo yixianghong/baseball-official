@@ -248,18 +248,15 @@ async function finish() {
   half.value = next.half
 }
 
-/**
- * 還有片段沒傳完就離開頁面 —— 攔一下。
+/*
+ * 這裡**刻意沒有**「還在上傳，確定要離開嗎」的攔截。
  *
- * 影片本身已經存到裝置了，所以最壞情況不是「弄丟」而是「還沒上去」，
- * 但那仍然是使用者會想知道的事。
+ * 佇列活在 plugin 上（見 `useClipUpload`），站內換頁不會中斷上傳 ——
+ * 攔一下只會讓人以為離開就會壞掉，然後為了一件不會發生的事站在這一頁等。
+ * 回到這一頁時，已經傳完的會出現在「這一場的錄影」裡。
+ *
+ * 重新整理與關閉分頁那一種攔在 plugin 裡，因為使用者很可能是在別的頁上按的。
  */
-onBeforeRouteLeave(() => {
-  if (uploads.pending.value === 0) return true
-  return confirm(
-    `還有 ${uploads.pending.value} 段影片正在上傳，離開會中斷上傳。影片會留在這台裝置上，下次打開錄影頁可以再傳。確定要離開嗎？`,
-  )
-})
 
 /** 優先走系統分享（iOS 才存得進「照片」），沒有才退回下載。 */
 async function save(blob: Blob, filename: string) {

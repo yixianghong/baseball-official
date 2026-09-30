@@ -55,6 +55,8 @@ describe('formatBytes', () => {
     [512, '512 B'],
     [2048, '2 KB'],
     [3 * 1024 * 1024, '3.0 MB'],
+    // 外接相機的影片動輒好幾 GB —— 少了 GB 那一級會顯示成「4301.2 MB」
+    [4.2 * 1024 * 1024 * 1024, '4.20 GB'],
   ])('%i → %s', (bytes, expected) => {
     expect(formatBytes(bytes)).toBe(expected)
   })

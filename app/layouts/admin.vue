@@ -117,6 +117,14 @@ function isActive(link: (typeof links)[number]): boolean {
             </svg>
           </button>
 
+          <!--
+            影片還在上傳時的指示器。放在 `<nav>` **外面**是刻意的 ——
+            手機版的選單預設是收起來的，放進去就等於「只有打開選單才看得到
+            上傳狀態」，而它存在的理由正是「不必回到那一頁也知道還在傳」。
+            靠外層容器的 `flex-wrap`，它在手機上自己換到第二行。
+          -->
+          <AdminUploadIndicator />
+
           <nav
             id="admin-menu"
             class="w-full flex-col gap-1 md:flex md:w-auto"

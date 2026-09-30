@@ -437,6 +437,10 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           <UiBaseButton variant="ghost" @click="navigateTo(`/admin/record/${game.id}`)">
             📹 錄影
           </UiBaseButton>
+          <!-- 外接相機拍的：檔案已經在手機／電腦上，只差上傳與對上半局 -->
+          <UiBaseButton variant="ghost" @click="navigateTo(`/admin/upload/${game.id}`)">
+            ⬆️ 上傳影片檔
+          </UiBaseButton>
           <UiBaseButton variant="ghost" @click="navigateTo(`/games/${game.id}`)">
             前台預覽
           </UiBaseButton>
@@ -682,7 +686,14 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
                 >
                   錄影頁
                 </NuxtLink>
-                錄製並自動上傳。
+                錄製並自動上傳；外接相機拍的影片走
+                <NuxtLink
+                  :to="`/admin/upload/${game.id}`"
+                  class="text-brand-600 underline underline-offset-4 dark:text-brand-300"
+                >
+                  上傳影片檔
+                </NuxtLink>
+                。
               </p>
             </div>
             <!--
@@ -722,8 +733,8 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             那個寫入本身也可能失敗。沒有影片的那幾格自然就是待補的。
           -->
           <p v-if="missingClipCount" class="text-fluid-sm text-content-muted">
-            還有 {{ missingClipCount }} 個半局沒有影片。自動上傳失敗時，把影片自己傳上
-            YouTube，再把網址貼到對應的那一格。
+            還有 {{ missingClipCount }} 個半局沒有影片。相機拍的檔案可以在「上傳影片檔」
+            一次挑多個傳上去；已經自己傳上 YouTube 的，把網址貼到對應的那一格。
           </p>
 
           <ul class="space-y-2">

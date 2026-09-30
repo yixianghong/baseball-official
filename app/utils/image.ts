@@ -161,9 +161,16 @@ export function readFileAsBase64(file: File): Promise<string> {
   })
 }
 
-/** 把位元組數格式化成人看得懂的大小。 */
+/**
+ * 把位元組數格式化成人看得懂的大小。
+ *
+ * ⚠️ **GB 那一級不能省。** 這個函式原本最大只到 MB，因為當時只有圖片與
+ * 附件在用（上限 6MB）。外接相機的影片一個半局就有好幾 GB，少了這一級，
+ * 畫面上會出現「4301.2 MB」—— 看得懂，但要數位數才知道有多大。
+ */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }

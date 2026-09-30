@@ -1,39 +1,54 @@
 import type { GameHalf } from '#shared/schemas/game'
 import { HALF_LABELS } from '#shared/schemas/game'
 import { getClipStore } from '~/utils/clip-store'
+import { getUploadStore } from '~/utils/upload-store'
+import {
+  CHUNK_BYTES,
+  createUploadSession,
+  NOT_CONFIGURED_MESSAGE,
+  uploadChunks,
+  UploadLimitError,
+  UPLOAD_LIMIT_MESSAGE,
+} from '~/utils/youtube-upload'
 
 /**
- * 把錄好的片段上傳到 YouTube（見 `docs/game-recording-plan.md`）。
+ * 把片段上傳到 YouTube 的佇列（見 `docs/game-recording-plan.md`）。
  *
- * ## 檔案不經過我們的伺服器
- * 一段 1080p 有 85～140 MB。BFF 只發一個短效權杖（`/api/admin/youtube/upload-token`），
- * 瀏覽器拿著它**直傳 YouTube** —— 沒有 Storage 費、沒有流量費，也不必擔心
- * Cloud Run 的記憶體與請求逾時。
+ * 「怎麼把位元組送上去」在 `~/utils/youtube-upload.ts`。這裡是佇列：排隊、
+ * 進度、重試、成功之後登錄到比賽上。兩個呼叫端共用它 —— 錄影頁
+ * （`/admin/record/[id]`）與從裝置挑檔案的「上傳影片檔」（`/admin/upload/[id]`）。
  *
- * ## 為什麼是佇列而不是 await
- * 一段傳完要 2～4 分鐘，而下一個半局馬上就要開始錄。上傳如果擋著使用者，
- * 他就得站在原地等 —— 所以錄完就丟進佇列，背景慢慢傳，人可以繼續錄下一段。
+ * ## ⚠️ 佇列活在 plugin 上，不在頁面上
+ * 原本它是一般的 composable，狀態跟著頁面生滅 —— 於是換一頁就會出現
+ * 「正在傳的那一個在背景繼續（XHR 不綁元件生命週期），還沒開始的那幾個
+ * 卻因為 Blob 被清掉而失敗」這種一半一半的狀態，而且畫面已經不在，兩邊都
+ * 看不到。而一個 4K 半局的檔案要傳幾十分鐘，中途去看一下別的後台頁是常態
+ * 而不是例外。
+ *
+ * 現在整個佇列由 `app/plugins/clip-upload.client.ts` 建立一次，站內換頁
+ * 不影響它。`useClipUpload()` 只是把它**依比賽篩過**的檢視交給頁面，
+ * 所以兩個頁面的用法和原本一模一樣。
+ *
+ * ## 關掉分頁還是會斷，所以要落地
+ * plugin 撐得過換頁，撐不過重新載入。從裝置挑的檔案因此會連同「上傳網址
+ * 與已確認的位移」寫進 IndexedDB（`~/utils/upload-store.ts`），回到頁面
+ * 就能從斷點接著傳。錄影頁不必：它的片段本來就留在 `clip-store` 裡。
  *
  * ## 上傳失敗不會弄丟影片
- * 每一段在丟進佇列之前都已經存到裝置上了（見 `pages/admin/record/[id].vue`）。
- * 所以這裡的失敗只是「這一段還沒上去」，不是「這一段沒了」——
- * 使用者事後從手機手動上傳也可以。訊息要講清楚這件事，不要讓人以為白錄了。
- *
- * ## 上傳成功才刪掉暫存
- * 片段在 IndexedDB 裡留到**上傳成功**為止（見 `app/utils/clip-store.ts`）。
- * 頁面在上傳途中被系統回收的話，下次打開錄影頁它會出現在「還沒上傳的錄影」裡。
+ * 錄影的片段在丟進佇列之前已經存到裝置上了；挑檔案的那一種，檔案本來就在
+ * 裝置上。所以這裡的失敗一律只是「這一段還沒上去」，不是「這一段沒了」——
+ * 訊息要講清楚，不要讓人以為白錄了。
  */
-
-/** 用 resumable upload 而不是一次 POST：大檔案中斷時才有機會續傳。 */
-const UPLOAD_INIT_URL =
-  'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status'
 
 export type ClipUploadState = 'waiting' | 'uploading' | 'done' | 'failed'
 
 export interface ClipUpload {
   id: string
+  gameId: string
   inning: number
   half: GameHalf
+  /** 顯示用的名字：挑檔案的是檔名，錄影的是「第 N 局X半」。 */
+  label: string
   bytes: number
   state: ClipUploadState
   /** 0～100。resumable upload 沒有原生進度，這是用 XHR 的 progress 事件算的。 */
@@ -42,59 +57,96 @@ export interface ClipUpload {
   videoId: string
 }
 
+export interface EnqueueOptions {
+  gameId: string
+  inning: number
+  half: GameHalf
+  blob: Blob
+  /** YouTube 上的標題。續傳時要和第一次開工作階段時一致。 */
+  title: string
+  label?: string
+  /** 錄影頁在 `clip-store` 的暫存 id。上傳成功後用它刪掉暫存。 */
+  sessionId?: string
+  /** 寫進 `upload-store`，重新載入後可以接著傳。從裝置挑的檔案才需要。 */
+  persist?: boolean
+  /** 從 `upload-store` 救回來的：沿用原本的 id 與斷點。 */
+  id?: string
+  resume?: { location: string; offset: number }
+}
+
 /**
- * YouTube 頻道每天可以上傳幾支影片是有上限的，而且**和 API 的配額是兩回事**。
- * Google 沒有公布確切數字，會依頻道的歷史與帳號信譽浮動（實務上約 15～50），
- * 觸頂後要等 24 小時。一場七局十四段很容易在一天之內撞到。
+ * 建立佇列。**整個 app 只呼叫一次**（在 client plugin 裡），
+ * 頁面拿到的是下面 `useClipUpload()` 篩過的檢視。
  */
-class UploadLimitError extends Error {}
-
-const UPLOAD_LIMIT_MESSAGE =
-  '已達 YouTube 今日的上傳數量上限。影片都還在這台裝置上，24 小時後再按重試，或自己上傳後到後台補登。'
-
-export function useClipUpload(options: {
-  gameId: () => string
-  title: (inning: number, half: GameHalf) => string
-}) {
+export function createClipUploadQueue() {
   const queue = ref<ClipUpload[]>([])
   const { post } = useApi()
+  const store = getUploadStore()
 
   /** 撞到當天的上傳額度。整批停下，而不是讓每一段各撞一次。 */
   const limitReached = ref(false)
 
-  /** 還沒傳完的段數。離開頁面前要用它攔一下。 */
-  const pending = computed(
-    () =>
-      queue.value.filter((item) => item.state === 'waiting' || item.state === 'uploading').length,
-  )
-  const failed = computed(() => queue.value.filter((item) => item.state === 'failed').length)
-
   let running = false
+  let seq = 0
 
-  /** 把一段排進佇列。Blob 只留在這個 Map 裡，上傳完就丟掉。 */
+  /** Blob 只留在這個 Map 裡，上傳完就丟掉。 */
   const blobs = new Map<string, Blob>()
-
-  /** 佇列項目 → IndexedDB 裡的片段 id。上傳成功後用它刪掉暫存。 */
+  /** 佇列項目 → IndexedDB 裡的錄影暫存 id。 */
   const sessions = new Map<string, string>()
+  /** 要不要把進度寫進 `upload-store`。 */
+  const persisted = new Set<string>()
+  /** 上傳網址與已確認的位移。重試與續傳都靠它。 */
+  const resumes = new Map<string, { location: string; offset: number }>()
+  /** 上一次寫進 IndexedDB 時的位移，用來節流。 */
+  const lastWritten = new Map<string, number>()
+  /** 佇列項目 → YouTube 標題。續傳時要和第一次開工作階段時一致。 */
+  const titles = new Map<string, string>()
 
-  function enqueue(clip: {
-    inning: number
-    half: GameHalf
-    blob: Blob
-    sessionId?: string
-  }): string {
-    const id = `${clip.inning}-${clip.half}-${Date.now()}`
-    blobs.set(id, clip.blob)
-    if (clip.sessionId) sessions.set(id, clip.sessionId)
+  function patch(id: string, changes: Partial<ClipUpload>) {
+    queue.value = queue.value.map((item) => (item.id === id ? { ...item, ...changes } : item))
+  }
+
+  function enqueue(options: EnqueueOptions): string {
+    const id = options.id ?? `${options.gameId}-${options.inning}-${options.half}-${(seq += 1)}`
+    const label = options.label ?? `第 ${options.inning} 局${HALF_LABELS[options.half]}`
+
+    blobs.set(id, options.blob)
+    titles.set(id, options.title)
+    if (options.sessionId) sessions.set(id, options.sessionId)
+    if (options.resume) resumes.set(id, options.resume)
+    if (options.persist) {
+      persisted.add(id)
+      // 寫失敗不該擋住上傳 —— 最壞只是「重新載入後救不回來」，
+      // 而那正是沒有這個功能之前的行為
+      void store
+        .save({
+          id,
+          gameId: options.gameId,
+          inning: options.inning,
+          half: options.half,
+          title: options.title,
+          fileName: label,
+          file: options.blob as File,
+          location: options.resume?.location ?? '',
+          offset: options.resume?.offset ?? 0,
+          createdAt: Date.now(),
+        })
+        .catch(() => {})
+    }
+
     queue.value = [
       ...queue.value,
       {
         id,
-        inning: clip.inning,
-        half: clip.half,
-        bytes: clip.blob.size,
+        gameId: options.gameId,
+        inning: options.inning,
+        half: options.half,
+        label,
+        bytes: options.blob.size,
         state: 'waiting',
-        progress: 0,
+        progress: options.resume
+          ? Math.round((options.resume.offset / options.blob.size) * 100)
+          : 0,
         error: '',
         videoId: '',
       },
@@ -103,12 +155,8 @@ export function useClipUpload(options: {
     return id
   }
 
-  function patch(id: string, changes: Partial<ClipUpload>) {
-    queue.value = queue.value.map((item) => (item.id === id ? { ...item, ...changes } : item))
-  }
-
   /**
-   * 一次只傳一段。
+   * 一次只傳一個。
    *
    * 平行上傳在球場的行動網路上只會讓每一段都變慢，而且同時錄影時還要跟
    * 編碼搶 CPU。照順序慢慢傳，反正下一個半局還有十幾分鐘。
@@ -125,7 +173,7 @@ export function useClipUpload(options: {
         await upload(next)
 
         /*
-         * 撞到當天的上傳額度就整批停下 —— 後面每一段都會撞同一面牆，
+         * 撞到當天的上傳額度就整批停下 —— 後面每一個都會撞同一面牆，
          * 繼續試只是讓七段各自失敗一次，訊息還互相蓋掉。
          * 剩下的維持 `waiting`，明天（或手動）再按重試就會接著跑。
          */
@@ -143,7 +191,12 @@ export function useClipUpload(options: {
       return
     }
 
-    patch(item.id, { state: 'uploading', progress: 0, error: '' })
+    const resume = resumes.get(item.id)
+    patch(item.id, {
+      state: 'uploading',
+      progress: resume ? Math.round((resume.offset / blob.size) * 100) : 0,
+      error: '',
+    })
 
     try {
       const token = await post<{ configured: boolean; accessToken?: string }>(
@@ -151,18 +204,33 @@ export function useClipUpload(options: {
         {},
       )
       if (!token.configured || !token.accessToken) {
-        // 三個環境變數缺任何一個都會走到這裡，講清楚要去哪裡補
-        patch(item.id, {
-          state: 'failed',
-          error: '尚未設定 YouTube 上傳（缺 NUXT_YOUTUBE_CLIENT_ID／SECRET／REFRESH_TOKEN）',
-        })
+        patch(item.id, { state: 'failed', error: NOT_CONFIGURED_MESSAGE })
         return
       }
 
-      const location = await startUpload(token.accessToken, item, blob)
-      const videoId = await sendBytes(location, blob, (progress) => patch(item.id, { progress }))
+      // 已經開過工作階段就沿用它 —— 重開一個等於在 YouTube 上多一支半殘的影片
+      const location =
+        resume?.location ||
+        (await createUploadSession({
+          accessToken: token.accessToken,
+          title: titles.get(item.id) ?? item.label,
+          description: `第 ${item.inning} 局${HALF_LABELS[item.half]}`,
+          size: blob.size,
+          contentType: blob.type || 'application/octet-stream',
+        }))
+      remember(item.id, location, resume?.offset ?? 0, true)
 
-      await post(`/admin/games/${encodeURIComponent(options.gameId())}/clips`, {
+      const videoId = await uploadChunks({
+        location,
+        blob,
+        startAt: resume?.offset ?? 0,
+        onProgress: (progress, offset) => {
+          patch(item.id, { progress })
+          remember(item.id, location, offset, false)
+        },
+      })
+
+      await post(`/admin/games/${encodeURIComponent(item.gameId)}/clips`, {
         inning: item.inning,
         half: item.half,
         videoId,
@@ -171,16 +239,15 @@ export function useClipUpload(options: {
       })
 
       patch(item.id, { state: 'done', progress: 100, videoId })
+      forget(item.id)
 
       /*
        * 只有成功才放掉 Blob。
        *
-       * 一段 140 MB，留著當然佔記憶體 —— 但失敗的那幾段必須留著，
-       * 否則「重試」按鈕按下去沒有東西可以傳。球場的網路本來就不可靠，
-       * 重試是這個功能最常用到的路徑，不能為了省記憶體把它做成死的。
-       *
-       * 最壞的情況（連續失敗好幾段）使用者看得到警告，而且影片已經存在
-       * 裝置上了 —— 大不了不重試，事後手動傳。
+       * 失敗的那幾個必須留著，否則「重試」按鈕按下去沒有東西可以傳。
+       * 球場的網路本來就不可靠，重試是這個功能最常用到的路徑，
+       * 不能為了省記憶體把它做成死的。挑檔案的那一種更是如此：`File`
+       * 只是磁碟上的參照，留著幾乎不佔記憶體。
        */
       blobs.delete(item.id)
 
@@ -205,125 +272,38 @@ export function useClipUpload(options: {
     }
   }
 
-  /** 第一步：告訴 YouTube 要傳什麼，拿回一個上傳網址。 */
-  async function startUpload(accessToken: string, item: ClipUpload, blob: Blob): Promise<string> {
-    const response = await fetch(UPLOAD_INIT_URL, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        'content-type': 'application/json',
-        'x-upload-content-type': blob.type,
-        'x-upload-content-length': String(blob.size),
-      },
-      body: JSON.stringify({
-        snippet: {
-          title: options.title(item.inning, item.half),
-          description: `第 ${item.inning} 局${HALF_LABELS[item.half]}`,
-        },
-        // 送 private 只是表明意圖 —— 未通過合規稽核的專案本來就強制私人
-        status: { privacyStatus: 'private', selfDeclaredMadeForKids: false },
-      }),
-    })
-
-    const location = response.headers.get('location')
-    if (!response.ok) {
-      /*
-       * 把 YouTube 真正說的話帶出來。
-       *
-       * 只回一個狀態碼的話，使用者（和之後除錯的人）完全不知道是配額用完、
-       * 權杖沒有上傳範圍、還是頻道沒驗證。這幾種的處理方式完全不同，
-       * 而這是唯一會告訴你的地方。
-       */
-      const { reason, message } = await describeError(response)
-
-      /*
-       * YouTube 頻道有「每天可以上傳幾支」的額度，和 API 的配額是兩回事。
-       * 撞到之後**當天剩下的每一段都會撞同一面牆** —— 所以要標記出來讓佇列
-       * 停下，而不是讓七段各自失敗七次、跳七個看不懂的英文訊息。
-       */
-      if (reason === 'uploadLimitExceeded') {
-        throw new UploadLimitError()
-      }
-      throw new Error(`YouTube 拒絕上傳（${response.status}）：${message}`)
-    }
-    if (!location) {
-      throw new Error('YouTube 沒有回傳上傳位址')
-    }
-    return location
-  }
-
   /**
-   * 從 Google 的錯誤回應裡撈出原因與可讀訊息。
+   * 記住斷點。
    *
-   * `reason` 是機器判讀用的（例如 `uploadLimitExceeded`、`quotaExceeded`），
-   * `message` 是給人看的。只回其中一個都不夠：前者沒法顯示，後者沒法分支。
+   * ⚠️ **寫 IndexedDB 要節流。** `onProgress` 在一個大檔案上會觸發上千次，
+   * 每次都寫一筆的話，磁碟寫入會跟上傳搶資源，而且那些寫入之間的差別
+   * 對「接著傳」毫無意義 —— 續傳本來就以**塊**為單位。所以只在跨過一整塊
+   * （或剛拿到上傳網址）時才落地。
    */
-  async function describeError(response: Response): Promise<{ reason: string; message: string }> {
-    try {
-      const body = await response.json()
-      return {
-        reason: body?.error?.errors?.[0]?.reason ?? '',
-        message: body?.error?.message ?? body?.error_description ?? '沒有說明',
-      }
-    } catch {
-      return { reason: '', message: '沒有說明' }
-    }
+  function remember(id: string, location: string, offset: number, force: boolean) {
+    resumes.set(id, { location, offset })
+    if (!persisted.has(id)) return
+
+    const written = lastWritten.get(id) ?? -1
+    if (!force && offset - written < CHUNK_BYTES) return
+    lastWritten.set(id, offset)
+    void store.progress(id, location, offset).catch(() => {})
   }
 
-  /**
-   * 第二步：把位元組送上去。
-   *
-   * 用 `XMLHttpRequest` 而不是 `fetch` —— 只有它有 `upload.onprogress`。
-   * 傳一段要好幾分鐘，沒有進度條的話使用者不知道是在傳還是卡住了。
-   */
-  function sendBytes(
-    location: string,
-    blob: Blob,
-    onProgress: (percent: number) => void,
-  ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      xhr.open('PUT', location)
-      xhr.setRequestHeader('content-type', blob.type)
-
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100))
-      }
-
-      xhr.onload = () => {
-        if (xhr.status < 200 || xhr.status >= 300) {
-          let detail: string
-          try {
-            detail = JSON.parse(xhr.responseText)?.error?.message ?? ''
-          } catch {
-            detail = xhr.responseText.slice(0, 120)
-          }
-          reject(new Error(`上傳失敗（${xhr.status}）${detail ? `：${detail}` : ''}`))
-          return
-        }
-        try {
-          const videoId = JSON.parse(xhr.responseText)?.id
-          if (typeof videoId === 'string' && videoId) resolve(videoId)
-          else reject(new Error('YouTube 沒有回傳影片 ID'))
-        } catch {
-          reject(new Error('無法解析 YouTube 的回應'))
-        }
-      }
-
-      xhr.onerror = () => reject(new Error('網路中斷，這一段還沒上傳'))
-      xhr.onabort = () => reject(new Error('上傳已取消'))
-      xhr.send(blob)
-    })
+  /** 傳完了（或被丟棄）：把這一筆的所有痕跡清掉。 */
+  function forget(id: string) {
+    resumes.delete(id)
+    lastWritten.delete(id)
+    titles.delete(id)
+    if (persisted.delete(id)) void store.remove(id).catch(() => {})
   }
 
-  /** 重試某一段。失敗多半是球場的網路，重按一次通常就過了。 */
+  /** 重試某一個。失敗多半是網路，重按一次通常就過了，而且是**接著**傳。 */
   function retry(id: string) {
     // 手動重試代表「我認為現在可以了」—— 把額度旗標放掉，讓佇列重新跑
     limitReached.value = false
     if (!blobs.has(id)) {
-      // 理論上不會發生（失敗的 Blob 都留著），但如果真的發生了，
-      // 要講出「請手動上傳」而不是讓按鈕按下去毫無反應
-      patch(id, { error: '影片資料已釋放，請從裝置手動上傳這一段' })
+      patch(id, { error: '影片資料已釋放，請重新挑一次檔案' })
       return false
     }
     patch(id, { state: 'waiting', error: '' })
@@ -331,13 +311,76 @@ export function useClipUpload(options: {
     return true
   }
 
-  /**
-   * 離開頁面時把 Blob 全部放掉。
-   *
-   * 沒有這一段的話，失敗的片段會一直佔著記憶體直到分頁關閉 ——
-   * 而管理者很可能只是切去看一下比賽頁再回來。
-   */
-  onBeforeUnmount(() => blobs.clear())
+  /** 從佇列（與 IndexedDB）移除。正在傳的那一個不給移除，先讓它失敗或傳完。 */
+  function discard(id: string) {
+    blobs.delete(id)
+    sessions.delete(id)
+    forget(id)
+    queue.value = queue.value.filter((item) => item.id !== id)
+  }
 
-  return { queue, pending, failed, limitReached, enqueue, retry }
+  const pending = computed(
+    () =>
+      queue.value.filter((item) => item.state === 'waiting' || item.state === 'uploading').length,
+  )
+
+  return { queue, limitReached, pending, enqueue, retry, discard }
+}
+
+export type ClipUploadQueue = ReturnType<typeof createClipUploadQueue>
+
+/**
+ * 某一場比賽的上傳檢視。
+ *
+ * 佇列本身是全站共用的（見上面），這裡只把它篩成「這一場的」，
+ * 所以頁面的寫法和佇列還活在頁面上的時候完全一樣。
+ */
+export function useClipUpload(options: {
+  gameId: () => string
+  title: (inning: number, half: GameHalf) => string
+}) {
+  const shared = useNuxtApp().$clipUploads as ClipUploadQueue
+
+  const queue = computed(() =>
+    shared.queue.value.filter((item) => item.gameId === options.gameId()),
+  )
+
+  return {
+    queue,
+    limitReached: shared.limitReached,
+    pending: computed(
+      () =>
+        queue.value.filter((item) => item.state === 'waiting' || item.state === 'uploading').length,
+    ),
+    failed: computed(() => queue.value.filter((item) => item.state === 'failed').length),
+
+    enqueue: (clip: Omit<EnqueueOptions, 'gameId' | 'title'> & { title?: string }) =>
+      shared.enqueue({
+        ...clip,
+        gameId: options.gameId(),
+        title: clip.title ?? options.title(clip.inning, clip.half),
+      }),
+
+    retry: shared.retry,
+    discard: shared.discard,
+  }
+}
+
+/** 全站的上傳狀態，給後台版面上的指示器用。 */
+export function useClipUploadStatus() {
+  const shared = useNuxtApp().$clipUploads as ClipUploadQueue
+
+  const active = computed(() =>
+    shared.queue.value.filter((item) => item.state === 'waiting' || item.state === 'uploading'),
+  )
+
+  return {
+    count: computed(() => active.value.length),
+    /** 正在傳的那一個的進度。沒有正在傳的就是 0。 */
+    progress: computed(
+      () => active.value.find((item) => item.state === 'uploading')?.progress ?? 0,
+    ),
+    /** 點下去要去哪一頁。以正在傳的那一場為準。 */
+    gameId: computed(() => active.value[0]?.gameId ?? ''),
+  }
 }
