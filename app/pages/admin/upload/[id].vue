@@ -278,7 +278,7 @@ useHead({ title: () => (game.value ? `上傳影片檔：vs ${game.value.opponent
     <AdminHeader
       title="上傳影片檔"
       description="把相機拍好、已經匯出到這台裝置的影片，一個半局一個檔案傳上 YouTube。"
-      :back-to="`/admin/games/${gameId}?tab=result`"
+      :back-to="`/admin/games/${gameId}?tab=video`"
       back-label="回到這場比賽"
     />
 

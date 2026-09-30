@@ -280,6 +280,38 @@ describe('資安標頭', () => {
   })
 
   /**
+   * 迴歸測試：舊的 `?tab=result` 還要落得到地方。
+   *
+   * 「賽事管理」那個分頁被拆掉了（狀態回到基本資料、計分板回到逐局紀錄、
+   * 錄影清單成為「錄影管理」）。但錄影頁與上傳頁的返回連結、以及使用者自己
+   * 收藏的網址都還指著 `?tab=result` —— 沒有對應規則的話它會安靜地退回
+   * 「基本資料」，而那正是剛錄完影片的人最不想看到的一頁。
+   */
+  it('舊網址 ?tab=result 會落在「錄影管理」', async () => {
+    const { cookie } = await login()
+    const html = await fetch('/admin/games/g3?tab=result', { headers: { cookie } }).then((r) =>
+      r.text(),
+    )
+
+    // 分頁列上被選起來的那一顆就是錄影管理（兩個屬性是相鄰的）
+    expect(html).toContain('aria-selected="true" aria-label="錄影管理"')
+  })
+
+  /**
+   * 迴歸測試：底部分頁列不能把最後一段內容蓋住。
+   *
+   * `AdminGameTabs` 是 `fixed`，所以它自己在文件流裡留一個等高的佔位方塊。
+   * 拿掉的話，每個分頁的最後一個欄位都會永遠躲在分頁列底下 —— 而畫面上
+   * 看起來只是「這顆按鈕點不到」。
+   */
+  it('底部分頁列有留等高的佔位', async () => {
+    const { cookie } = await login()
+    const html = await fetch('/admin/games/g3', { headers: { cookie } }).then((r) => r.text())
+
+    expect(html).toContain('h-[calc(4rem+env(safe-area-inset-bottom))]')
+  })
+
+  /**
    * CSP 的 `frame-src`。
    *
    * 沒有這一條會 fallback 到 `default-src 'self'`，賽事錄影的 YouTube 播放器

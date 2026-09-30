@@ -16,6 +16,10 @@ import type { Toast } from '~/composables/useToast'
  * - 外層要 `pointer-events-none`、每一則自己 `pointer-events-auto`。
  *   否則這個橫跨整個畫面下緣的 fixed 容器會把底下的按鈕全部吃掉，
  *   而它平常是空的、完全看不出來。
+ * - 頁面自己貼在畫面下緣的東西（`AdminGameTabs` 那一排分頁）會被這個
+ *   z-index 更高的容器蓋住，所以內距裡加了 `var(--bottom-bar, 0px)` ——
+ *   有那種頁面時由它設這個變數，toast 就自己往上讓開。預設 0，
+ *   其餘頁面完全不受影響。
  * - `z-index` 要高於 `AdminRowMenu`（遮罩 40、選單 50），否則提示會被那層
  *   全螢幕遮罩壓住，「重試」按鈕點不到。
  */
@@ -60,7 +64,7 @@ const toneIconClasses: Record<Toast['tone'], string> = {
     而這裡的訊息（含失敗）都會留在畫面上，值不到那個代價。
   -->
   <div
-    class="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:items-end"
+    class="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom)+var(--bottom-bar,0px))] sm:items-end"
     role="status"
     aria-live="polite"
     aria-atomic="false"

@@ -30,21 +30,28 @@ import { formatGameDateLong } from '~/utils/format'
 /**
  * 編輯比賽。
  *
- * ## 為什麼分成四個分頁、各自儲存
- * 一場比賽的資料有四組彼此獨立的東西：基本資料、出席、打線、計分板。
+ * ## 為什麼分成五個分頁、各自儲存
+ * 一場比賽的資料是幾組彼此獨立的東西：基本資料、出席、打線、逐局紀錄、錄影。
  * 分頁之後每次儲存只送自己那一組欄位（PATCH），所以：
  * - 編輯打線時不會覆蓋掉別人剛更新的出席名單
  * - 表單短、可以馬上儲存，不必為了改一個時間而捲過整個計分板
  *
  * ## 出席與打線在哪個分頁看得到
  * 未開打的比賽前台顯示「出席＋先發陣容」，開打之後顯示「打線＋計分板」。
- * 後台四個分頁一律都在 —— 比賽結束後仍可能要回頭補出席紀錄。
+ * 後台五個分頁一律都在 —— 比賽結束後仍可能要回頭補出席紀錄。
  *
- * ## 「賽事管理」分頁
- * 賽事狀態與計分板放在同一個分頁，因為它們是同一件事的兩面：比賽開打時
- * 按「比賽中」並開始填分，打完按「比賽結束」。狀態原本擺在「基本資料」
- * 裡當成一個下拉選單，但那是比賽當天最常按的東西，不該和場地、地圖連結
- * 這些建檔一次就不再碰的欄位放在一起。
+ * ## ⚠️ 曾經有第六個分頁叫「賽事管理」
+ * 裡面裝的是賽事狀態、計分板與錄影清單 —— 三件彼此無關的事，而名字又和
+ * 整個頁面一樣叫「管理」，等於在說「其他分頁都不是管理」。現在各自回到
+ * 它們真正屬於的地方：
+ *
+ * - **賽事狀態 → 基本資料**（排在所有欄位之前，見那裡的註解）
+ * - **計分板 → 逐局紀錄**：有打席的那幾格本來就是由打席推導的，同一個分頁
+ *   才看得到那條推導鏈
+ * - **錄影清單 + 兩個入口 → 錄影管理**
+ *
+ * 分頁列固定在畫面底部（`AdminGameTabs`）：這一頁每個分頁都很長，而管理者
+ * 是在分頁之間來回切的，放在頂端等於每切一次都要先捲回最上面。
  */
 definePageMeta({ layout: 'admin', middleware: 'auth' })
 
@@ -61,25 +68,39 @@ const teamName = computed(() => settings.value?.teamName ?? '我隊')
 const teamNames = computed(() => (settings.value ? teamNameCandidates(settings.value) : []))
 const roster = computed(() => players.value ?? [])
 
+/**
+ * 五個分頁，每一個都對應「這場比賽的一件事」。
+ *
+ * ⚠️ 原本有第六個叫「賽事管理」，裡面裝的是賽事狀態、計分板與錄影清單 ——
+ * 三件彼此無關的事，而名字又和整個頁面一樣叫「管理」，等於在說「其他的都不是
+ * 管理」。現在各自回到它們真正屬於的地方：**狀態**是建檔資料的一部分（基本資料）、
+ * **計分板**和逐打席是同一份數字的兩種呈現（逐局紀錄，而且計分板本來就有幾格
+ * 是由打席推導的）、**錄影**和它的兩個入口（現場錄影、上傳相機檔）合成一個
+ * 「錄影管理」。
+ */
 const tabs = [
-  { key: 'basic', label: '基本資料' },
-  { key: 'attendance', label: '出席統計' },
-  { key: 'lineup', label: '打線' },
-  { key: 'innings', label: '逐局紀錄' },
-  { key: 'result', label: '賽事管理' },
+  { key: 'basic', label: '基本資料', icon: '📋' },
+  { key: 'attendance', label: '出席統計', icon: '🙋' },
+  { key: 'lineup', label: '打線', icon: '🧢' },
+  { key: 'innings', label: '逐局紀錄', icon: '⚾' },
+  { key: 'video', label: '錄影管理', icon: '🎬' },
 ] as const
 type TabKey = (typeof tabs)[number]['key']
+
+/** 舊網址（`?tab=result`）落在哪裡。錄影頁與上傳頁的返回連結都指過那裡。 */
+const LEGACY_TABS: Record<string, TabKey> = { result: 'video' }
 
 /**
  * 現在停在哪個分頁放在網址上（`?tab=`）。
  *
  * 這不是為了做出可以分享的連結，而是為了**回得來**：錄影頁的「離開」要直接
- * 回到「賽事管理」（剛錄完的片段就列在那裡），不該讓人再點一次分頁。
+ * 回到「錄影管理」（剛錄完的片段就列在那裡），不該讓人再點一次分頁。
  *
- * 網址未知或沒帶時退回第一個分頁 —— 有人手改網址不該讓四個分頁全部消失。
+ * 網址未知或沒帶時退回第一個分頁 —— 有人手改網址不該讓五個分頁全部消失。
  */
 function tabFromQuery(value: unknown): TabKey {
-  return tabs.some((tab) => tab.key === value) ? (value as TabKey) : 'basic'
+  if (tabs.some((tab) => tab.key === value)) return value as TabKey
+  return (typeof value === 'string' && LEGACY_TABS[value]) || 'basic'
 }
 
 const activeTab = ref<TabKey>(tabFromQuery(route.query.tab))
@@ -433,14 +454,10 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         back-label="回到賽事列表"
       >
         <template #actions>
-          <!-- 錄影是在球場邊用手機開的，所以那是一個獨立的、深底大按鈕的頁面 -->
-          <UiBaseButton variant="ghost" @click="navigateTo(`/admin/record/${game.id}`)">
-            📹 錄影
-          </UiBaseButton>
-          <!-- 外接相機拍的：檔案已經在手機／電腦上，只差上傳與對上半局 -->
-          <UiBaseButton variant="ghost" @click="navigateTo(`/admin/upload/${game.id}`)">
-            ⬆️ 上傳影片檔
-          </UiBaseButton>
+          <!--
+            錄影與上傳影片檔的入口收在「錄影管理」分頁裡，不放在這裡 ——
+            它們和賽事錄影清單是同一件事，分散在兩個地方只會讓人找不到。
+          -->
           <UiBaseButton variant="ghost" @click="navigateTo(`/games/${game.id}`)">
             前台預覽
           </UiBaseButton>
@@ -453,29 +470,64 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         釘在這裡的一行字在使用者捲到計分板時完全看不到。
       -->
 
-      <!-- 分頁 -->
-      <div class="mb-6 flex flex-wrap gap-1 border-b border-border" role="tablist">
-        <button
-          v-for="tab in tabs"
-          :key="tab.key"
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === tab.key"
-          class="min-h-11 border-b-2 px-4 text-fluid-sm font-medium transition"
-          :class="
-            activeTab === tab.key
-              ? 'border-brand-600 text-brand-600 dark:text-brand-300'
-              : 'border-transparent text-content-muted hover:text-content'
-          "
-          @click="activeTab = tab.key"
-        >
-          {{ tab.label }}
-          <!-- 未儲存的變更用一個小圓點提示，切到別的分頁也看得到 -->
-        </button>
-      </div>
-
       <!-- ══ 基本資料 ══════════════════════════════════════════ -->
       <section v-show="activeTab === 'basic'" role="tabpanel" class="max-w-2xl space-y-4">
+        <!--
+          ⚠️ 狀態排在所有欄位**前面**，而且和它們之間有一條分隔線。
+          這一頁其餘的欄位是建檔時填一次就不再碰的；狀態是比賽當天要按兩次的
+          按鈕。混在表單中間的話，開賽前那三十秒裡它會變成最難找的東西。
+        -->
+        <!-- ── 賽事狀態 ────────────────────────────────────────── -->
+        <fieldset class="space-y-3">
+          <legend class="text-fluid-lg font-bold">賽事狀態</legend>
+          <p class="text-fluid-sm text-content-muted">
+            按下去就會立刻反映在官網上：「比賽中」會在賽程與首頁顯示紅色的 LIVE
+            與即時比數，「比賽結束」會顯示 FINAL 與勝敗。
+          </p>
+
+          <!--
+          手機上五顆要塞進一排，所以內距與字級都先縮小，`sm:` 才放大。
+          仍然保留 `flex-wrap` 當安全網 —— 更窄的螢幕寧可換行，也不要橫向溢出。
+        -->
+          <div
+            class="flex flex-wrap items-center gap-1 sm:gap-2"
+            role="group"
+            aria-label="賽事狀態"
+          >
+            <button
+              v-for="status in GAME_FLOW_STATUSES"
+              :key="status"
+              type="button"
+              class="min-h-11 rounded-full border px-2.5 text-xs font-semibold whitespace-nowrap transition sm:px-5 sm:text-fluid-sm"
+              :class="statusButtonClass(status)"
+              :aria-pressed="basic.status === status"
+              @click="basic.status = status"
+            >
+              {{ GAME_STATUS_LABELS[status] }}
+            </button>
+
+            <!--
+            延賽與取消是岔出主流程的兩條，所以用一條分隔線隔開而不是排成同一排。
+            它們還是同一個欄位的值，做成第二個控制項只會讓人不知道該以哪個為準。
+          -->
+            <span class="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
+
+            <button
+              v-for="status in GAME_EXCEPTION_STATUSES"
+              :key="status"
+              type="button"
+              class="min-h-11 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap transition sm:px-4 sm:text-fluid-sm"
+              :class="statusButtonClass(status)"
+              :aria-pressed="basic.status === status"
+              @click="basic.status = status"
+            >
+              {{ GAME_STATUS_LABELS[status] }}
+            </button>
+          </div>
+        </fieldset>
+
+        <hr class="border-border" />
+
         <div class="grid gap-4 sm:grid-cols-2">
           <UiBaseInput v-model="basic.date" label="日期" type="date" required />
           <UiBaseInput v-model="basic.time" label="時間" type="time" required />
@@ -504,10 +556,6 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           :error="mapUrlError"
         />
 
-        <!--
-          比賽狀態不在這裡 —— 它在「賽事管理」分頁。這一頁的欄位是建檔時填一次
-          就不再碰的東西，而狀態是比賽當天要按兩次的按鈕，混在一起只會讓它難找。
-        -->
         <UiBaseSelect
           v-model="basic.homeAway"
           label="主客場"
@@ -570,84 +618,20 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
       </section>
 
       <!-- ══ 逐局紀錄 ══════════════════════════════════════════ -->
-      <section v-show="activeTab === 'innings'" role="tabpanel">
-        <AdminInningEditor
-          :plays="playLog.plays.value"
-          :home-away="basic.homeAway"
-          :lineup="lineup"
-          :starting-pitcher="startingPitcher"
-          :players="roster"
-          :clips="clips"
-          :scoreboard="board"
-          :our-name="teamName"
-          :opponent-name="game.opponent"
-          :pending-count="playLog.pending.value.length"
-          @save="playLog.saveHalf"
-          @retry="playLog.syncPending"
-        />
-      </section>
-
-      <!-- ══ 賽事管理 ══════════════════════════════════════════ -->
-      <section v-show="activeTab === 'result'" role="tabpanel" class="space-y-8">
-        <!-- ── 賽事狀態 ────────────────────────────────────────── -->
-        <fieldset class="space-y-3">
-          <legend class="text-fluid-lg font-bold">賽事狀態</legend>
-          <p class="text-fluid-sm text-content-muted">
-            按下去就會立刻反映在官網上：「比賽中」會在賽程與首頁顯示紅色的 LIVE
-            與即時比數，「比賽結束」會顯示 FINAL 與勝敗。
-          </p>
-
-          <!--
-            手機上五顆要塞進一排，所以內距與字級都先縮小，`sm:` 才放大。
-            仍然保留 `flex-wrap` 當安全網 —— 更窄的螢幕寧可換行，也不要橫向溢出。
-          -->
-          <div
-            class="flex flex-wrap items-center gap-1 sm:gap-2"
-            role="group"
-            aria-label="賽事狀態"
-          >
-            <button
-              v-for="status in GAME_FLOW_STATUSES"
-              :key="status"
-              type="button"
-              class="min-h-11 rounded-full border px-2.5 text-xs font-semibold whitespace-nowrap transition sm:px-5 sm:text-fluid-sm"
-              :class="statusButtonClass(status)"
-              :aria-pressed="basic.status === status"
-              @click="basic.status = status"
-            >
-              {{ GAME_STATUS_LABELS[status] }}
-            </button>
-
-            <!--
-              延賽與取消是岔出主流程的兩條，所以用一條分隔線隔開而不是排成同一排。
-              它們還是同一個欄位的值，做成第二個控制項只會讓人不知道該以哪個為準。
-            -->
-            <span class="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
-
-            <button
-              v-for="status in GAME_EXCEPTION_STATUSES"
-              :key="status"
-              type="button"
-              class="min-h-11 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap transition sm:px-4 sm:text-fluid-sm"
-              :class="statusButtonClass(status)"
-              :aria-pressed="basic.status === status"
-              @click="basic.status = status"
-            >
-              {{ GAME_STATUS_LABELS[status] }}
-            </button>
-          </div>
-        </fieldset>
-
-        <hr class="border-border" />
-
+      <section v-show="activeTab === 'innings'" role="tabpanel" class="space-y-8">
+        <!--
+          計分板和下面的逐打席是**同一份數字的兩種呈現** —— 有打席的那幾格
+          本來就是由打席推導出來的（唯讀並標示來源）。放在同一個分頁，登完一個
+          半局就能立刻看到那一格跟著動；分開放的話，那條推導鏈在畫面上是看不見的。
+        -->
         <div class="space-y-4">
           <div class="flex flex-wrap items-baseline justify-between gap-3">
             <h2 class="text-fluid-lg font-bold">計分板</h2>
 
             <!--
-              判定結果只顯示、不能改：它是計分板總分推導出來的，而且只有
-              「比賽結束」才有值 —— 領先不等於贏了。
-            -->
+            判定結果只顯示、不能改：它是計分板總分推導出來的，而且只有
+            「比賽結束」才有值 —— 領先不等於贏了。
+          -->
             <p v-if="result" class="text-fluid-sm">
               <span class="text-content-muted">判定結果</span>
               <span class="ml-2 font-bold">{{ GAME_RESULT_LABELS[result] }}</span>
@@ -673,27 +657,66 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
 
         <hr class="border-border" />
 
+        <AdminInningEditor
+          :plays="playLog.plays.value"
+          :home-away="basic.homeAway"
+          :lineup="lineup"
+          :starting-pitcher="startingPitcher"
+          :players="roster"
+          :clips="clips"
+          :scoreboard="board"
+          :our-name="teamName"
+          :opponent-name="game.opponent"
+          :pending-count="playLog.pending.value.length"
+          @save="playLog.saveHalf"
+          @retry="playLog.syncPending"
+        />
+      </section>
+
+      <!-- ══ 錄影管理 ══════════════════════════════════════════ -->
+      <section v-show="activeTab === 'video'" role="tabpanel" class="space-y-8">
+        <!--
+          兩個入口。它們是**去別的頁**，不是這一頁的表單，所以做成兩張卡片
+          而不是標題列上的小按鈕 —— 一場比賽的影片從頭到尾就是這兩條路，
+          在這裡它們是主角。
+        -->
+        <div class="grid gap-3 sm:grid-cols-2">
+          <NuxtLink
+            :to="`/admin/record/${game.id}`"
+            class="surface-card flex items-center gap-3 p-4 transition hover:border-brand-600"
+          >
+            <span class="text-2xl" aria-hidden="true">📹</span>
+            <span class="min-w-0">
+              <span class="block font-bold">現場錄影</span>
+              <span class="block text-fluid-sm text-content-muted">
+                用這台手機每半局錄一段，錄完自動上傳
+              </span>
+            </span>
+          </NuxtLink>
+
+          <NuxtLink
+            :to="`/admin/upload/${game.id}`"
+            class="surface-card flex items-center gap-3 p-4 transition hover:border-brand-600"
+          >
+            <span class="text-2xl" aria-hidden="true">⬆️</span>
+            <span class="min-w-0">
+              <span class="block font-bold">上傳影片檔</span>
+              <span class="block text-fluid-sm text-content-muted">
+                外接相機拍的：匯出到裝置後挑檔案上傳
+              </span>
+            </span>
+          </NuxtLink>
+        </div>
+
+        <hr class="border-border" />
+
         <!-- ── 賽事錄影 ──────────────────────────────────────── -->
         <div class="space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 class="text-fluid-lg font-bold">賽事錄影</h2>
+              <h2 class="text-fluid-lg font-bold">這一場的片段</h2>
               <p class="text-fluid-sm text-content-muted">
-                片段在
-                <NuxtLink
-                  :to="`/admin/record/${game.id}`"
-                  class="text-brand-600 underline underline-offset-4 dark:text-brand-300"
-                >
-                  錄影頁
-                </NuxtLink>
-                錄製並自動上傳；外接相機拍的影片走
-                <NuxtLink
-                  :to="`/admin/upload/${game.id}`"
-                  class="text-brand-600 underline underline-offset-4 dark:text-brand-300"
-                >
-                  上傳影片檔
-                </NuxtLink>
-                。
+                列出所有半局，沒有影片的那幾格就是待補的。
               </p>
             </div>
             <!--
@@ -823,6 +846,12 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           第二個來源，兩邊寫的不一樣時前台沒辦法知道該信哪一個。
         -->
       </section>
+
+      <!--
+        分頁列固定在畫面底部。放在所有 panel **之後**：它自己會在文件流裡
+        留一個等高的佔位方塊，所以最後一段內容不會被蓋住（見 `AdminGameTabs`）。
+      -->
+      <AdminGameTabs v-model="activeTab" :tabs="tabs" />
     </template>
   </div>
 </template>
