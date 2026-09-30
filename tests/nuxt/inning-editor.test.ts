@@ -29,8 +29,16 @@ function makePlay(
   return playSchema.parse({ inning, half, batter: { number, name: `選手${number}` }, result })
 }
 
-function mount(overrides: Record<string, unknown> = {}) {
+/**
+ * `attachTo` 只有測 focus 的那幾條需要。
+ *
+ * ⚠️ **沒有掛進 document 的元素 focus 不起來**（`document.activeElement`
+ * 會一直是 `<body>`）—— 而那正是這個功能在真實瀏覽器裡也會遇到的限制。
+ * 其餘測試維持不掛，免得每條都要自己清乾淨 DOM。
+ */
+function mount(overrides: Record<string, unknown> = {}, attach = false) {
   return mountSuspended(InningEditor, {
+    ...(attach ? { attachTo: document.body } : {}),
     props: {
       plays: [] as Play[],
       homeAway: 'home' as HomeAway,
@@ -632,6 +640,69 @@ describe('AdminInningEditor 三出局後鎖住', () => {
     await nextTick()
 
     expect(component.find('h3').text()).toContain('第 1 局下')
+  })
+
+  /**
+   * 對手打擊時，游標要直接落在背號框上。
+   *
+   * 我隊打擊有整份打線可以點，對手只有那一個框 —— 而每個打席的第一個動作
+   * **一定是**打背號。少了自動 focus，場邊的人一場要多點十幾次，而他另一隻手
+   * 正拿著手機在看球。
+   */
+  describe('對手打擊時自動 focus 背號框', () => {
+    /** 主場 = 我隊後攻，所以「1 上」是對手進攻。 */
+    const numberSelector = 'input[placeholder="例如 24"]'
+
+    it('切到這個分頁時就進去', async () => {
+      const component = await mount({ active: true }, true)
+      await openTop(component)
+      await nextTick()
+
+      expect(document.activeElement).toBe(component.find(numberSelector).element)
+      component.unmount()
+    })
+
+    it('⚠️ 分頁沒被選到時不搶游標', async () => {
+      // 分頁是 `v-show`，這個元件在別的分頁上也一直掛著 —— 少了這條判斷，
+      // 使用者在「基本資料」打字打到一半，游標會被這裡搶走
+      const component = await mount({ active: false }, true)
+      await openTop(component)
+      await nextTick()
+
+      expect(document.activeElement).not.toBe(component.find(numberSelector).element)
+      component.unmount()
+    })
+
+    it('換到另一個對手進攻的半局也會再進去一次', async () => {
+      const component = await mount({ active: true }, true)
+      await openTop(component)
+      await nextTick()
+      ;(document.activeElement as HTMLElement).blur()
+
+      // 「2 上」也是對手進攻：`wantsNumberFocus` 從頭到尾都是 true，
+      // 所以只看它的話不會觸發 —— 半局本身也要看
+      await component.findAll('[aria-label="半局"] [role="tab"]')[2]?.trigger('click')
+      await nextTick()
+
+      expect(document.activeElement).toBe(component.find(numberSelector).element)
+      component.unmount()
+    })
+
+    it('我隊打擊的半局沒有那個框，也不會出事', async () => {
+      const component = await mount({ active: true })
+      await component.findAll('[aria-label="半局"] [role="tab"]')[1]?.trigger('click')
+      await nextTick()
+
+      expect(component.find(numberSelector).exists()).toBe(false)
+    })
+
+    it('三出局鎖住的半局不 focus', async () => {
+      const component = await mount({ active: true, plays: threeOuts() })
+      await openTop(component)
+      await nextTick()
+
+      expect(component.find(numberSelector).exists()).toBe(false)
+    })
   })
 
   it('兩出局時雙殺打按不下去（出局數不能超過三）', async () => {

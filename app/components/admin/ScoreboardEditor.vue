@@ -90,12 +90,6 @@ function isDerived(inning: number, side: 'our' | 'opponent'): boolean {
   return derivedKeys.value.has(`${inning}-${side}`)
 }
 
-const hasDerived = computed(
-  () =>
-    derivedKeys.value.size > 0 ||
-    Object.values(props.derivedTotals ?? {}).some((t) => t.h !== undefined || t.e !== undefined),
-)
-
 /**
  * 所有改動都經過這裡，順手把 R 對齊逐局。
  *
@@ -330,20 +324,23 @@ async function handleFile(event: Event) {
         <UiBaseButton variant="ghost" size="sm" @click="removeInning">－ 減少一局</UiBaseButton>
       </div>
 
-      <p
-        v-if="hasDerived"
-        class="rounded-lg bg-brand-600/10 px-3 py-2 text-fluid-sm text-brand-600 dark:text-brand-300"
-      >
-        有底色的格子是「逐局紀錄」分頁的逐打席加總，所以在這裡不能改 ——
-        要改就去改那個半局的打席。H（安打）與 E（失誤）要等一隊打過的每個半局都有
-        登錄才會接管，否則維持手填；E 只算得到「失誤上壘」。
-      </p>
+      <!--
+        表格底下原本有兩段說明，都拿掉了。
 
-      <p class="text-xs text-content-muted">
-        提示：上面那列是先攻（客隊），和前台顯示的順序一樣，改主客場就會對調。
-        欄位留空代表該半局沒有進行（顯示為 X），輸入 0 代表打了但沒有得分。
-        R（總得分）由逐局自動加總，不需要也不能手動填。
-      </p>
+        一段是「提示：…」（先攻在上、留空＝沒打這半局、R 是加總）—— 那三件事
+        畫面上本來就看得到：隊名寫在列首、空格與 X 是同一件事的兩個樣子、
+        R 那一欄是唯讀的樣式。
+
+        一段是「有底色的格子是逐打席加總，在這裡不能改」。CLAUDE.md 原本
+        要求它一定要在（「一格數字改不動而畫面上又沒說原因，看起來就是壞掉了」），
+        ⚠️ **前提後來變了**：計分板已經搬進「逐局紀錄」分頁，就排在逐打席登錄的
+        正上方 —— 資料來源和它本人在同一個畫面上。而且**每一格推導值自己帶
+        `title`**（「由『逐局紀錄』的逐打席加總，請到那裡修改」），滑鼠停著或長按
+        就看得到。
+
+        ⚠️ 要再拿掉那些 `title` 的話，就得把這段文字加回來 —— 那時畫面上就真的
+        沒有任何地方說得出原因了。
+      -->
     </template>
   </div>
 </template>

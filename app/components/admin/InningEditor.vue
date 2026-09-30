@@ -68,6 +68,14 @@ const props = defineProps<{
   opponentName: string
   /** 還沒同步到伺服器的半局數。 */
   pendingCount?: number
+  /**
+   * 這個分頁現在是不是被選中的。
+   *
+   * ⚠️ 分頁是 `v-show`，所以這個元件在別的分頁上也一直掛著 —— 少了這個 prop，
+   * 「輪到對手時把游標移進背號框」只會在元件掛載那一刻試一次，而那時它多半是
+   * `display: none`（**隱藏的元素 focus 不起來，而且完全不會報錯**）。
+   */
+  active?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -332,6 +340,43 @@ const rowsLocked = computed(() => complete.value && !editUnlocked.value)
 /** 這個半局還剩幾個出局可以用。 */
 const remainingOuts = computed(() => Math.max(0, 3 - selected.value.outs))
 
+/* ── 對手打擊時，游標直接進背號框 ────────────────────────────── */
+
+const numberField = useTemplateRef<{ focus: (options?: FocusOptions) => void }>('numberField')
+
+/**
+ * 現在該不該把游標放在背號框上。
+ *
+ * 對手打擊時，一個打席的第一個動作**一定是**打背號（我隊有名冊可以點，
+ * 對手只有那個框）。少了自動 focus，場邊的人每個打席都要先點一下那個框 ——
+ * 一場十幾次，而且他另一隻手還拿著手機在看球。
+ */
+const wantsNumberFocus = computed(() => Boolean(props.active) && !ourAtBat.value && !complete.value)
+
+function focusNumberField() {
+  if (!wantsNumberFocus.value) return
+  /*
+   * ⚠️ 要等 `nextTick`。
+   *
+   * 換半局（或剛切到這個分頁）時，這個框是**這一幀才被畫出來**的，而
+   * 還沒進 DOM／還是 `display: none` 的元素 `.focus()` 會**安靜地沒有作用**
+   * （和 `AdminRowMenu` 那個坑同一回事）。
+   *
+   * 刻意**不加** `preventScroll` —— 捲回輸入框正是這裡想要的：登完上一筆之後
+   * 使用者多半停在下面的球場或打席列表上。
+   */
+  void nextTick(() => numberField.value?.focus())
+}
+
+/*
+ * 三個會需要重新 focus 的時機，共用同一個判斷：
+ * 切到這個分頁、換到（另一個）對手進攻的半局、以及登完一筆之後（`commit` 裡）。
+ * `selectedKey` 要單獨看 —— 從「3 上」換到「5 上」時 `wantsNumberFocus`
+ * 從頭到尾都是 true，只看它的話不會觸發。
+ */
+watch([wantsNumberFocus, selectedKey], () => focusNumberField())
+onMounted(focusNumberField)
+
 /**
  * 這個結果會不會讓出局數超過三。兩出局時不可能打出雙殺 ——
  * 登得進去的話，這個半局的出局數就是 4，而完整性與投球局數都從它算。
@@ -438,6 +483,9 @@ function addPlay(result: PlayResult, landing: Landing = NO_LANDING): void {
   opponentNumber.value = ''
   switchSide.value = 'R'
   pendingPoint.value = null
+
+  // 下一個打者的背號馬上就要打，游標留在那裡
+  focusNumberField()
 
   // 第三個出局登錄完，直接跳到下一個半局 —— 下一筆一定是在那裡
   if (halfInningOuts(next) >= 3) void nextTick(goToNextHalf)
@@ -930,6 +978,7 @@ function suggestionText(item: Suggestion): string {
         <div v-if="!complete" class="flex flex-col items-start gap-3">
           <div v-if="!ourAtBat" class="w-full max-w-xs">
             <UiBaseInput
+              ref="numberField"
               v-model="opponentNumber"
               label="對手打者背號"
               digits

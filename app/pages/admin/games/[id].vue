@@ -658,6 +658,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         <hr class="border-border" />
 
         <AdminInningEditor
+          :active="activeTab === 'innings'"
           :plays="playLog.plays.value"
           :home-away="basic.homeAway"
           :lineup="lineup"

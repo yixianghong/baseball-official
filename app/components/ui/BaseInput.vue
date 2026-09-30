@@ -63,6 +63,19 @@ function onInput(event: Event): void {
   model.value = cleaned
 }
 
+/**
+ * 讓呼叫端把游標移進來（`inputRef.focus()`）。
+ *
+ * ⚠️ **`ref` 放在元件上拿到的是元件實例，不是裡面的 `<input>`** —— 沒有這個
+ * `expose` 的話，呼叫端只能去 `$el.querySelector('input')`，而那會在元件內部
+ * 結構改變時安靜地失效。
+ */
+const inputRef = useTemplateRef<HTMLInputElement>('input')
+
+defineExpose({
+  focus: (options?: FocusOptions) => inputRef.value?.focus(options),
+})
+
 const describedBy = computed(() => {
   const ids = []
   if (props.hint) ids.push(hintId.value)
@@ -80,6 +93,7 @@ const describedBy = computed(() => {
 
     <input
       :id="id"
+      ref="input"
       v-model="model"
       :type="type"
       :required="required"

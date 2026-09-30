@@ -92,8 +92,19 @@ describe('AdminScoreboardEditor 的 H／E', () => {
     expect(component.find('input[aria-label="藍鷹隊 安打數"]').exists()).toBe(true)
   })
 
-  it('有推導的欄位時會說明原因', async () => {
+  /**
+   * ⚠️ 推導的格子**每一格自己**要說得出原因。
+   *
+   * 表格底下原本有一段常駐的說明文字，已經拿掉了（計分板現在就排在逐打席登錄的
+   * 正上方，來源和它本人在同一個畫面上）。所以現在畫面上唯一說得出「為什麼這格
+   * 改不動」的就是這個 `title` —— 拿掉它，那一格就變成一個沒有理由改不動的數字，
+   * 看起來就是壞掉了。
+   */
+  it('推導的那幾格自己帶著「去哪裡改」的說明', async () => {
     const component = await mountWith({ our: { h: 8 }, opponent: {} })
-    expect(component.text()).toContain('E 只算得到「失誤上壘」')
+
+    expect(component.find('[aria-label="城市隊 安打數（由逐打席推導）"]').attributes('title')).toBe(
+      '由「逐局紀錄」的逐打席加總，請到那裡修改',
+    )
   })
 })
