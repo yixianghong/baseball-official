@@ -61,7 +61,9 @@ self.addEventListener('activate', (event) => {
     (async () => {
       const keys = await caches.keys()
       await Promise.all(
-        keys.filter((key) => key !== ASSET_CACHE && key !== PAGE_CACHE).map((key) => caches.delete(key)),
+        keys
+          .filter((key) => key !== ASSET_CACHE && key !== PAGE_CACHE)
+          .map((key) => caches.delete(key)),
       )
       await self.clients.claim()
     })(),
@@ -209,19 +211,76 @@ self.addEventListener('notificationclick', (event) => {
     // 解析不了就用首頁，不要讓點擊沒有反應
   }
 
-  event.waitUntil(
-    (async () => {
-      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-      for (const client of windows) {
-        if (new URL(client.url).origin !== target.origin) continue
-        await client.focus()
-        if (client.url !== target.href) await client.navigate(target.href)
-        return
-      }
-      await self.clients.openWindow(target.href)
-    })(),
-  )
+  event.waitUntil(openTarget(target))
 })
+
+/**
+ * 把使用者送到通知指向的那一頁。
+ *
+ * ⚠️ **每一步都可能失敗，而失敗的樣子都是「點了通知沒反應」。**
+ * 原本這裡是 `await client.focus()` 接 `await client.navigate()`，兩個都沒有
+ * try —— 任何一個 reject，整個 handler 就停在那裡，使用者停在原本的頁面，
+ * 而且 console 在他的手機上看不到。實測（無頭 Chrome 送一則真的 push）
+ * `focus()` 一被擋，後面的 `navigate()` 就永遠不會執行。
+ *
+ * ⚠️ **`WindowClient.navigate()` 不是每個瀏覽器都有。** 而這個球隊的裝置正是
+ * iOS 加到主畫面的 PWA —— App 已經開著的時候，少了退路就等於「點了通知
+ * 只是把 App 叫到前景，停在原本那一頁」。所以 navigate 不成就改用
+ * `postMessage()` 請頁面自己的路由走過去（`app/plugins/pwa.client.ts` 接）。
+ *
+ * 順序：已經停在那一頁 → 只要聚焦；其他本站分頁 → 聚焦後導過去；
+ * 都不行 → 開一個新的。
+ */
+async function openTarget(target) {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+
+  const sameOrigin = windows.filter((client) => {
+    try {
+      return new URL(client.url).origin === target.origin
+    } catch {
+      return false
+    }
+  })
+
+  // 已經停在目標頁的那個視窗優先 —— 聚焦它就結束，不必再導一次
+  sameOrigin.sort((a, b) => (b.url === target.href) - (a.url === target.href))
+
+  for (const client of sameOrigin) {
+    const focused = await focusQuietly(client)
+    if (focused.url === target.href) return
+    if (await navigateQuietly(focused, target)) return
+
+    // navigate 沒有或被拒 —— 交給頁面自己的路由
+    try {
+      focused.postMessage({ type: 'navigate', url: target.pathname + target.search + target.hash })
+      return
+    } catch {
+      // 這個視窗送不進去就換下一個
+    }
+  }
+
+  await self.clients.openWindow(target.href)
+}
+
+/** `focus()` 可能被瀏覽器擋下（沒有使用者手勢）。擋了就沿用原本的 client。 */
+async function focusQuietly(client) {
+  try {
+    return (await client.focus()) || client
+  } catch {
+    return client
+  }
+}
+
+/** `navigate()` 在部分瀏覽器不存在（WebKit），而且只對受控的 client 有效。 */
+async function navigateQuietly(client, target) {
+  if (typeof client.navigate !== 'function') return false
+  try {
+    await client.navigate(target.href)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /**
  * 訂閱被瀏覽器換掉時自動重新註冊。

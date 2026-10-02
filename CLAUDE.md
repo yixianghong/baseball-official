@@ -1046,6 +1046,18 @@ gcloud scheduler jobs create http game-reminders \
   「任何人都能叫伺服器去打任意網址」（SSRF）。
 - **通知的 `url` 只能是站內路徑，而且要擋掉 `//`**。`//evil.test` 以 `/` 開頭，
   但 `new URL()` 會把它解析成外部網站，結果是一則外觀來自球隊的釣魚通知。
+- **⚠️ 點了通知之後要「真的到得了」那一頁，而每一步都可能失敗。** 比賽提醒的
+  `url` 指向 `/games/[id]`（`reminderPayload()`），但送達只是一半。
+  `notificationclick` 原本是 `await client.focus()` 接 `await client.navigate()`，
+  兩個都沒有 try —— 任何一個 reject，整個 handler 就停住，使用者停在原本的頁面，
+  而他手機上看不到 console（實測：合成事件的 `focus()` 一被擋，後面的
+  `navigate()` 就永遠不會執行）。而且 **`WindowClient.navigate()` 不是每個
+  瀏覽器都有**，這個球隊的裝置正是 iOS 加到主畫面的 PWA —— App 已經開著時
+  少了退路，點通知只會把它叫到前景、停在原本那一頁。現在
+  `openTarget()` 的順序是：**已經停在那一頁 → 只聚焦；其他本站分頁 → 聚焦後
+  `navigate()`；navigate 沒有或被拒 → `postMessage` 請頁面自己的路由走過去
+  （`app/plugins/pwa.client.ts` 接，網址在 `navigationTargetFrom()` 再驗一次）；
+  都不行 → `openWindow()`**。每一步各自 try，一步失敗就換下一步。
 - **VAPID 三項要嘛全設、要嘛全不設**。只設一半的症狀是前台訂閱按鈕整個消失，
   看起來像功能沒做。`00.env-validate.ts` 會對這個狀況發警告。
 - **換了 VAPID 公鑰之後，舊訂閱會擋住新的訂閱**。瀏覽器不允許同一個 registration

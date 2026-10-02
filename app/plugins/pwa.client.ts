@@ -66,9 +66,26 @@ export default defineNuxtPlugin(() => {
     stale = true
   })
 
-  useRouter().beforeEach((to) => {
+  const router = useRouter()
+
+  router.beforeEach((to) => {
     if (!stale) return
     window.location.assign(to.fullPath)
     return false
+  })
+
+  /**
+   * SW 請我們換頁（點了推播通知）。
+   *
+   * ⚠️ 這不是多餘的。SW 會先試 `WindowClient.navigate()`，但**那個 API 在
+   * 部分瀏覽器不存在**，而這個球隊的裝置正是 iOS 加到主畫面的 PWA ——
+   * 沒有這條退路的話，App 已經開著時點通知只會把它叫到前景，停在原本那一頁
+   * （通知指向哪一場比賽完全沒有作用）。
+   *
+   * 目標網址在 `navigationTargetFrom()` 裡再驗一次（純函式、測得到）。
+   */
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const target = navigationTargetFrom(event.data)
+    if (target) void router.push(target)
   })
 })

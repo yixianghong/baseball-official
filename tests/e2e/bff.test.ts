@@ -1116,6 +1116,26 @@ describe('PWA', () => {
     expect(source).toContain("addEventListener('fetch'")
   })
 
+  /**
+   * 迴歸測試：點了通知一定要**真的到得了**那一頁。
+   *
+   * 比賽提醒的 `url` 指向 `/games/[id]`（`reminderPayload()`），但送達只是
+   * 一半 —— 原本的 `notificationclick` 是 `await client.focus()` 接
+   * `await client.navigate()`，兩個都沒有 try：任何一個 reject，整個 handler
+   * 就停住，使用者停在原本的頁面，而他手機上看不到 console。
+   *
+   * 而 `WindowClient.navigate()` 不是每個瀏覽器都有，這個球隊的裝置正是
+   * iOS 加到主畫面的 PWA —— 沒有 `postMessage` 那條退路的話，App 已經開著時
+   * 點通知只會把它叫到前景，停在原本那一頁。
+   */
+  it('Service Worker 點通知之後有退路（navigate 不成就請頁面自己換頁）', async () => {
+    const source = await $fetch<string>('/sw.js')
+
+    expect(source).toContain("typeof client.navigate !== 'function'")
+    expect(source).toContain("postMessage({ type: 'navigate'")
+    expect(source).toContain('openWindow')
+  })
+
   it('首頁有連上 manifest 與 iOS 的圖示', async () => {
     const html = await $fetch<string>('/')
 
