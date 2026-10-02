@@ -24,7 +24,11 @@ import {
 import { teamNameCandidates } from '#shared/schemas/settings'
 import { TAIWAN_CITIES, type TaiwanCity } from '#shared/schemas/weather'
 import { applyPlayDerivedScores, playDerivedTotalFields } from '#shared/schemas/box-score'
-import { mergeAttendanceWithRoster } from '~/utils/attendance'
+import {
+  attendanceLocked,
+  formatLockAt,
+  mergeAttendanceWithRoster,
+} from '#shared/schemas/attendance'
 import { formatGameDateLong } from '~/utils/format'
 
 /**
@@ -135,6 +139,8 @@ const basic = reactive({
   note: '',
   coverImageUrl: '',
   opponentLogoUrl: '',
+  /** 出席回報的截止時間（台北時間的牆上時鐘，和 datetime-local 的值一樣）。 */
+  attendanceLockAt: '',
 })
 
 /**
@@ -162,6 +168,9 @@ const scoreboard = ref<Scoreboard>(emptyScoreboard(0))
  * 如果是這條規則之前寫進去的，那個 R 可能停在別的數字。
  */
 const board = computed(() => withSummedRuns(scoreboard.value))
+
+/** 前台現在還能不能回報。和前台、端點共用同一支判斷。 */
+const attendanceClosed = computed(() => attendanceLocked(basic))
 
 /**
  * 表單的完整內容。
@@ -196,6 +205,7 @@ function syncFromGame() {
     note: current.note,
     coverImageUrl: current.coverImageUrl,
     opponentLogoUrl: current.opponentLogoUrl,
+    attendanceLockAt: current.attendanceLockAt,
   })
 
   /*
@@ -582,8 +592,42 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
       <!-- ══ 出席統計 ══════════════════════════════════════════ -->
       <section v-show="activeTab === 'attendance'" role="tabpanel" class="space-y-4">
         <p class="text-fluid-sm text-content-muted">
-          出席名單會顯示在前台的比賽頁（未開打的場次）。
+          出席名單會顯示在前台的比賽頁，**隊員可以自己點名字回報**。
         </p>
+
+        <!--
+          鎖盤。放在出席分頁而不是基本資料：它是這份名單的規則，
+          而不是這場比賽的建檔資料。
+        -->
+        <div class="max-w-md space-y-2 rounded-xl border border-border bg-surface p-4">
+          <UiBaseInput
+            v-model="basic.attendanceLockAt"
+            label="回報截止時間"
+            type="datetime-local"
+            hint="到了這個時間，前台就不能再改出席（後台不受影響）。留空＝不另外設。"
+          />
+
+          <!--
+            ⚠️ 一定要寫出「開打本來就會鎖」。否則留空看起來像「永遠開著」，
+            而實際上狀態一改成比賽中就鎖了 —— 那個落差會被當成 bug。
+          -->
+          <p class="text-xs text-content-muted">
+            留空也會在比賽狀態改成「比賽中」或「比賽結束」時自動鎖住。
+            <template v-if="basic.attendanceLockAt">
+              目前設定：{{ formatLockAt(basic.attendanceLockAt) }}
+              <template v-if="attendanceClosed">（已截止）</template>
+            </template>
+          </p>
+
+          <UiBaseButton
+            v-if="basic.attendanceLockAt"
+            variant="ghost"
+            size="sm"
+            @click="basic.attendanceLockAt = ''"
+          >
+            清除截止時間
+          </UiBaseButton>
+        </div>
 
         <AdminAttendanceEditor v-model="attendance" :players="roster" />
       </section>

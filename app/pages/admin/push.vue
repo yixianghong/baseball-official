@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ReminderKind } from '#shared/schemas/reminder'
 import type { PushSendResult } from '#shared/schemas/push'
 import { markdownToText } from '~/utils/markdown'
 
@@ -17,6 +18,21 @@ import { markdownToText } from '~/utils/markdown'
  * 有人在後台改了錯字就變動，沒有「要不要通知」的判斷空間。它和公告不一樣。
  */
 definePageMeta({ layout: 'admin', middleware: 'auth' })
+
+/**
+ * 三種提醒在預覽清單上長什麼樣子。
+ *
+ * 用一張表而不是巢狀三元式 —— 多第四種時少一個會改漏的地方，
+ * 而漏掉的樣子是「某一種提醒的標籤顯示成另一種」。
+ */
+const REMINDER_BADGE: Record<
+  ReminderKind,
+  { tone: 'warning' | 'brand' | 'danger'; label: (days: number) => string }
+> = {
+  d1: { tone: 'warning', label: () => '賽前一天' },
+  d7: { tone: 'brand', label: (days) => `還有 ${days} 天` },
+  lock: { tone: 'danger', label: () => '出席明天截止' },
+}
 
 const { data: status, refresh: refreshStatus, pending: statusPending } = await usePushStatus()
 const { data: announcements } = await useAdminAnnouncements()
@@ -148,8 +164,8 @@ useHead({ title: '推播通知' })
             class="rounded-lg border border-border bg-surface-muted px-3 py-2"
           >
             <div class="flex flex-wrap items-center gap-2">
-              <UiBaseBadge :tone="item.kind === 'd1' ? 'warning' : 'brand'" size="sm">
-                {{ item.kind === 'd1' ? '賽前一天' : `還有 ${item.days} 天` }}
+              <UiBaseBadge :tone="REMINDER_BADGE[item.kind].tone" size="sm">
+                {{ REMINDER_BADGE[item.kind].label(item.days) }}
               </UiBaseBadge>
               <span class="text-fluid-sm font-medium">{{ item.title }}</span>
             </div>

@@ -1,5 +1,6 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type {
+  AttendanceEntry,
   Game,
   GameClip,
   GameHalf,
@@ -8,6 +9,7 @@ import type {
   GameQuery,
 } from '#shared/schemas/game'
 import type { Play } from '#shared/schemas/play'
+import type { AttendanceAnswer } from '#shared/schemas/attendance-request'
 
 /**
  * 「比賽」這個功能領域的所有 API 呼叫。
@@ -28,6 +30,8 @@ const ENDPOINTS = {
   clip: (id: string, videoId: string) =>
     `/admin/games/${encodeURIComponent(id)}/clips/${encodeURIComponent(videoId)}`,
   plays: (id: string) => `/admin/games/${encodeURIComponent(id)}/plays`,
+  /** ⚠️ 不在 `/admin` 底下 —— 隊員是在前台自己回報的，沒有登入。 */
+  attendance: (id: string) => `/games/${encodeURIComponent(id)}/attendance`,
 } as const
 
 /**
@@ -99,6 +103,15 @@ export function useGameActions() {
     fetchGame: (id: string) => get<Game>(ENDPOINTS.detail(id)),
 
     createGame: (payload: GameInput) => post<Game>(ENDPOINTS.create, payload),
+
+    /**
+     * 隊員自己回報出席（**前台**，不需要登入）。
+     *
+     * 回的是整份名單而不是只回成功 —— 比賽頁走 CDN 快取，畫面上那一份最多
+     * 可能是 60 秒前的；回整份是按下去的人唯一能看到最新狀態的機會。
+     */
+    answerAttendance: (id: string, answer: AttendanceAnswer) =>
+      put<{ attendance: AttendanceEntry[] }>(ENDPOINTS.attendance(id), answer),
 
     /** 批次建立 —— AI 辨識賽程圖後一次匯入多場。 */
     createGames: (games: GameInput[]) => post<Game[]>(ENDPOINTS.batch, { games }),

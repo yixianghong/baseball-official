@@ -2,7 +2,7 @@
 import type { AttendanceEntry, AttendanceStatus } from '#shared/schemas/game'
 import { ATTENDANCE_LABELS } from '#shared/schemas/game'
 import type { Player } from '#shared/schemas/player'
-import { mergeAttendanceWithRoster } from '~/utils/attendance'
+import { mergeAttendanceWithRoster } from '#shared/schemas/attendance'
 
 /**
  * 出席統計編輯器。

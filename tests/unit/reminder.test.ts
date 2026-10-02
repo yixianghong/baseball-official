@@ -155,3 +155,76 @@ describe('reminderPayload', () => {
     expect(payload.title!.length).toBeLessThanOrEqual(60)
   })
 })
+
+describe('出席回報截止前一天的提醒', () => {
+  const pending = [{ playerId: 'p1', name: '王大明', number: '1', status: 'pending', note: '' }]
+  const answered = [{ playerId: 'p1', name: '王大明', number: '1', status: 'yes', note: '' }]
+
+  /** 截止日是 `day`，名單上還有人沒回。 */
+  const withLock = (day: string, attendance = pending, extra: Partial<Game> = {}) =>
+    game('g1', plus(10), {
+      attendanceLockAt: `${day}T21:00`,
+      attendance,
+      ...extra,
+    } as Partial<Game>)
+
+  it('截止日的前一天送出', () => {
+    const due = dueReminders([withLock(plus(1))], TODAY)
+
+    expect(due.map((item) => item.kind)).toEqual(['lock'])
+    expect(due[0]!.days).toBe(1)
+  })
+
+  it('不是前一天就不送（當天、兩天前都不送）', () => {
+    expect(dueReminders([withLock(TODAY)], TODAY)).toEqual([])
+    expect(dueReminders([withLock(plus(2))], TODAY)).toEqual([])
+  })
+
+  it('沒設截止時間就不送 —— 那條線是「比賽開打」，賽前一天那則已經在講了', () => {
+    expect(dueReminders([game('g1', plus(10), { attendance: pending })], TODAY)).toEqual([])
+  })
+
+  it('⚠️ 全隊都回報完了就不送 —— 推播沒辦法只推給還沒回的人', () => {
+    expect(dueReminders([withLock(plus(1), answered)], TODAY)).toEqual([])
+  })
+
+  it('送過就不再送（冪等）', () => {
+    expect(dueReminders([withLock(plus(1), pending, { remindersSent: ['lock'] })], TODAY)).toEqual(
+      [],
+    )
+  })
+
+  /**
+   * ⚠️ 截止時間剛好設在比賽當天時，它會和「賽前一天」撞在同一天。
+   *
+   * 兩則都要送：硬要擇一的話，被擠掉的那一則**永遠不會補送**（兩邊的區間
+   * 都只有一天），而那是一個沒有任何人會發現的遺漏。
+   */
+  it('和「賽前一天」撞在同一天時兩則都送', () => {
+    const tomorrow = plus(1)
+    const subject = game('g1', tomorrow, {
+      attendanceLockAt: `${tomorrow}T08:00`,
+      attendance: pending,
+    } as Partial<Game>)
+
+    expect(
+      dueReminders([subject], TODAY)
+        .map((item) => item.kind)
+        .sort(),
+    ).toEqual(['d1', 'lock'])
+  })
+
+  it('延賽的場次不送', () => {
+    expect(dueReminders([withLock(plus(1), pending, { status: 'postponed' })], TODAY)).toEqual([])
+  })
+
+  it('文案把截止時間寫進標題 —— 收到的人要判斷「還剩幾小時」', () => {
+    const [due] = dueReminders([withLock(plus(1))], TODAY)
+    const payload = reminderPayload(due!)
+
+    expect(payload.title).toBe('出席回報明天 21:00 截止：對戰 藍鷹隊')
+    expect(payload.url).toBe('/games/g1')
+    // tag 和另外兩則不同，所以通知不會互相覆蓋
+    expect(payload.tag).toBe('game-g1-lock')
+  })
+})

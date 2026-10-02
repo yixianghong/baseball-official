@@ -7,7 +7,9 @@ import {
   gameResult,
   hasScore,
   isNotPlayed,
+  type AttendanceEntry,
 } from '#shared/schemas/game'
+import { attendanceLocked, formatLockAt } from '#shared/schemas/attendance'
 import { describeCountdown, daysUntil, formatGameDateLong } from '~/utils/format'
 
 /**
@@ -146,7 +148,41 @@ const showWeather = computed(
 
 /** 未來場次若還沒登錄先發，顯示提示而不是一片空白。 */
 const hasLineup = computed(() => (game.value?.lineup.length ?? 0) > 0)
-const hasAttendance = computed(() => (game.value?.attendance.length ?? 0) > 0)
+/**
+ * 出席名單另外存一份本地狀態。
+ *
+ * `useApiFetch()` 回來的 `game` 是唯讀的（而且是整頁共用的那一筆快取），
+ * 而回報完要立刻在畫面上看到結果 —— 所以這一份跟著比賽資料同步，
+ * 回報成功時由端點回傳的那一份覆蓋。
+ */
+const attendance = ref<AttendanceEntry[]>([])
+watch(game, () => (attendance.value = [...(game.value?.attendance ?? [])]), { immediate: true })
+
+const hasAttendance = computed(() => attendance.value.length > 0)
+
+/**
+ * 隊員還能不能自己回報出席。
+ *
+ * 和端點共用 `attendanceLocked()` —— 各寫一次的話，遲早會出現「畫面上按得下去、
+ * 按了卻失敗」。這裡只是不要畫出按不下去的按鈕，真正擋得住的是端點那一次。
+ *
+ * ⚠️ 跟著 `now` 走，所以**截止時間到了這一頁不會自己鎖起來** —— 它是在這一次
+ * 渲染時算的。這是刻意的：為了一個「過了就變灰」的效果掛一個每分鐘的計時器，
+ * 代價是整頁多一個會忘記清掉的東西，而真的在截止那一秒按下去的人會拿到
+ * 端點的那句話（而且那句話講得比變灰清楚）。
+ */
+const attendanceClosed = computed(() => (game.value ? attendanceLocked(game.value) : true))
+const canReportAttendance = computed(() => !attendanceClosed.value)
+
+/**
+ * 回報成功之後把整份名單換掉。
+ *
+ * ⚠️ 用端點回傳的那一份，不是自己改一筆就好 —— 這一頁走 CDN 快取，手上這份
+ * 最多可能是 60 秒前的，別人在那段時間回報的要一起補上來。
+ */
+function applyAttendance(entries: AttendanceEntry[]) {
+  attendance.value = entries
+}
 const hasScoreboard = computed(() => (game.value?.scoreboard.innings.length ?? 0) > 0)
 
 useHead({
@@ -371,12 +407,29 @@ useHead({
       <template v-else-if="!notPlayed">
         <div class="grid gap-8 lg:grid-cols-2">
           <section aria-labelledby="attendance-heading">
-            <h2 id="attendance-heading" class="mb-4 text-fluid-xl font-bold">預計出席</h2>
-            <GameAttendance v-if="hasAttendance" :entries="game.attendance" />
+            <h2 id="attendance-heading" class="mb-2 text-fluid-xl font-bold">預計出席</h2>
+
+            <!--
+              截止時間一定要寫出來。少了它，過了時間之後畫面上只是「按鈕不見了」
+              —— 看起來就像壞掉，而不是「已經截止」。
+            -->
+            <p v-if="game.attendanceLockAt" class="mb-4 text-fluid-sm text-content-muted">
+              <template v-if="attendanceClosed">
+                回報已於 {{ formatLockAt(game.attendanceLockAt) }} 截止。
+              </template>
+              <template v-else> 回報到 {{ formatLockAt(game.attendanceLockAt) }} 截止。 </template>
+            </p>
+            <div v-else class="mb-4" />
+            <GameAttendance
+              v-if="hasAttendance"
+              :entries="attendance"
+              :game-id="canReportAttendance ? game.id : undefined"
+              @updated="applyAttendance"
+            />
             <UiBaseEmpty
               v-else
               title="尚未開始統計出席"
-              description="隊員回報後，出席名單會顯示在這裡。"
+              description="管理者在後台帶入隊員名單之後，大家就可以在這裡自己回報。"
               icon="🙋"
             />
           </section>

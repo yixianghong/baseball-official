@@ -9,8 +9,16 @@ import {
   type GameInput,
   type GamePatch,
   type GameQueryOptions,
+  type AttendanceEntry,
+  attendanceEntrySchema,
 } from '../../shared/schemas/game'
 import { applyPlayDerivedScores } from '../../shared/schemas/box-score'
+import {
+  applyAttendanceAnswer,
+  type AttendanceAnswer,
+} from '../../shared/schemas/attendance-request'
+import { mergeAttendanceWithRoster } from '../../shared/schemas/attendance'
+import { listPlayers } from './players'
 import { replaceHalfInning, type Play } from '../../shared/schemas/play'
 import type { GameHalf } from '../../shared/schemas/half-inning'
 import { getDb, isFirebaseConfigured } from '../utils/firebase'
@@ -18,6 +26,9 @@ import { getMemoryStore, memoryId } from '../utils/memory-store'
 import { notFound, nowIso, parseEntity, parseEntityOrNull } from './_helpers'
 
 const COLLECTION = 'games'
+
+/** 交易裡只驗這一個欄位，不跑整份 `gameSchema`（見 `answerAttendance()`）。 */
+const attendanceListSchema = attendanceEntrySchema.array()
 
 /**
  * 賽程／比賽資料存取。
@@ -73,8 +84,26 @@ export async function getGame(id: string): Promise<Game | null> {
   return parseEntity(gameSchema, migrateLegacyGame({ ...doc.data(), id: doc.id }), 'game')
 }
 
+/**
+ * 新增一場比賽。
+ *
+ * ⚠️ **沒帶出席名單時，自動補上現役名冊（全部「未回覆」）。**
+ * 隊員是在前台**自己**回報出席的（`PUT /api/games/[id]/attendance`），而那支
+ * 端點只能改「已經在名單上的那個人」—— 它不能把人加進名單，否則就變成一支
+ * 匿名的任意寫入。所以名單必須在比賽建好的那一刻就在。
+ *
+ * 少了這一步，一場剛建好的比賽前台是「尚未開始統計出席」，沒有任何人可以點
+ * —— 而賽前提醒是排程自動送出的，**不保證**管理者在那之前開過出席分頁
+ * （開過才會由 `mergeAttendanceWithRoster()` 補上）。
+ *
+ * 之後才入隊的新隊員由後台出席分頁補（同一支純函式），所以兩邊的規則是同一條。
+ */
 export async function createGame(input: GameInput): Promise<Game> {
-  const data = withDerivedRuns(gameInputSchema.parse(input))
+  const parsed = gameInputSchema.parse(input)
+  const data = withDerivedRuns({
+    ...parsed,
+    attendance: parsed.attendance.length ? parsed.attendance : await rosterAttendance(),
+  })
   const timestamps = { createdAt: nowIso(), updatedAt: nowIso() }
 
   if (!isFirebaseConfigured()) {
@@ -133,6 +162,56 @@ export async function markReminderSent(id: string, kind: string): Promise<void> 
 
   const db = await getDb()
   await db.collection(COLLECTION).doc(id).set({ remindersSent }, { merge: true })
+}
+
+/**
+ * 隊員自己回報出席（`PUT /api/games/[id]/attendance`，不需要登入）。
+ *
+ * 不走 `updateGame()`：理由和 `markReminderSent()` 相同 —— 只動 `attendance`
+ * 這一個欄位，不會把管理者同時在後台編輯的打線或計分板蓋掉。
+ *
+ * ## ⚠️ 這支一定要用 transaction，別的欄位不必
+ * `addGameClip()` 那幾支是「同一個人在同一台裝置上依序操作」，讀出來再寫回去
+ * 中間不會有別人。出席相反：**提醒推播是同一時間送給所有人的**，十幾個隊員
+ * 會在同一分鐘內各自按下去。讀-改-寫沒有交易保護的話，兩個人同時按就會有一個
+ * 被後寫的那份整個陣列蓋掉 —— 而他看到的畫面是「我按了，也成功了」，
+ * 隔天才發現自己不在名單上。這種錯誤沒有任何錯誤訊息。
+ *
+ * 名單上沒有這個 `playerId` 時回 `null`（端點據此回 404）——
+ * 這支端點只能改既有的那幾筆，不能把新的人塞進名單。
+ */
+export async function answerAttendance(
+  id: string,
+  answer: AttendanceAnswer,
+): Promise<AttendanceEntry[] | null> {
+  if (!isFirebaseConfigured()) {
+    const existing = getMemoryStore().games.get(id)
+    if (!existing) throw notFound('比賽')
+    const attendance = applyAttendanceAnswer(existing.attendance, answer)
+    if (!attendance) return null
+    getMemoryStore().games.set(id, { ...existing, attendance })
+    return attendance
+  }
+
+  const db = await getDb()
+  const ref = db.collection(COLLECTION).doc(id)
+
+  return db.runTransaction(async (tx) => {
+    const doc = await tx.get(ref)
+    if (!doc.exists) throw notFound('比賽')
+
+    /*
+     * 交易裡只取 `attendance` 這一個欄位來算，不跑整份 `gameSchema.parse()`
+     * —— 舊文件上可能有過不了現行 schema 的殘留欄位，而那不該讓一個
+     * 「我會到」寫不進去。
+     */
+    const current = attendanceListSchema.parse(doc.data()?.attendance ?? [])
+    const attendance = applyAttendanceAnswer(current, answer)
+    if (!attendance) return null
+
+    tx.set(ref, { attendance }, { merge: true })
+    return attendance
+  })
 }
 
 /**
@@ -256,6 +335,21 @@ export async function createGames(inputs: GameInput[]): Promise<Game[]> {
     created.push(await createGame(input))
   }
   return created
+}
+
+/**
+ * 現役名冊轉成一份「全部未回覆」的出席名單。
+ *
+ * 名冊讀不到時回空陣列而不是拋錯 —— 建比賽是主要的動作，出席名單只是順手
+ * 補上的方便。為了它讓「新增比賽」整個失敗，代價和收益完全不成比例
+ * （後台開一次出席分頁就補回來了）。
+ */
+async function rosterAttendance(): Promise<Game['attendance']> {
+  try {
+    return mergeAttendanceWithRoster([], await listPlayers())
+  } catch {
+    return []
+  }
 }
 
 /**

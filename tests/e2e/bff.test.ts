@@ -365,6 +365,97 @@ describe('後台權限：所有寫入都需要登入', () => {
   })
 
   /*
+   * ⚠️ 隊員自己回報出席是**全站第三支不需要登入的寫入端點**（前兩支是推播訂閱
+   * 與 `/api/cron/*`）。這個網站沒有前台登入系統，所以防線不在身分，而在
+   * 「能做的事被壓到很小」—— 這一組就是在守那幾條邊界。
+   */
+  describe('出席自行回報（不需要登入，但只能做很少的事）', () => {
+    it('名單上的人可以改自己的狀態', async () => {
+      const response = await fetch('/api/games/g1/attendance', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ playerId: 'p1', status: 'no' }),
+      })
+      const body = (await response.json()) as {
+        data: { attendance: Array<{ playerId: string; status: string }> }
+      }
+
+      expect(response.status).toBe(200)
+      expect(body.data.attendance.find((e) => e.playerId === 'p1')?.status).toBe('no')
+    })
+
+    it('⚠️ 不能把名單上沒有的人加進來', async () => {
+      // 擋不住的話，這支端點就是一支匿名的任意寫入
+      const response = await fetch('/api/games/g1/attendance', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ playerId: '我是誰', status: 'yes' }),
+      })
+
+      expect(response.status).toBe(404)
+    })
+
+    it('⚠️ 不收「未回覆」，也不收自由文字', async () => {
+      const pending = await fetch('/api/games/g1/attendance', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ playerId: 'p1', status: 'pending' }),
+      })
+      expect(pending.status).toBe(400)
+
+      // note 送上去也不會被寫進去（schema 根本沒有這個欄位）
+      const withNote = await fetch('/api/games/g1/attendance', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ playerId: 'p1', status: 'yes', note: '<script>' }),
+      })
+      const body = (await withNote.json()) as {
+        data: { attendance: Array<{ playerId: string; note: string }> }
+      }
+      expect(withNote.status).toBe(200)
+      expect(body.data.attendance.find((e) => e.playerId === 'p1')?.note).not.toContain('script')
+    })
+
+    it('⚠️ 過了後台設的截止時間就收不進去（鎖盤）', async () => {
+      // 先把截止時間設成過去，再試著回報
+      const { cookie, csrfToken } = await login()
+      await fetch('/api/admin/games/g1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie, 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ attendanceLockAt: '2020-01-01T00:00' }),
+      })
+
+      const response = await fetch('/api/games/g1/attendance', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ playerId: 'p1', status: 'yes' }),
+      })
+      const body = (await response.json()) as { error: { message: string } }
+
+      expect(response.status).toBe(409)
+      expect(body.error.message).toContain('截止')
+
+      // 收拾乾淨，後面的測試還要用 g1
+      await fetch('/api/admin/games/g1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', cookie, 'x-csrf-token': csrfToken },
+        body: JSON.stringify({ attendanceLockAt: '' }),
+      })
+    })
+
+    it('⚠️ 已經開打或結束的場次改不了 —— 那份名單已經是歷史紀錄', async () => {
+      // g3 是已結束的示範資料
+      const response = await fetch('/api/games/g3/attendance', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ playerId: 'p1', status: 'yes' }),
+      })
+
+      expect(response.status).toBe(409)
+    })
+  })
+
+  /*
    * 排程端點沒有 session 可以驗，閘門是一把共用密鑰。這一組守著兩件事：
    * 沒帶密鑰不能執行，以及**沒設定密鑰時一律擋下** —— 空字串不能等於
    * 「不用驗證」，否則忘了設定的部署就變成任何人都能觸發推播。

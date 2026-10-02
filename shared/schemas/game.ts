@@ -525,6 +525,25 @@ export const gameInputSchema = z.object({
   attendance: z.array(attendanceEntrySchema).max(60).default([]),
 
   /**
+   * 出席回報的截止時間（台北時間，`YYYY-MM-DDTHH:mm`）。空字串＝不另外設。
+   *
+   * 隊員是在前台自己回報的，所以要有一條線告訴大家「過了這個時間就以名單為準」
+   * —— 教練要照它排打線、訂便當。設不設都可以：**比賽開打本來就會鎖**
+   * （`attendanceLocked()`），這個欄位只是把那條線往前挪。
+   *
+   * ⚠️ **存台北時間的牆上時鐘，不存 UTC 也不存時間戳。** 和同一份文件上的
+   * `date`／`time` 同一個慣例，而且它和 `<input type="datetime-local">` 的值
+   * 一模一樣 —— 中間不經過任何換算，就沒有「Cloud Run 跑在 UTC、本機重現不了」
+   * 的那一類時區錯誤（見 `taipeiDateTimeKey()`）。格式固定寬度又補零，
+   * 所以比大小直接比字串。
+   */
+  attendanceLockAt: z
+    .string()
+    .trim()
+    .regex(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})?$/, '格式需為 YYYY-MM-DDTHH:mm')
+    .default(''),
+
+  /**
    * 打線。
    *
    * 只有一份：比賽前排好的先發陣容，就是比賽後的出賽紀錄。業餘球隊不會為了
@@ -724,6 +743,18 @@ export function needsResultUpdate(game: Pick<Game, 'status' | 'date'>, today: st
  */
 export function taipeiDateKey(now: Date = new Date()): string {
   return new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+/**
+ * 台北時間的「現在」，`YYYY-MM-DDTHH:mm`。
+ *
+ * 和 `taipeiDateKey()` 同一個理由（Cloud Run 跑在 UTC，本機重現不了），
+ * 只是多到分鐘。這個格式**和 `<input type="datetime-local">` 吐出來的
+ * 一模一樣**，而且是固定寬度、補零的 —— 所以「現在過了截止時間沒有」
+ * 直接用字串比大小就對，不必換算成 Date（換算才是會出錯的那一步）。
+ */
+export function taipeiDateTimeKey(now: Date = new Date()): string {
+  return new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 16)
 }
 
 /**
