@@ -188,6 +188,21 @@ describe('GameCard 的狀態色條', () => {
     expect(component.text()).toContain('敗')
     expect(component.text()).not.toContain('勝')
   })
+
+  /**
+   * ⚠️ 卡片上的對戰組合要**先攻在前**，和大會的賽程表同一個順序。
+   *
+   * 固定寫成「我隊 vs 對手」的話，主場的比賽在大會的表上和我們的網站上順序
+   * 相反 —— 而那正是球員拿來對照的東西，看起來就像排錯場次。
+   */
+  it.each([
+    ['客場（先攻）我隊在前', 'away', '城市隊 vs 藍鷹隊'],
+    ['主場（後攻）對手在前', 'home', '藍鷹隊 vs 城市隊'],
+  ])('%s', async (_label, homeAway, expected) => {
+    const component = await mount({ homeAway })
+
+    expect(component.text().replace(/\s+/g, ' ')).toContain(expected)
+  })
 })
 
 describe('GameLineupCard', () => {

@@ -6,6 +6,7 @@ import {
   normalizeJerseyNumber,
   normalizePlayResult,
   normalizeTime,
+  resolveMatchup,
   toParsedPlay,
 } from '../../server/utils/gemini'
 
@@ -268,5 +269,94 @@ describe('toParsedPlay', () => {
   it('聽不出結果時 result 是 null', () => {
     const play = toParsedPlay({ ...blank, number: '24', result: '嗯' }, { ourAtBat: true, roster })
     expect(play.result).toBeNull()
+  })
+})
+
+describe('resolveMatchup', () => {
+  const teamNames = ['後港傭兵', '後港']
+
+  /** 省略那兩個「配不出來才用」的退路參數。 */
+  const resolve = (firstTeam: string, secondTeam: string, fallback = {}) =>
+    resolveMatchup({
+      firstTeam,
+      secondTeam,
+      teamNames,
+      fallbackHomeAway: null,
+      fallbackOpponent: '',
+      ...fallback,
+    })
+
+  /**
+   * ⚠️ 規則只有一句話：**寫在前面的先攻**。
+   *
+   * 這是這支球隊的慣例，不是常識 —— MLB 的「A vs B」剛好相反（A 是主隊）。
+   * 搞反的結果是整張賽程的主客場全部顛倒，而計分板的上下半局、前台的排列
+   * 全部跟著錯，畫面上卻只是「看起來怪怪的」。
+   */
+  it('我隊寫在前面＝先攻＝客場', () => {
+    expect(resolve('後港傭兵', '兄弟象')).toMatchObject({
+      homeAway: 'away',
+      opponent: '兄弟象',
+      fromOrder: true,
+    })
+  })
+
+  it('我隊寫在後面＝後攻＝主場', () => {
+    expect(resolve('兄弟象', '後港傭兵')).toMatchObject({
+      homeAway: 'home',
+      opponent: '兄弟象',
+      fromOrder: true,
+    })
+  })
+
+  it('對手隊名從另一邊取，不用模型自己判斷的那一個', () => {
+    expect(resolve('統一獅', '後港', { fallbackOpponent: '讀錯的隊名' }).opponent).toBe('統一獅')
+  })
+
+  it('全半形、空格、括號、簡稱都算同一支隊伍', () => {
+    for (const written of ['後 港 傭 兵', '（後港傭兵）', '後港', '後港傭兵・A隊']) {
+      expect(resolve(written, '兄弟象').homeAway, written).toBe('away')
+    }
+  })
+
+  it('⚠️ 兩邊都不像我隊時不猜，退回模型從圖上讀到的標示', () => {
+    const result = resolve('統一獅', '兄弟象', {
+      fallbackHomeAway: 'home',
+      fallbackOpponent: '兄弟象',
+    })
+
+    expect(result).toMatchObject({ homeAway: 'home', opponent: '兄弟象', fromOrder: false })
+  })
+
+  it('⚠️ 兩邊都像我隊時也不猜（隊內對抗賽、對手隊名含我隊的字）', () => {
+    const result = resolveMatchup({
+      firstTeam: '後港傭兵 A',
+      secondTeam: '後港傭兵 B',
+      teamNames,
+      fallbackHomeAway: null,
+      fallbackOpponent: '後港傭兵 B',
+    })
+
+    expect(result.fromOrder).toBe(false)
+    expect(result.homeAway).toBeNull()
+  })
+
+  it('⚠️ 一個字的隊名不做包含比對 —— 它會把對手也比中', () => {
+    // 設定裡若填了「港」，「南港紅襪」也會被當成我隊，先攻後攻就顛倒了
+    const result = resolveMatchup({
+      firstTeam: '南港紅襪',
+      secondTeam: '兄弟象',
+      teamNames: ['港'],
+      fallbackHomeAway: null,
+      fallbackOpponent: '兄弟象',
+    })
+
+    expect(result.fromOrder).toBe(false)
+  })
+
+  it('某一邊讀不到隊名時不猜', () => {
+    expect(resolve('', '後港傭兵').fromOrder).toBe(true)
+    expect(resolve('後港傭兵', '').fromOrder).toBe(true)
+    expect(resolve('', '').fromOrder).toBe(false)
   })
 })

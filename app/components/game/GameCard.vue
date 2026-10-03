@@ -7,6 +7,7 @@ import {
   gameResult,
   hasScore,
   isNotPlayed,
+  matchupOrder,
 } from '#shared/schemas/game'
 import { describeCountdown, daysUntil, formatGameDate } from '~/utils/format'
 
@@ -30,6 +31,11 @@ const props = defineProps<{
   /** `YYYY-MM-DD` 的今天，由頁面傳入以避免 SSR 與瀏覽器算出不同結果。 */
   today: string
 }>()
+
+/** 對戰組合，先攻在前。卡片上的順序要和大會的賽程表一致。 */
+const matchup = computed(() =>
+  matchupOrder(props.game.homeAway, props.ourName, props.game.opponent),
+)
 
 const isFinished = computed(() => props.game.status === 'finished')
 const isLive = computed(() => props.game.status === 'live')
@@ -99,10 +105,11 @@ const score = computed(() => ({
 
     <div class="flex items-center justify-between gap-4">
       <div class="min-w-0 flex-1">
+        <!-- 先攻的寫在前面，和大會的賽程表同一個順序（見 `matchupOrder()`） -->
         <p class="truncate text-fluid-base font-semibold">
-          {{ ourName }}
+          {{ matchup[0] }}
           <span class="mx-1.5 text-content-muted">vs</span>
-          {{ game.opponent }}
+          {{ matchup[1] }}
         </p>
         <p class="mt-0.5 flex flex-wrap items-center gap-x-2 text-fluid-sm text-content-muted">
           <span>{{ game.homeAway === 'home' ? '主場' : '客場' }}</span>

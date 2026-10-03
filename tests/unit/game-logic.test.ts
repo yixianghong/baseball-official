@@ -4,6 +4,8 @@ import {
   migrateLegacyGame,
   startingPitcherSchema,
   battingSide,
+  dugoutLabel,
+  matchupOrder,
   deriveBench,
   deriveResult,
   emptyScoreboard,
@@ -916,6 +918,54 @@ describe('scoreboardSides', () => {
       const [first, second] = scoreboardSides(homeAway)
       expect(first).toBe(battingSide('top', homeAway))
       expect(second).toBe(battingSide('bottom', homeAway))
+    }
+  })
+})
+
+describe('matchupOrder', () => {
+  /**
+   * ⚠️ 卡片上固定寫成「我隊 vs 對手」的話，**同一場比賽在大會的賽程表上和我們的
+   * 網站上順序相反** —— 而那正是球員拿來對照的東西，看起來就像排錯場次。
+   */
+  it('客場（先攻）時我隊在前', () => {
+    expect(matchupOrder('away', '後港傭兵', '音浪')).toEqual(['後港傭兵', '音浪'])
+  })
+
+  it('主場（後攻）時對手在前', () => {
+    expect(matchupOrder('home', '後港傭兵', '音浪')).toEqual(['音浪', '後港傭兵'])
+  })
+
+  it('和計分板排出來的順序是同一條規則（同一個來源）', () => {
+    for (const homeAway of ['home', 'away'] as const) {
+      const sides = scoreboardSides(homeAway)
+      expect(matchupOrder(homeAway, 'our', 'opponent')).toEqual(sides)
+    }
+  })
+
+  it('傳物件也行（要連隊徽一起排的時候）', () => {
+    const our = { name: '後港傭兵', ours: true }
+    const them = { name: '音浪', ours: false }
+
+    expect(matchupOrder('home', our, them)).toEqual([them, our])
+  })
+})
+
+describe('dugoutLabel', () => {
+  /**
+   * 大會的規定：**先攻坐三壘側、後攻坐一壘側**。
+   *
+   * 推導而不是存欄位，所以它和 `homeAway` 永遠不會對不上 ——
+   * 但也因此這條對應關係一旦寫反，前台會很有把握地告訴全隊坐錯邊。
+   */
+  it('客場（先攻）坐三壘、主場（後攻）坐一壘', () => {
+    expect(dugoutLabel('away')).toBe('三壘休息室')
+    expect(dugoutLabel('home')).toBe('一壘休息室')
+  })
+
+  it('坐三壘的就是打上半局的那一方', () => {
+    for (const homeAway of ['home', 'away'] as const) {
+      const first = dugoutLabel(homeAway) === '三壘休息室'
+      expect(first).toBe(battingSide('top', homeAway) === 'our')
     }
   })
 })

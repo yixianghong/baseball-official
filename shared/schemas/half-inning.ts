@@ -63,6 +63,17 @@ export function battingSide(half: GameHalf, homeAway: HomeAway): 'our' | 'oppone
 }
 
 /**
+ * 坐哪一邊的休息室。**先攻在三壘側、後攻在一壘側**（大會的規定）。
+ *
+ * 推導而不是存欄位：它完全由 `homeAway` 決定，多存一份就多一個會不同步的東西
+ * （和 `gameResult()`、`deriveBench()` 同一條原則）。賽前在群組問「我們坐哪邊」
+ * 很常見，所以前台的比賽頁直接寫出來。
+ */
+export function dugoutLabel(homeAway: HomeAway): string {
+  return homeAway === 'away' ? '三壘休息室' : '一壘休息室'
+}
+
+/**
  * 計分板由上而下的兩列。**上面那列是先攻**，也就是打上半局的那一方。
  *
  * 資料層存的是「我隊／對手」，不存上下半局（見 `game.ts` 開頭的說明），
@@ -74,6 +85,25 @@ export function battingSide(half: GameHalf, homeAway: HomeAway): 'our' | 'oppone
  */
 export function scoreboardSides(homeAway: HomeAway): ['our' | 'opponent', 'our' | 'opponent'] {
   return [battingSide('top', homeAway), battingSide('bottom', homeAway)]
+}
+
+/**
+ * 「A vs B」要排成什麼順序：**先攻的寫在前面**。
+ *
+ * 和計分板（`scoreboardSides()`）是**同一條規則的同一個來源** —— 直接建在它
+ * 上面，所以「客隊先攻」這件事全站只寫在 `battingSide()` 一個地方。
+ *
+ * 大會的賽程表就是這樣寫的（前者攻方／三壘休息區、後者守方／一壘休息區），
+ * 而賽程辨識也是照這個順序讀回來的（`resolveMatchup()`）。
+ * ⚠️ 卡片上固定寫成「我隊 vs 對手」的話，**同一場比賽在大會的表上和我們的網站
+ * 上順序相反** —— 而那正是球員拿來對照的東西，看起來就像排錯場次。
+ *
+ * 泛型是為了讓呼叫端傳什麼都行：只要隊名時傳字串，要連隊徽一起排時傳物件。
+ */
+export function matchupOrder<T>(homeAway: HomeAway, our: T, opponent: T): [T, T] {
+  const [first, second] = scoreboardSides(homeAway)
+  const pick = (side: 'our' | 'opponent') => (side === 'our' ? our : opponent)
+  return [pick(first), pick(second)]
 }
 
 /**

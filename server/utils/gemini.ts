@@ -22,6 +22,7 @@ import {
   type ParseScoreboardResponse,
 } from '../../shared/schemas/ai'
 import { POSITIONS, type Hand, type Position } from '../../shared/schemas/player'
+import type { HomeAway } from '../../shared/schemas/half-inning'
 import { PLAY_RESULTS, type BattedType, type PlayResult } from '../../shared/schemas/play'
 import { needsBattedType, needsFielder } from '../../shared/schemas/field'
 
@@ -91,13 +92,21 @@ const SCHEDULE_RESPONSE_SCHEMA = {
             description: '比賽時間，格式 HH:mm（24 小時制），讀不到填空字串',
           },
           opponent: { type: 'STRING', description: '對戰球隊名稱（不是我隊的那一隊）' },
+          firstTeam: {
+            type: 'STRING',
+            description: '這一場寫在前面（左邊／上面）的隊名，照圖上原樣輸出',
+          },
+          secondTeam: {
+            type: 'STRING',
+            description: '這一場寫在後面（右邊／下面）的隊名，照圖上原樣輸出',
+          },
           venue: { type: 'STRING', description: '球場名稱或場地編號，讀不到填空字串' },
           league: { type: 'STRING', description: '聯賽或賽事名稱，讀不到填空字串' },
           homeAway: { type: 'STRING', enum: ['home', 'away', 'unknown'] },
           confidence: { type: 'NUMBER', description: '對這一列的把握程度，0 到 1' },
           sourceText: { type: 'STRING', description: '這一場在原圖上的完整文字，供人工核對' },
         },
-        required: ['date', 'opponent', 'confidence'],
+        required: ['date', 'opponent', 'firstTeam', 'secondTeam', 'confidence'],
       },
     },
     warnings: {
@@ -167,9 +176,12 @@ export async function parseScheduleImage(
     `- date：日期，格式 YYYY-MM-DD。圖上若只寫月／日沒有年份，年份一律用 ${year}。`,
     '- time：開賽時間，格式 HH:mm（24 小時制）。圖上寫「下午 2 點」請轉成 14:00。',
     '- opponent：對手隊名。也就是該場次中「不是我方」的那一隊，隊名請照圖上原樣輸出。',
+    '- firstTeam：這一場**寫在前面**（左邊或上面）的隊名，照圖上原樣輸出。',
+    '- secondTeam：這一場**寫在後面**（右邊或下面）的隊名，照圖上原樣輸出。',
+    '  ⚠️ 這兩個欄位只要忠實反映圖上的順序，不要替我判斷誰先攻誰後攻、不要重新排序。',
     '- venue：球場名稱或場地編號。',
     '- league：賽事或聯賽名稱（通常在標題）。',
-    '- homeAway：我方是先攻（away）還是後攻（home）。圖上通常寫成「先攻／後攻」或用左右欄位表示；判斷不出來請填 unknown。',
+    '- homeAway：**只有圖上明寫**「先攻／後攻」或「主／客」時才填（先攻＝away、後攻＝home）；沒有明寫就填 unknown。不要從隊名順序推測。',
     '- confidence：你對這一列的把握程度，0 到 1。',
     '- sourceText：這一場在圖上的原始文字，讓人可以核對。',
     '',
@@ -182,18 +194,40 @@ export async function parseScheduleImage(
     warnings?: string[]
   }>(event, prompt, request.imageBase64, request.mimeType, SCHEDULE_RESPONSE_SCHEMA)
 
-  const matches = (raw.matches ?? []).map((match) => ({
-    date: normalizeDate(String(match.date ?? ''), year),
-    time: normalizeTime(String(match.time ?? '')),
-    opponent: String(match.opponent ?? '').trim(),
-    venue: String(match.venue ?? '').trim(),
-    league: String(match.league ?? '').trim(),
-    homeAway: match.homeAway === 'home' || match.homeAway === 'away' ? match.homeAway : null,
-    confidence: clamp01(Number(match.confidence ?? 0)),
-    sourceText: String(match.sourceText ?? '').trim(),
-  }))
-
   const warnings = [...(raw.warnings ?? []).map(String)]
+
+  const matches = (raw.matches ?? []).map((match) => {
+    /*
+     * 先攻後攻由**圖上的順序**決定（寫在前面的先攻），不是叫模型自己判斷 ——
+     * 那是這支球隊的慣例而不是常識，理由完整寫在 `resolveMatchup()`。
+     */
+    const matchup = resolveMatchup({
+      firstTeam: String(match.firstTeam ?? ''),
+      secondTeam: String(match.secondTeam ?? ''),
+      teamNames: request.teamNames,
+      fallbackHomeAway:
+        match.homeAway === 'home' || match.homeAway === 'away' ? match.homeAway : null,
+      fallbackOpponent: String(match.opponent ?? '').trim(),
+    })
+
+    if (!matchup.fromOrder) {
+      warnings.push(
+        `「${matchup.opponent || '未知對手'}」這一場對不出我隊排在前面還是後面，` +
+          '主客場請自行確認。',
+      )
+    }
+
+    return {
+      date: normalizeDate(String(match.date ?? ''), year),
+      time: normalizeTime(String(match.time ?? '')),
+      opponent: matchup.opponent,
+      venue: String(match.venue ?? '').trim(),
+      league: String(match.league ?? '').trim(),
+      homeAway: matchup.homeAway,
+      confidence: clamp01(Number(match.confidence ?? 0)),
+      sourceText: String(match.sourceText ?? '').trim(),
+    }
+  })
 
   // 後端自己再檢一次模型沒把握或欄位缺漏的地方，不完全依賴模型的自評
   for (const match of matches) {
@@ -1039,6 +1073,92 @@ function clampInt(value: number | undefined): number {
 function clamp01(value: number): number {
   if (Number.isNaN(value)) return 0
   return Math.min(Math.max(value, 0), 1)
+}
+
+/**
+ * 把隊名收斂成可以比對的樣子。
+ *
+ * 賽程公告上的隊名幾乎不會和設定裡的一模一樣：全半形、簡繁、中間的空格、
+ * 外面的括號與中點，每一張圖都不同。這些差異一律在這裡抹平，
+ * 比對本身才能是單純的字串比較。
+ */
+function teamKey(name: string): string {
+  return name
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\s·‧・.,，、()（）[\]【】「」『』-]/g, '')
+}
+
+/**
+ * 這個隊名是不是我隊。
+ *
+ * 允許**雙向包含**，因為公告上常常只寫簡稱（「後港」之於「後港傭兵」），
+ * 而設定裡填的也可能是全名。⚠️ 但要求至少兩個字 —— 一個字的隊名
+ * （設定裡若填了「港」）會把對手也比中，而那個錯誤的結果是先攻後攻顛倒，
+ * 畫面上完全看不出來。
+ */
+function isOurTeam(name: string, candidates: string[]): boolean {
+  const key = teamKey(name)
+  if (!key) return false
+
+  return candidates.some((candidate) => {
+    const other = teamKey(candidate)
+    if (other.length < 2 || key.length < 2) return other === key
+    return key === other || key.includes(other) || other.includes(key)
+  })
+}
+
+/**
+ * 依「圖上的順序」決定先攻後攻與對手。
+ *
+ * ## 規則只有一句話：**寫在前面的先攻**
+ * 「後港傭兵 vs 兄弟象」＝後港先攻＝**客場**；
+ * 「兄弟象 vs 後港傭兵」＝後港後攻＝**主場**。
+ * 這和全站的 `battingSide()` 是同一條慣例（客隊先攻）。
+ *
+ * ## ⚠️ 判斷寫在程式碼裡，不是叫模型自己決定
+ * 原本是 prompt 裡寫「homeAway：我方是先攻還是後攻，判斷不出來填 unknown」——
+ * 模型於是得同時做兩件事：讀出順序，再把順序翻譯成主客場。而第二件事是
+ * **這支球隊自己的慣例**，不是常識（MLB 的「A vs B」慣例剛好相反，A 是主隊），
+ * 模型沒有理由猜得到，猜錯的結果是整張賽程的主客場全部顛倒 —— 而計分板的
+ * 上下半局、前台的排列全部跟著錯，畫面上卻只是「看起來怪怪的」。
+ *
+ * 現在模型只負責**照原樣讀出兩隊的名字與順序**（它擅長的事），
+ * 翻譯成主客場由這裡做，而且測得到。
+ *
+ * ## 配不出來時退回模型讀到的標示
+ * 兩邊都不像我隊、或**兩邊都像**（對手隊名含有我隊的字，或隊內對抗賽）時，
+ * 順序就不可信了 —— 退回模型從圖上明寫的「先攻／後攻」讀到的值，
+ * 並讓呼叫端補一則警告。寧可讓人多確認一列，也不要靜悄悄地填反。
+ */
+export function resolveMatchup(options: {
+  firstTeam: string
+  secondTeam: string
+  teamNames: string[]
+  /** 模型從圖上明寫的「先攻／後攻」讀到的值，沒讀到是 `null`。 */
+  fallbackHomeAway: HomeAway | null
+  /** 模型自己判斷的對手隊名。 */
+  fallbackOpponent: string
+}): { homeAway: HomeAway | null; opponent: string; fromOrder: boolean } {
+  const first = options.firstTeam.trim()
+  const second = options.secondTeam.trim()
+
+  const ourIsFirst = Boolean(first) && isOurTeam(first, options.teamNames)
+  const ourIsSecond = Boolean(second) && isOurTeam(second, options.teamNames)
+
+  // 剛好一邊是我隊時，順序才說得準
+  if (ourIsFirst && !ourIsSecond) {
+    return { homeAway: 'away', opponent: second || options.fallbackOpponent, fromOrder: true }
+  }
+  if (ourIsSecond && !ourIsFirst) {
+    return { homeAway: 'home', opponent: first || options.fallbackOpponent, fromOrder: true }
+  }
+
+  return {
+    homeAway: options.fallbackHomeAway,
+    opponent: options.fallbackOpponent,
+    fromOrder: false,
+  }
 }
 
 /**

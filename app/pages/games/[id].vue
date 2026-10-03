@@ -7,6 +7,8 @@ import {
   gameResult,
   hasScore,
   isNotPlayed,
+  dugoutLabel,
+  matchupOrder,
   type AttendanceEntry,
 } from '#shared/schemas/game'
 import { attendanceLocked, formatLockAt } from '#shared/schemas/attendance'
@@ -171,6 +173,17 @@ const hasAttendance = computed(() => attendance.value.length > 0)
  * 代價是整頁多一個會忘記清掉的東西，而真的在截止那一秒按下去的人會拿到
  * 端點的那句話（而且那句話講得比變灰清楚）。
  */
+/** 對戰組合，先攻在前。隊徽只掛在對手那一側。 */
+const matchup = computed(() =>
+  game.value
+    ? matchupOrder(
+        game.value.homeAway,
+        { name: teamName.value, ours: true },
+        { name: game.value.opponent, ours: false },
+      )
+    : [],
+)
+
 const attendanceClosed = computed(() => (game.value ? attendanceLocked(game.value) : true))
 const canReportAttendance = computed(() => !attendanceClosed.value)
 
@@ -186,7 +199,7 @@ function applyAttendance(entries: AttendanceEntry[]) {
 const hasScoreboard = computed(() => (game.value?.scoreboard.innings.length ?? 0) > 0)
 
 useHead({
-  title: () => (game.value ? `${teamName.value} vs ${game.value.opponent}` : '比賽'),
+  title: () => (game.value ? matchup.value.map((side) => side.name).join(' vs ') : '比賽'),
 })
 </script>
 
@@ -235,16 +248,24 @@ useHead({
 
           <div class="mt-5 flex flex-wrap items-center justify-between gap-6">
             <div>
+              <!--
+                先攻的隊伍寫在前面（見 `matchupOrder()`），所以主場的比賽
+                會變成「對手 vs 我隊」—— 和大會的賽程表、賽程卡片同一個順序。
+                用 `v-for` 而不是兩套 `v-if` 的版面：隊徽只掛在對手那一側，
+                複製一份遲早會有一邊忘記改。
+              -->
               <h1 class="flex flex-wrap items-center gap-3 text-fluid-2xl font-black">
-                {{ teamName }}
-                <span class="text-white/60">vs</span>
-                <CommonTeamCrest
-                  :name="game.opponent"
-                  :logo-url="game.opponentLogoUrl"
-                  size="md"
-                  on-dark
-                />
-                {{ game.opponent }}
+                <template v-for="(side, index) in matchup" :key="side.name">
+                  <span v-if="index" class="text-white/60">vs</span>
+                  <CommonTeamCrest
+                    v-if="!side.ours"
+                    :name="side.name"
+                    :logo-url="game.opponentLogoUrl"
+                    size="md"
+                    on-dark
+                  />
+                  {{ side.name }}
+                </template>
               </h1>
               <p class="mt-2 text-white/70">{{ formatGameDateLong(game.date) }} {{ game.time }}</p>
             </div>
@@ -309,6 +330,11 @@ useHead({
               <dt class="text-white/60">主客場</dt>
               <dd class="font-medium">
                 {{ game.homeAway === 'home' ? '主場（後攻）' : '客場（先攻）' }}
+                <!--
+                  坐哪一邊是推導的（先攻三壘、後攻一壘），不另存欄位。
+                  接在同一行而不是多一列 —— 它就是主客場的另一種說法。
+                -->
+                <span class="text-white/60">・{{ dugoutLabel(game.homeAway) }}</span>
               </dd>
             </div>
             <!--

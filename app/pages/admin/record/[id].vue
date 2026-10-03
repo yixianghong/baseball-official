@@ -2,7 +2,7 @@
 import { clipFileName, formatDuration, nextHalf, resumePosition } from '~/utils/recording'
 import { getClipStore, type ClipSession } from '~/utils/clip-store'
 import type { ClipUpload } from '~/composables/useClipUpload'
-import { battingSide, HALF_LABELS, type GameHalf } from '#shared/schemas/game'
+import { battingSide, matchupOrder, HALF_LABELS, type GameHalf } from '#shared/schemas/game'
 import { formatBytes } from '~/utils/image'
 import { formatGameDateLong } from '~/utils/format'
 
@@ -460,7 +460,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <h1 class="truncate text-fluid-lg font-bold">
-                  {{ teamName }} vs {{ game.opponent }}
+                  {{ matchupOrder(game.homeAway, teamName, game.opponent).join(' vs ') }}
                 </h1>
                 <p class="text-fluid-sm text-white/60">
                   {{ formatGameDateLong(game.date) }}

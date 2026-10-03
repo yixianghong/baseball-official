@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { HALF_LABELS, type GameHalf } from '#shared/schemas/game'
+import { HALF_LABELS, matchupOrder, type GameHalf } from '#shared/schemas/game'
 import {
   duplicateSlots,
   halfInningSlots,
@@ -286,7 +286,9 @@ useHead({ title: () => (game.value ? `上傳影片檔：vs ${game.value.opponent
 
     <template v-else-if="game">
       <p class="mb-4 text-fluid-sm text-content-muted">
-        {{ formatGameDateLong(game.date) }}．{{ teamName }} vs {{ game.opponent }}
+        {{ formatGameDateLong(game.date) }}．{{
+          matchupOrder(game.homeAway, teamName, game.opponent).join(' vs ')
+        }}
       </p>
 
       <!--

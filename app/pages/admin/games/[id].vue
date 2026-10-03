@@ -29,6 +29,7 @@ import {
   formatLockAt,
   mergeAttendanceWithRoster,
 } from '#shared/schemas/attendance'
+import { dugoutLabel, matchupOrder } from '#shared/schemas/half-inning'
 import { formatGameDateLong } from '~/utils/format'
 
 /**
@@ -458,7 +459,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
 
     <template v-else-if="game">
       <AdminHeader
-        :title="`${teamName} vs ${game.opponent}`"
+        :title="matchupOrder(basic.homeAway, teamName, game.opponent).join(' vs ')"
         :description="formatGameDateLong(game.date)"
         back-to="/admin/games"
         back-label="回到賽事列表"
@@ -574,7 +575,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             { value: 'home', label: '主場（後攻）' },
             { value: 'away', label: '客場（先攻）' },
           ]"
-          hint="影響計分板上下半局的排列方式"
+          :hint="`影響計分板上下半局的排列方式。${dugoutLabel(basic.homeAway)}（大會規定：先攻三壘側、後攻一壘側）`"
         />
 
         <UiBaseTextarea v-model="basic.note" label="備註" :rows="3" :maxlength="500" />
