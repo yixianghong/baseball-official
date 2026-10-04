@@ -57,6 +57,7 @@ async function mount(plays: Play[] = []) {
         { id: 'p5', name: '李承翰', number: '9', bats: 'S' },
       ] as unknown as Player[],
       clips: [],
+      narratives: [],
       scoreboard: {
         innings: [{ inning: 1, our: null, opponent: null }],
         totals: { our: { r: 0, h: 0, e: 0 }, opponent: { r: 0, h: 0, e: 0 } },

@@ -3,6 +3,7 @@ import type {
   AttendanceEntry,
   Game,
   GameClip,
+  HalfInningNarrative,
   GameHalf,
   GameInput,
   GamePatch,
@@ -30,6 +31,7 @@ const ENDPOINTS = {
   clip: (id: string, videoId: string) =>
     `/admin/games/${encodeURIComponent(id)}/clips/${encodeURIComponent(videoId)}`,
   plays: (id: string) => `/admin/games/${encodeURIComponent(id)}/plays`,
+  narrative: (id: string) => `/admin/games/${encodeURIComponent(id)}/narrative`,
   /** ⚠️ 不在 `/admin` 底下 —— 隊員是在前台自己回報的，沒有登入。 */
   attendance: (id: string) => `/games/${encodeURIComponent(id)}/attendance`,
 } as const
@@ -123,6 +125,19 @@ export function useGameActions() {
     updateGame: (id: string, payload: GamePatch) => patch<Game>(ENDPOINTS.update(id), payload),
 
     removeGame: (id: string) => del<{ deleted: boolean }>(ENDPOINTS.update(id)),
+
+    /**
+     * 存下一個半局的賽況敘述。以「第幾局的哪半局」為鍵覆蓋，空字串＝刪掉那一格。
+     *
+     * 文字是在 `/admin/ai/describe-half-inning` 產生的，那一支什麼都不寫 ——
+     * 「產生」與「保存」是兩個可以各自失敗的動作。
+     */
+    saveNarrative: (id: string, inning: number, half: GameHalf, text: string) =>
+      put<{ narratives: HalfInningNarrative[] }>(ENDPOINTS.narrative(id), {
+        inning,
+        half,
+        text,
+      }),
 
     /**
      * 把 YouTube 上的可見度同步回來。

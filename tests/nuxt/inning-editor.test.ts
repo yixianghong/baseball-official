@@ -1,7 +1,7 @@
 // @vitest-environment nuxt
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import InningEditor from '../../app/components/admin/InningEditor.vue'
 import { playSchema, type Play, type PlayResult } from '../../shared/schemas/play'
 import type { GameHalf, HomeAway } from '../../shared/schemas/half-inning'
@@ -13,6 +13,14 @@ import type { LineupEntry } from '../../shared/schemas/game'
  * 這裡守的是三條「只要壞掉就沒人會用這個功能」的行為：打者自動帶下一棒、
  * 我隊防守的半局才問投手、以及一次點擊就登錄一個打席。
  */
+
+/**
+ * 「產生這半局的敘述」會打 Gemini。這裡換成假的，守的是**送上去的東西對不對**
+ * 以及拿回來之後畫面怎麼呈現 —— 模型寫得好不好只能用真的 API 看。
+ */
+const describeHalfInning = vi.fn()
+
+mockNuxtImport('useAiActions', () => () => ({ describeHalfInning }))
 
 const lineup: LineupEntry[] = [
   { order: 1, playerId: 'p4', name: '張志豪', number: '7', position: '2B' },
@@ -46,6 +54,7 @@ function mount(overrides: Record<string, unknown> = {}, attach = false) {
       startingPitcher: { playerId: 'p1', name: '陳冠宇', number: '1' },
       players: [],
       clips: [],
+      narratives: [],
       scoreboard: {
         innings: [
           { inning: 1, our: null, opponent: null },
@@ -719,5 +728,114 @@ describe('AdminInningEditor 三出局後鎖住', () => {
     const go = sheet.findAll('button').find((button) => button.text() === '滾地球出局')
     expect(dp?.attributes('disabled')).toBeDefined()
     expect(go?.attributes('disabled')).toBeUndefined()
+  })
+})
+
+describe('產生這半局的敘述', () => {
+  beforeEach(() => describeHalfInning.mockReset())
+
+  async function openTop(component: Awaited<ReturnType<typeof mount>>) {
+    await component.findAll('[aria-label="半局"] [role="tab"]')[0]?.trigger('click')
+  }
+
+  const twoPlays = () => [makePlay(1, 'top', '11', 'single'), makePlay(1, 'top', '12', 'strikeout')]
+
+  it('沒有打席時不顯示按鈕 —— 沒東西可以敘述', async () => {
+    const component = await mount()
+    await openTop(component)
+
+    expect(component.findAll('button').some((b) => b.text().includes('產生這半局的敘述'))).toBe(
+      false,
+    )
+  })
+
+  it('送上去的是這個半局的打席、進攻與防守的隊名', async () => {
+    describeHalfInning.mockResolvedValue({ text: '一句敘述。' })
+    const component = await mount({ plays: twoPlays() })
+    await openTop(component)
+
+    await component
+      .findAll('button')
+      .find((b) => b.text().includes('產生這半局的敘述'))!
+      .trigger('click')
+
+    // 主場（預設）＝上半局是對手進攻
+    expect(describeHalfInning).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inning: 1,
+        half: 'top',
+        battingTeam: '藍鷹隊',
+        fieldingTeam: '城市隊',
+        plays: [
+          expect.objectContaining({ batter: '#11 選手11', result: 'single' }),
+          expect.objectContaining({ batter: '#12 選手12', result: 'strikeout' }),
+        ],
+      }),
+    )
+  })
+
+  it('⚠️ 產生出來之後是 emit 出去存，不是自己留在畫面上', async () => {
+    /*
+     * 畫面上那一段直接讀 `narratives` prop（也就是資料庫裡的那一份）——
+     * 元件自己再留一份的話就有兩個來源，而前台顯示的是另外那一個。
+     */
+    describeHalfInning.mockResolvedValue({ text: '一局上半，#11 擊出一壘安打。' })
+    const component = await mount({ plays: twoPlays() })
+    await openTop(component)
+
+    await component
+      .findAll('button')
+      .find((b) => b.text().includes('產生這半局的敘述'))!
+      .trigger('click')
+    await nextTick()
+
+    expect(component.emitted('saveNarrative')?.[0]).toEqual([
+      1,
+      'top',
+      '一局上半，#11 擊出一壘安打。',
+    ])
+    // 還沒存回來之前，畫面上不會憑空多一段文字
+    expect(component.text()).not.toContain('一局上半，#11 擊出一壘安打。')
+  })
+
+  it('已經存下來的那一段顯示在畫面上', async () => {
+    const component = await mount({
+      plays: twoPlays(),
+      narratives: [
+        { inning: 1, half: 'top', text: '存好的第一局上半敘述。', createdAt: '2026-01-01' },
+      ],
+    })
+    await openTop(component)
+
+    expect(component.text()).toContain('存好的第一局上半敘述。')
+    // 它是 AI 寫的草稿，畫面上要講出來
+    expect(component.text()).toContain('AI 產生的草稿')
+  })
+
+  /**
+   * ⚠️ 換半局時畫面上換的是**那一格**的敘述。
+   *
+   * 敘述是 computed 自 `narratives` prop，所以這件事是結構上成立的 ——
+   * 曾經是本地 ref，切過去之後上一局那段話還留著，而它看起來完全像是
+   * 這一局的，在有人發現之前已經有機會被複製出去。
+   */
+  it('換半局顯示的是那一格的敘述', async () => {
+    const component = await mount({
+      plays: [...twoPlays(), makePlay(1, 'bottom', '7')],
+      narratives: [
+        { inning: 1, half: 'top', text: '上半局的敘述。', createdAt: '2026-01-01' },
+        { inning: 1, half: 'bottom', text: '下半局的敘述。', createdAt: '2026-01-01' },
+      ],
+    })
+
+    await openTop(component)
+    expect(component.text()).toContain('上半局的敘述。')
+    expect(component.text()).not.toContain('下半局的敘述。')
+
+    await component.findAll('[aria-label="半局"] [role="tab"]')[1]?.trigger('click')
+    await nextTick()
+
+    expect(component.text()).toContain('下半局的敘述。')
+    expect(component.text()).not.toContain('上半局的敘述。')
   })
 })

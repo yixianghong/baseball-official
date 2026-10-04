@@ -1,4 +1,6 @@
 import type {
+  DescribeHalfInningRequest,
+  DescribeHalfInningResponse,
   ParseAttendanceResponse,
   ParsePlaysRequest,
   ParsePlaysResponse,
@@ -28,6 +30,7 @@ const ENDPOINTS = {
   parseRoster: '/admin/ai/parse-roster',
   parseAttendance: '/admin/ai/parse-attendance',
   parsePlays: '/admin/ai/parse-plays',
+  describeHalfInning: '/admin/ai/describe-half-inning',
 } as const
 
 export function useAiActions() {
@@ -38,6 +41,17 @@ export function useAiActions() {
     loading,
     error,
     attempt,
+
+    /**
+     * 把一個半局的逐打席寫成一段話。
+     *
+     * ⚠️ **這一支的方向和其他幾支相反**：別的是「圖片／音訊 → 結構化資料」，
+     * 它是「結構化資料 → 散文」。回傳的一樣是**建議** —— 端點什麼都不寫，
+     * 產生的草稿由使用者自己複製去用。
+     */
+    describeHalfInning(request: DescribeHalfInningRequest): Promise<DescribeHalfInningResponse> {
+      return post<DescribeHalfInningResponse>(ENDPOINTS.describeHalfInning, request)
+    },
 
     /**
      * 辨識賽程公告圖，取出所有屬於我隊的場次。

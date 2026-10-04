@@ -269,6 +269,7 @@ function createSeedStore(): MemoryStore {
       opponentLogoUrl: '',
       // 示範：回報截止在賽前一天晚上九點（前台會寫出來，到了就鎖）
       attendanceLockAt: `${dayOffset(6)}T21:00`,
+      narratives: [],
       remindersSent: [],
       plays: [],
       clips: [],
@@ -308,6 +309,7 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       attendanceLockAt: '',
+      narratives: [],
       remindersSent: [],
       plays: [],
       clips: [],
@@ -336,6 +338,7 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       attendanceLockAt: '',
+      narratives: [],
       remindersSent: [],
       plays: [],
       clips: [],
@@ -364,6 +367,7 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       attendanceLockAt: '',
+      narratives: [],
       remindersSent: [],
       plays: [],
       clips: [],
@@ -398,6 +402,7 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       attendanceLockAt: '',
+      narratives: [],
       remindersSent: [],
       /**
        * 只登錄了前兩局 —— 用來呈現「**登錄不完整**」的樣子：那幾格的得分
@@ -466,6 +471,7 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       attendanceLockAt: '',
+      narratives: [],
       remindersSent: [],
       plays: [],
       clips: [],
@@ -502,6 +508,7 @@ function createSeedStore(): MemoryStore {
       coverImageUrl: '',
       opponentLogoUrl: '',
       attendanceLockAt: '',
+      narratives: [],
       remindersSent: [],
       /**
        * 這一場**逐打席全部登錄完整**（每個半局都到三出局），所以前台的

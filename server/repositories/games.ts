@@ -10,6 +10,7 @@ import {
   type GamePatch,
   type GameQueryOptions,
   type AttendanceEntry,
+  type HalfInningNarrative,
   attendanceEntrySchema,
 } from '../../shared/schemas/game'
 import { applyPlayDerivedScores } from '../../shared/schemas/box-score'
@@ -113,6 +114,7 @@ export async function createGame(input: GameInput): Promise<Game> {
       remindersSent: [],
       clips: [],
       plays: [],
+      narratives: [],
       id: memoryId('g'),
     }
     getMemoryStore().games.set(game.id, game)
@@ -121,7 +123,15 @@ export async function createGame(input: GameInput): Promise<Game> {
 
   const db = await getDb()
   const ref = await db.collection(COLLECTION).add({ ...data, ...timestamps })
-  return { ...data, ...timestamps, remindersSent: [], clips: [], plays: [], id: ref.id }
+  return {
+    ...data,
+    ...timestamps,
+    remindersSent: [],
+    clips: [],
+    plays: [],
+    narratives: [],
+    id: ref.id,
+  }
 }
 
 export async function updateGame(id: string, patch: GamePatch): Promise<Game> {
@@ -215,6 +225,37 @@ export async function answerAttendance(
 }
 
 /**
+ * 存下一個半局的賽況敘述，或覆蓋既有的那一段（重新產生）。
+ *
+ * 以「第幾局的哪半局」為鍵，和 `addGameClip()` 完全同一套 —— 重新產生就蓋掉
+ * 同一格，不會疊第二筆。空字串＝把那一格刪掉。
+ *
+ * 不走 `updateGame()`：`narratives` 刻意不在 `gameInputSchema` 裡（和 `clips`、
+ * `plays` 同一個理由），而且只動這一個欄位才不會蓋掉管理者同時在別處編輯的內容。
+ */
+export async function saveHalfInningNarrative(
+  id: string,
+  inning: number,
+  half: GameHalf,
+  text: string,
+): Promise<HalfInningNarrative[]> {
+  const existing = await getGame(id)
+  if (!existing) throw notFound('比賽')
+
+  const rest = existing.narratives.filter((item) => !(item.inning === inning && item.half === half))
+  const narratives = text ? [...rest, { inning, half, text, createdAt: nowIso() }] : rest
+
+  if (!isFirebaseConfigured()) {
+    getMemoryStore().games.set(id, { ...existing, narratives })
+    return narratives
+  }
+
+  const db = await getDb()
+  await db.collection(COLLECTION).doc(id).set({ narratives }, { merge: true })
+  return narratives
+}
+
+/**
  * 加一段錄影，或覆蓋同一個半局既有的那一段（重錄）。
  *
  * 不走 `updateGame()`：理由和 `markReminderSent()` 相同 —— 只動這一個欄位，
@@ -289,7 +330,22 @@ export async function saveHalfInningPlays(
 
   const next = replaceHalfInning(existing.plays, inning, half, plays)
   const { scoreboard } = withDerivedRuns({ ...existing, plays: next })
-  const payload = { plays: next, scoreboard }
+
+  /*
+   * ⚠️ **打席一變，那一格的賽況敘述就要丟掉。**
+   *
+   * 敘述是從打席寫出來的，而**前台看得到它** —— 改完打席還留著舊的那一段，
+   * 等於對訪客說一件沒有發生過的事，而且它讀起來非常像真的（AI 寫的）。
+   * 「寧可空白，也不要一段看起來很專業但是錯的文字」和「登錄不完整就不顯示
+   * 打擊率」是同一條原則。
+   *
+   * 代價是調一下得分就要重新產生一次（約 US$0.003）。用「標記為過時」代替
+   * 刪除的話，就得同時決定前台要不要顯示過時的那一段 —— 而那個問題沒有好答案。
+   */
+  const narratives = existing.narratives.filter(
+    (item) => !(item.inning === inning && item.half === half),
+  )
+  const payload = { plays: next, scoreboard, narratives }
 
   if (!isFirebaseConfigured()) {
     getMemoryStore().games.set(id, { ...existing, ...payload })

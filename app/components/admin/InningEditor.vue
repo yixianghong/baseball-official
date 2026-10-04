@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import type { GameClip, LineupEntry, Scoreboard, StartingPitcher } from '#shared/schemas/game'
+import type {
+  GameClip,
+  HalfInningNarrative,
+  LineupEntry,
+  Scoreboard,
+  StartingPitcher,
+} from '#shared/schemas/game'
 import type { HomeAway } from '#shared/schemas/half-inning'
 import { POSITION_LABELS, type Player, type Position } from '#shared/schemas/player'
 import type { BatSide, BattedType, FieldPoint, Play, PlayResult } from '#shared/schemas/play'
@@ -12,8 +18,9 @@ import {
   zoneOf,
   ZONE_LABELS,
 } from '#shared/schemas/field'
-import { clipEmbedUrl } from '#shared/schemas/game'
+import { clipEmbedUrl, narrativeOf } from '#shared/schemas/game'
 import { LOW_CONFIDENCE_THRESHOLD } from '#shared/schemas/ai'
+import { ApiError } from '~/utils/api-error'
 import {
   GAME_HALVES,
   halfInningLabel,
@@ -28,6 +35,7 @@ import {
   defaultRbi,
   defaultRuns,
   describeBatter,
+  describePerson,
   halfInningOuts,
   halfInningRuns,
   halfInningStatus,
@@ -66,6 +74,8 @@ const props = defineProps<{
   scoreboard: Scoreboard
   ourName: string
   opponentName: string
+  /** 已經存下來的半局敘述。 */
+  narratives: HalfInningNarrative[]
   /** 還沒同步到伺服器的半局數。 */
   pendingCount?: number
   /**
@@ -80,6 +90,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   save: [inning: number, half: (typeof GAME_HALVES)[number], plays: Play[]]
+  saveNarrative: [inning: number, half: (typeof GAME_HALVES)[number], text: string]
   retry: []
 }>()
 
@@ -319,6 +330,76 @@ const currentPitcher = computed<Play['pitcher']>(() => {
 // ── 新增一個打席 ────────────────────────────────────────────────
 
 const full = computed(() => rows.value.length >= MAX_PLAYS_PER_HALF_INNING)
+
+/* ── 單局敘述（AI 產生）──────────────────────────────────── */
+
+const { describeHalfInning } = useAiActions()
+
+const narrativeError = ref('')
+const describing = ref(false)
+const copied = ref(false)
+
+/**
+ * 這個半局已經存下來的敘述。
+ *
+ * **直接讀比賽資料，不另外存一份本地狀態** —— 存了就會有「畫面上那一段」和
+ * 「資料庫裡那一段」兩個來源，而換半局時忘了清掉的那一份看起來完全像是
+ * 這一局的。前台顯示的也是這一份，所以這裡看到什麼、訪客就看到什麼。
+ *
+ * ⚠️ 改了打席之後它會自己消失 —— 伺服器在存打席時就把那一格刪掉了
+ * （`saveHalfInningPlays()`），因為敘述講的已經是別的事。
+ */
+const narrative = computed(
+  () => narrativeOf(props.narratives, selected.value.inning, selected.value.half)?.text ?? '',
+)
+
+watch(selectedKey, () => {
+  narrativeError.value = ''
+  copied.value = false
+})
+
+async function generateNarrative() {
+  describing.value = true
+  narrativeError.value = ''
+  copied.value = false
+  try {
+    const result = await describeHalfInning({
+      inning: selected.value.inning,
+      half: selected.value.half,
+      battingTeam: ourAtBat.value ? props.ourName : props.opponentName,
+      fieldingTeam: ourAtBat.value ? props.opponentName : props.ourName,
+      pitcher: ourAtBat.value ? '' : describePerson(currentPitcher.value),
+      plays: rows.value.map((play) => ({
+        batter: describePerson(play.batter),
+        result: play.result,
+        runs: play.runs,
+        rbi: play.rbi,
+        fielder: play.fielder,
+        batted: play.batted,
+      })),
+    })
+    if (!result.text) {
+      narrativeError.value = '這次沒有產生出內容，請再試一次。'
+      return
+    }
+    // 產生與保存是兩個動作：產出來的立刻寫進那一格（覆蓋舊的）
+    emit('saveNarrative', selected.value.inning, selected.value.half, result.text)
+  } catch (err) {
+    narrativeError.value = ApiError.from(err).message
+  } finally {
+    describing.value = false
+  }
+}
+
+async function copyNarrative() {
+  try {
+    await navigator.clipboard.writeText(narrative.value)
+    copied.value = true
+  } catch {
+    // 沒有剪貼簿權限（或不是安全來源）時，文字本來就選得起來，不必擋路
+    narrativeError.value = '複製失敗，請自己選取文字複製。'
+  }
+}
 
 // ── 三出局之後鎖住 ──────────────────────────────────────────────
 
@@ -916,6 +997,46 @@ function suggestionText(item: Suggestion): string {
       >
         這個半局還沒有紀錄。
       </p>
+
+      <!--
+        ── 單局敘述（AI 產生的草稿）────────────────────────
+        產生出來**不存回資料庫**：它是從打席生出來的，打席一改就過時，
+        存起來等於多一份會和真相對不上的資料。要用的人自己複製。
+      -->
+      <div v-if="rows.length" class="space-y-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <UiBaseButton
+            variant="secondary"
+            size="sm"
+            :loading="describing"
+            @click="generateNarrative"
+          >
+            ✨ 產生這半局的敘述
+          </UiBaseButton>
+          <span v-if="narrative" class="text-xs text-content-muted">
+            AI 產生的草稿，貼出去之前請看過一遍
+          </span>
+        </div>
+
+        <p v-if="narrativeError" class="text-fluid-sm text-danger">{{ narrativeError }}</p>
+
+        <div v-if="narrative" class="space-y-2 rounded-xl border border-border bg-surface p-3">
+          <p class="text-fluid-sm whitespace-pre-wrap">{{ narrative }}</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <UiBaseButton variant="ghost" size="sm" @click="copyNarrative">
+              {{ copied ? '已複製' : '複製' }}
+            </UiBaseButton>
+            <UiBaseButton
+              variant="ghost"
+              size="sm"
+              :loading="describing"
+              @click="generateNarrative"
+            >
+              重新產生
+            </UiBaseButton>
+          </div>
+        </div>
+      </div>
 
       <!--
         ── 三出局：鎖住 ──

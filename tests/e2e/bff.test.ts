@@ -280,6 +280,47 @@ describe('資安標頭', () => {
   })
 
   /**
+   * ⚠️ 半局的賽況敘述存得下來，而且**改了打席就會被刪掉**。
+   *
+   * 敘述是從打席寫出來的，而前台看得到它 —— 改完打席還留著舊的那一段，
+   * 等於對訪客說一件沒有發生過的事，而且它讀起來非常像真的（AI 寫的）。
+   */
+  it('敘述以半局為鍵覆蓋，改了那一局的打席就會被刪掉', async () => {
+    const { cookie, csrfToken } = await login()
+    const headers = { 'content-type': 'application/json', cookie, 'x-csrf-token': csrfToken }
+
+    const save = (text: string) =>
+      fetch('/api/admin/games/g1/narrative', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ inning: 2, half: 'top', text }),
+      }).then((r) => r.json() as Promise<{ data: { narratives: Array<{ text: string }> } }>)
+
+    // 第一次存
+    expect((await save('第一版敘述。')).data.narratives).toHaveLength(1)
+    // 重新產生：覆蓋同一格，不會疊第二筆
+    const second = await save('第二版敘述。')
+    expect(second.data.narratives).toHaveLength(1)
+    expect(second.data.narratives[0]!.text).toBe('第二版敘述。')
+
+    // 改那一局的打席 → 那一格的敘述要消失
+    await fetch('/api/admin/games/g1/plays', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        inning: 2,
+        half: 'top',
+        plays: [{ inning: 2, half: 'top', batter: { number: '7' }, result: 'strikeout' }],
+      }),
+    })
+
+    const game = (await fetch('/api/games/g1').then((r) => r.json())) as {
+      data: { narratives: unknown[] }
+    }
+    expect(game.data.narratives).toEqual([])
+  })
+
+  /**
    * 迴歸測試：舊的 `?tab=result` 還要落得到地方。
    *
    * 「賽事管理」那個分頁被拆掉了（狀態回到基本資料、計分板回到逐局紀錄、
@@ -347,6 +388,7 @@ describe('後台權限：所有寫入都需要登入', () => {
     ['POST', '/api/admin/ai/parse-roster'],
     ['POST', '/api/admin/ai/parse-attendance'],
     ['POST', '/api/admin/ai/parse-plays'],
+    ['POST', '/api/admin/ai/describe-half-inning'],
     ['PUT', '/api/admin/games/g1/plays'],
   ])('未登入時 %s %s 回傳 401', async (method, path) => {
     const response = await fetch(path, {

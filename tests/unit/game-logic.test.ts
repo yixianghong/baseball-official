@@ -6,6 +6,8 @@ import {
   battingSide,
   dugoutLabel,
   matchupOrder,
+  narrativeOf,
+  orderedNarratives,
   deriveBench,
   deriveResult,
   emptyScoreboard,
@@ -530,18 +532,22 @@ describe('gameInputSchema', () => {
    * - `clips`：整場的影片紀錄清空
    * - `plays`：整場兩百筆逐打席紀錄清空（連帶讓計分板的逐局得分歸零）
    * - `remindersSent`：記號被清掉，所有人再收一次同樣的推播
+   * - `narratives`：整場的逐局戰況清空（前台那一整塊跟著消失）
    *
-   * 三個欄位各自有專屬的端點與 repository 函式（單欄位 merge）。
+   * 每個欄位各自有專屬的端點與 repository 函式（單欄位 merge）。
    */
-  it.each(['clips', 'plays', 'remindersSent'])('不接受系統自己寫的 %s 欄位', (field) => {
-    expect(Object.keys(gameInputSchema.shape)).not.toContain(field)
+  it.each(['clips', 'plays', 'remindersSent', 'narratives'])(
+    '不接受系統自己寫的 %s 欄位',
+    (field) => {
+      expect(Object.keys(gameInputSchema.shape)).not.toContain(field)
 
-    const parsed = gameInputSchema.parse({ ...base, [field]: [{ anything: true }] }) as Record<
-      string,
-      unknown
-    >
-    expect(parsed[field]).toBeUndefined()
-  })
+      const parsed = gameInputSchema.parse({ ...base, [field]: [{ anything: true }] }) as Record<
+        string,
+        unknown
+      >
+      expect(parsed[field]).toBeUndefined()
+    },
+  )
 
   it('拒絕格式錯誤的日期', () => {
     expect(() => gameInputSchema.parse({ ...base, date: '2026/03/05' })).toThrow()
@@ -967,5 +973,38 @@ describe('dugoutLabel', () => {
       const first = dugoutLabel(homeAway) === '三壘休息室'
       expect(first).toBe(battingSide('top', homeAway) === 'our')
     }
+  })
+})
+
+describe('narrativeOf / orderedNarratives', () => {
+  const at = (inning: number, half: 'top' | 'bottom', text: string) => ({
+    inning,
+    half,
+    text,
+    createdAt: '2026-01-01',
+  })
+
+  it('找得到那一格，找不到回 null', () => {
+    const list = [at(1, 'top', 'A'), at(1, 'bottom', 'B')]
+
+    expect(narrativeOf(list, 1, 'bottom')?.text).toBe('B')
+    expect(narrativeOf(list, 2, 'top')).toBeNull()
+  })
+
+  it('依比賽順序排，而且不是照存進去的順序', () => {
+    const list = [at(3, 'top', 'C'), at(1, 'bottom', 'B'), at(1, 'top', 'A')]
+
+    expect(orderedNarratives(list).map((item) => item.text)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('空字串的不列出來 —— 清掉的那一格不該在前台長出一個空白區塊', () => {
+    expect(orderedNarratives([at(1, 'top', ''), at(1, 'bottom', 'B')])).toHaveLength(1)
+  })
+
+  it('不改動傳進來的陣列', () => {
+    const list = [at(3, 'top', 'C'), at(1, 'top', 'A')]
+    orderedNarratives(list)
+
+    expect(list[0]!.text).toBe('C')
   })
 })

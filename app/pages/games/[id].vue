@@ -512,6 +512,12 @@ useHead({
         沒有可顯示的片段時 `GameClips` 自己整塊不渲染（私人影片也會被濾掉），
         所以延賽／取消的場次不會多出一個空標題。
       -->
+      <!--
+        逐局戰況排在影片**前面**：它是文字，而上面那段註解講的就是
+        「文字資訊看完才會想點影片」。沒有任何敘述時整塊不渲染。
+      -->
+      <GameNarratives :narratives="game.narratives" />
+
       <GameClips :clips="game.clips" :finished="isFinished" :plays="game.plays" />
     </div>
   </div>

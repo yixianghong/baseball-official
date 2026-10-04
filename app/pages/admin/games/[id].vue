@@ -67,7 +67,13 @@ const gameId = computed(() => String(route.params.id))
 const { data: game, error } = await useGame(gameId)
 const { data: players } = await usePlayers()
 const { data: settings } = await useSiteSettings()
-const { updateGame, refreshClips, removeClip, addClip } = useGameActions()
+const {
+  updateGame,
+  refreshClips,
+  removeClip,
+  addClip,
+  saveNarrative: saveNarrativeApi,
+} = useGameActions()
 
 const teamName = computed(() => settings.value?.teamName ?? '我隊')
 const teamNames = computed(() => (settings.value ? teamNameCandidates(settings.value) : []))
@@ -347,6 +353,28 @@ const derivedCells = computed(() =>
  * 不放在自動儲存的 `formState` 裡 —— `clips` 刻意不在 `gameInputSchema`
  * 中（理由見 `gameSchema`），它有自己的端點。
  */
+/*
+ * ── 半局賽況敘述 ──────────────────────────────────────────────
+ * 和 `clips`、`plays` 同一個模式：不放進自動儲存的 `formState`，走自己的端點
+ * 以「第幾局的哪半局」為鍵覆蓋。改了打席之後伺服器會把那一格刪掉，
+ * 所以這裡要用回傳的那一份覆蓋，不能只改自己手上的。
+ */
+const narratives = ref([...(game.value?.narratives ?? [])])
+watch(game, () => (narratives.value = [...(game.value?.narratives ?? [])]))
+
+async function saveNarrative(inning: number, half: GameHalf, text: string) {
+  try {
+    const result = await saveNarrativeApi(gameId.value, inning, half, text)
+    narratives.value = result.narratives
+  } catch {
+    useToast().show({
+      tone: 'error',
+      message: '敘述儲存失敗，請再按一次「重新產生」。',
+      key: 'narrative',
+    })
+  }
+}
+
 const clips = ref([...(game.value?.clips ?? [])])
 watch(game, () => (clips.value = [...(game.value?.clips ?? [])]))
 
@@ -713,8 +741,10 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           :scoreboard="board"
           :our-name="teamName"
           :opponent-name="game.opponent"
+          :narratives="narratives"
           :pending-count="playLog.pending.value.length"
           @save="playLog.saveHalf"
+          @save-narrative="saveNarrative"
           @retry="playLog.syncPending"
         />
       </section>

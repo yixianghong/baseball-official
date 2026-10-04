@@ -8,6 +8,9 @@ import {
   parsedPlaySchema,
   parsePlaysResponseSchema,
   parseScheduleResponseSchema,
+  describeHalfInningResponseSchema,
+  type DescribeHalfInningRequest,
+  type DescribeHalfInningResponse,
   parseScoreboardResponseSchema,
   type ParsedPlay,
   type ParsePlaysRequest,
@@ -21,9 +24,14 @@ import {
   type ParseScoreboardRequest,
   type ParseScoreboardResponse,
 } from '../../shared/schemas/ai'
-import { POSITIONS, type Hand, type Position } from '../../shared/schemas/player'
-import type { HomeAway } from '../../shared/schemas/half-inning'
-import { PLAY_RESULTS, type BattedType, type PlayResult } from '../../shared/schemas/play'
+import { POSITIONS, POSITION_LABELS, type Hand, type Position } from '../../shared/schemas/player'
+import { HALF_LABELS, type HomeAway } from '../../shared/schemas/half-inning'
+import {
+  BATTED_LABELS,
+  PLAY_RESULTS,
+  type BattedType,
+  type PlayResult,
+} from '../../shared/schemas/play'
 import { needsBattedType, needsFielder } from '../../shared/schemas/field'
 
 /**
@@ -155,6 +163,105 @@ const SCOREBOARD_RESPONSE_SCHEMA = {
   },
   required: ['ourRow', 'opponentRow', 'ourTotals', 'opponentTotals', 'confidence'],
 } as const
+
+const HALF_INNING_RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    text: { type: 'STRING', description: '這個半局的口語化敘述，繁體中文' },
+  },
+  required: ['text'],
+} as const
+
+/**
+ * 把一個半局的打席寫成一段話。
+ *
+ * ## ⚠️ 這一支和其他五支方向相反
+ * 其他五支是「圖片／音訊 → 結構化資料」，這一支是「結構化資料 → 散文」。
+ * 共同點只有兩個：走 `responseSchema`（所以拿回來的是 `{ text }` 而不是要自己
+ * 從散文裡挖東西），以及**端點不寫入任何資料** —— 產出的是給人看、給人複製的
+ * 建議，要不要用是人決定的。
+ *
+ * ## ⚠️ 最大的風險是編造，而且編得很像真的
+ * 資料裡**沒有跑者**：我們只知道「這個打席隊伍得幾分」，不知道誰在幾壘、
+ * 怎麼推進回來的（那是專業記錄軟體的工作量，見 CLAUDE.md 的取捨）。
+ * 模型非常樂意補上「一二壘有人」「滿壘危機」這種聽起來很專業的句子，
+ * 而那是**憑空生出來的**，看的人沒有辦法分辨。
+ *
+ * 所以提示詞裡把「不知道的事」逐條列出來並禁止提及，而不是只說「不要編造」——
+ * 泛泛的叮嚀擋不住，列出項目才擋得住。畫面上也要寫明這是 AI 產生的草稿。
+ *
+ * ## 字數
+ * 大聯盟的 recap 是「幾句話講完發生什麼」，不是逐球轉播。這裡要 2～4 句、
+ * 100 字上下 —— 太長的話人會懶得看，也更容易開始編。
+ */
+export async function describeHalfInning(
+  event: H3Event,
+  request: DescribeHalfInningRequest,
+): Promise<DescribeHalfInningResponse> {
+  const lines = request.plays.map((play, index) => {
+    const detail = [
+      play.batted ? BATTED_LABELS[play.batted] : '',
+      play.fielder ? `${POSITION_LABELS[play.fielder]}方向` : '',
+    ].filter(Boolean)
+
+    const scoring = [
+      play.runs > 0 ? `這個打席隊伍得 ${play.runs} 分` : '',
+      play.rbi > 0 ? `打點 ${play.rbi}` : '',
+    ].filter(Boolean)
+
+    return [
+      `${index + 1}. ${play.batter || '（背號不詳）'}`,
+      PLAY_RESULTS[play.result].label,
+      detail.length ? `（${detail.join('、')}）` : '',
+      scoring.length ? `，${scoring.join('、')}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+  })
+
+  const runs = request.plays.reduce((sum, play) => sum + play.runs, 0)
+  const outs = request.plays.reduce((sum, play) => sum + PLAY_RESULTS[play.result].outs, 0)
+
+  const prompt = [
+    '你是一位棒球文字記錄員。請把下面這個半局的逐打席紀錄，寫成一段給球隊網站看的簡短敘述。',
+    '',
+    `局數：第 ${request.inning} 局${HALF_LABELS[request.half]}`,
+    `進攻：${request.battingTeam}、防守：${request.fieldingTeam}`,
+    request.pitcher ? `投手：${request.pitcher}` : '',
+    '',
+    '逐打席（照發生順序）：',
+    ...lines,
+    '',
+    `這個半局共得 ${runs} 分、${outs} 人出局。`,
+    '',
+    '寫法要求：',
+    '- 繁體中文，**2 到 4 句、100 字上下**。像大聯盟賽後簡報那樣講重點，不是逐球轉播。',
+    '- 用球員的背號與姓名稱呼，照上面給的寫法。',
+    '- 語氣專業、平實。不要用驚嘆號，不要替球員下評價，不要寫「精彩」「可惜」這類主觀形容。',
+    '',
+    '⚠️ 下面這些資料裡**沒有**，一個字都不准提：',
+    '- 壘上有沒有人、誰在幾壘、滿壘、得點圈、殘壘',
+    '- 球數、好壞球、球種、球速',
+    '- 守備的精彩程度、球員的狀態或心情',
+    '- 這個半局之外的事（比分、戰績、其他局數）',
+    '只能寫上面逐打席裡真的有的事。寧可短，不要補。',
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
+
+  const raw = await generate<{ text?: unknown }>(
+    event,
+    prompt,
+    '',
+    '',
+    HALF_INNING_RESPONSE_SCHEMA,
+    {
+      label: 'describe-half-inning',
+    },
+  )
+
+  return describeHalfInningResponseSchema.parse({ text: String(raw.text ?? '').trim() })
+}
 
 /** 辨識賽程公告圖，只挑出含我隊的場次。 */
 export async function parseScheduleImage(
@@ -952,6 +1059,7 @@ function optionalCount(input: unknown): number | null {
 async function generate<T>(
   event: H3Event,
   prompt: string,
+  /** 附件（圖片或音訊）的 base64。**空字串＝純文字呼叫**（見 `describeHalfInning()`）。 */
   mediaBase64: string,
   mimeType: string,
   responseSchema: unknown,
@@ -989,7 +1097,11 @@ async function generate<T>(
         contents: [
           {
             role: 'user',
-            parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: mediaBase64 } }],
+            parts: [
+              { text: prompt },
+              // 純文字呼叫不能送空的 inline_data —— Gemini 會回 400
+              ...(mediaBase64 ? [{ inline_data: { mime_type: mimeType, data: mediaBase64 } }] : []),
+            ],
           },
         ],
         generationConfig: {

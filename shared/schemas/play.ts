@@ -515,7 +515,15 @@ export function halfInningStatus(plays: Play[]): 'empty' | 'partial' | 'complete
 
 /** 打席上的人怎麼稱呼。有背號就 `#24 張宏宇`，只有背號就 `#24`。 */
 export function describeBatter(play: Play): string {
-  const { name, number } = play.batter
+  return describePerson(play.batter)
+}
+
+/**
+ * 「#24 張志豪」。打者與投手共用 —— 兩邊存的是同一種形狀，而「背號和姓名
+ * 要怎麼湊成一句」在畫面上到處都要用（打席列表、半局賽況、AI 的提示詞）。
+ */
+export function describePerson(person: { name: string; number: string }): string {
+  const { name, number } = person
   if (number && name) return `#${number} ${name}`
   if (number) return `#${number}`
   return name || '（未填）'

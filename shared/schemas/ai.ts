@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { attendanceStatusSchema, homeAwaySchema, inningScoreSchema, sideTotalsSchema } from './game'
 import { handSchema, positionSchema } from './player'
 import { battedTypeSchema, playResultSchema } from './play'
+import { gameHalfSchema } from './half-inning'
 
 /**
  * Gemini 圖片辨識的共用契約。
@@ -63,6 +64,50 @@ export const parseScheduleResponseSchema = z.object({
 })
 
 export type ParseScheduleResponse = z.infer<typeof parseScheduleResponseSchema>
+
+/**
+ * 產生單局敘述的請求。
+ *
+ * ⚠️ 這一支和另外五支不一樣：**它不辨識任何東西，而是把已經登錄好的打席
+ * 寫成一段話**。輸入是結構化資料、輸出是散文，方向剛好相反。
+ *
+ * 由前端把這個半局的打席送上來（而不是後端自己讀比賽資料）：使用者要的是
+ * **他現在螢幕上看到的那一局**的敘述，而逐局紀錄頁可能還有沒同步出去的變更。
+ * 端點什麼都不寫，所以採信前端送來的資料沒有風險 —— 它只拿來組提示詞。
+ */
+export const describeHalfInningRequestSchema = z.object({
+  inning: z.number().int().min(1).max(20),
+  half: gameHalfSchema,
+  /** 這個半局進攻的隊伍名稱。 */
+  battingTeam: z.string().trim().min(1).max(40),
+  /** 防守的隊伍名稱。 */
+  fieldingTeam: z.string().trim().min(1).max(40),
+  /** 投手，沒有就留空。 */
+  pitcher: z.string().trim().max(40).default(''),
+  plays: z
+    .array(
+      z.object({
+        /** 已經組好的「#24 張志豪」或「#24」。 */
+        batter: z.string().trim().max(40),
+        result: playResultSchema,
+        runs: z.number().int().min(0).max(4).default(0),
+        rbi: z.number().int().min(0).max(4).default(0),
+        fielder: positionSchema.nullable().default(null),
+        batted: battedTypeSchema.nullable().default(null),
+      }),
+    )
+    .min(1, '這個半局還沒有任何打席')
+    .max(40),
+})
+
+export type DescribeHalfInningRequest = z.infer<typeof describeHalfInningRequestSchema>
+
+export const describeHalfInningResponseSchema = z.object({
+  /** 口語化的單局敘述，繁體中文。 */
+  text: z.string().trim().max(400).default(''),
+})
+
+export type DescribeHalfInningResponse = z.infer<typeof describeHalfInningResponseSchema>
 
 /** 辨識計分板的請求。 */
 export const parseScoreboardRequestSchema = imagePayloadSchema.extend({

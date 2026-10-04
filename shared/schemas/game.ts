@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { patchSchemaOf } from './common'
 import { citySchema } from './weather'
 import { positionSchema } from './player'
-import { gameHalfSchema, homeAwaySchema } from './half-inning'
+import { gameHalfSchema, halfInningOrder, homeAwaySchema, type GameHalf } from './half-inning'
 import { MAX_PLAYS_PER_GAME, playSchema } from './play'
 
 /**
@@ -141,6 +141,44 @@ export const gameClipSchema = z.object({
 })
 
 export type GameClip = z.infer<typeof gameClipSchema>
+
+/**
+ * 一個半局的賽況敘述（AI 產生、人確認後存下來的那一段話）。
+ *
+ * 以「第幾局的哪半局」為鍵，和 `clips`、`plays` 同一個身分概念 ——
+ * 重新產生就覆蓋同一格，不會疊第二筆。
+ *
+ * ⚠️ **打席一變，這一格就會被刪掉**（`saveHalfInningPlays()`）。
+ * 敘述是從打席寫出來的，改了打席之後那段話描述的就是別的事了，
+ * 而前台看得到它 —— 留著就是對訪客說一件沒有發生過的事。
+ * 「寧可空白，也不要一段看起來很專業但是錯的文字」和「少登三場的 .412
+ * 比沒有數字糟糕得多」是同一條原則。要的話重新產生一次（約 US$0.003）。
+ */
+export const halfInningNarrativeSchema = z.object({
+  inning: z.number().int().min(1).max(20),
+  half: gameHalfSchema,
+  text: z.string().trim().max(400),
+  createdAt: z.string(),
+})
+
+export type HalfInningNarrative = z.infer<typeof halfInningNarrativeSchema>
+
+/** 這個半局的敘述，沒有就回 `null`。 */
+export function narrativeOf(
+  narratives: HalfInningNarrative[],
+  inning: number,
+  half: GameHalf,
+): HalfInningNarrative | null {
+  return narratives.find((item) => item.inning === inning && item.half === half) ?? null
+}
+
+/** 依比賽順序排好（第 3 局上 → 第 3 局下 → 第 4 局上），空白的不列。 */
+export function orderedNarratives(narratives: HalfInningNarrative[]): HalfInningNarrative[] {
+  return narratives
+    .filter((item) => item.text)
+    .slice()
+    .sort((a, b) => halfInningOrder(a.inning, a.half) - halfInningOrder(b.inning, b.half))
+}
 
 /** 前台看得到的片段：已經公開，而且依比賽順序排好。 */
 export function visibleClips(clips: GameClip[]): GameClip[] {
@@ -602,6 +640,14 @@ export const gameSchema = gameInputSchema.extend({
    * 對前台的比賽頁與 box score 都成立。
    */
   plays: z.array(playSchema).max(MAX_PLAYS_PER_GAME).default([]),
+  /**
+   * 每個半局的賽況敘述。
+   *
+   * **和 `clips`、`plays`、`remindersSent` 一樣刻意不放進 `gameInputSchema`**
+   * —— 同樣的理由：後台表單是自動儲存、整份送出的，放進去之後漏帶一次就是
+   * 整場的敘述清空。它走自己的端點（`PUT /admin/games/[id]/narrative`）。
+   */
+  narratives: z.array(halfInningNarrativeSchema).max(40).default([]),
 })
 
 export type Game = z.infer<typeof gameSchema>
