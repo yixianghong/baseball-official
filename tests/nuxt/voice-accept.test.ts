@@ -20,6 +20,8 @@ const suggestions = ref<ParsedPlay[]>([])
 /** 錄音狀態由測試操縱 —— 真的錄音在這個環境裡跑不起來。 */
 const status = ref<'idle' | 'recording' | 'parsing'>('idle')
 const elapsedMs = ref(0)
+const progress = ref({ done: 0, total: 0 })
+const speechSeconds = ref(0)
 const calls: string[] = []
 
 mockNuxtImport('useVoicePlayInput', () => () => ({
@@ -30,8 +32,11 @@ mockNuxtImport('useVoicePlayInput', () => () => ({
   warnings: ref<string[]>([]),
   supported: computed(() => true),
   elapsedMs,
+  progress,
+  speechSeconds,
   start: async () => void calls.push('start'),
   stop: async () => void calls.push('stop'),
+  parseFiles: async () => void calls.push('parseFiles'),
   clear: () => (suggestions.value = []),
 }))
 
@@ -218,5 +223,39 @@ describe('語音登錄：有問題的建議不能採用', () => {
 
     expect(component.text()).toContain('只剩 1 個')
     expect(acceptButton(component)?.attributes('disabled')).toBeDefined()
+  })
+})
+
+describe('上傳錄音檔', () => {
+  /**
+   * 人在場上打球、手機不在身邊時，隨身錄音筆照樣錄得到他唸的那幾句。
+   *
+   * ⚠️ 它和「現場錄音」是**同一條辨識路徑**，只是音訊來源不同 ——
+   * 結果一樣進暫存卡片，一樣要人確認過才寫進半局。做成第二條路的話，
+   * 「確認之後才採用」這件事就有兩個地方要維護。
+   */
+  it('挑了檔案就送去解析，而且帶著同一份脈絡', async () => {
+    const component = await mount()
+
+    const input = component.find('input[type="file"]')
+    expect(input.exists()).toBe(true)
+
+    // happy-dom 的 FileList 設不進去，所以直接觸發 change 驗「有沒有接上」
+    await input.trigger('change')
+    expect(component.find('input[type="file"]').attributes('accept')).toContain('audio')
+  })
+
+  it('解析多段時顯示進度與「有幾秒在說話」', async () => {
+    progress.value = { done: 2, total: 5 }
+    speechSeconds.value = 38
+    const component = await mount()
+
+    const text = component.text()
+    expect(text).toContain('解析中 2 / 5 段')
+    // 少了這個數字，人沒有辦法判斷「它有沒有抓到我講的話」
+    expect(text).toContain('38 秒有說話')
+
+    progress.value = { done: 0, total: 0 }
+    speechSeconds.value = 0
   })
 })

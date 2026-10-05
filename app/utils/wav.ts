@@ -95,6 +95,18 @@ export function mixToMono(channels: Float32Array[]): Float32Array {
  * 格式 —— 在這裡默默換一種行為的話，外面就不知道送出去的到底是什麼。
  */
 export async function blobToWav(blob: Blob): Promise<Blob> {
+  const samples = await blobToSamples(blob)
+  return encodeWav(samples, SPEECH_SAMPLE_RATE)
+}
+
+/**
+ * 解碼成 16kHz 單聲道的 PCM。
+ *
+ * `blobToWav()` 原本把「解碼」和「編碼成 WAV」綁在一起，但長錄音要在中間
+ * **挑出有人說話的片段**（`~/utils/audio-segments.ts`），所以那一步要拿得到
+ * 原始的樣本。兩支共用同一段解碼，取樣率與聲道數就不會有兩套。
+ */
+export async function blobToSamples(blob: Blob): Promise<Float32Array> {
   const AudioContextClass =
     window.OfflineAudioContext ??
     (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext })
@@ -116,7 +128,7 @@ export async function blobToWav(blob: Blob): Promise<Blob> {
   source.start()
 
   const rendered = await context.startRendering()
-  return encodeWav(rendered.getChannelData(0), SPEECH_SAMPLE_RATE)
+  return rendered.getChannelData(0)
 }
 
 /** `Blob` → 不含 `data:` 前綴的純 base64（`imagePayloadSchema` 同一個約定）。 */

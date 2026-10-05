@@ -665,8 +665,9 @@ const elapsedLabel = computed(() => {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
 })
 
-async function stopVoice(): Promise<void> {
-  await voice.stop({
+/** 送辨識時一起帶上去的脈絡。現場錄音與上傳檔案共用同一份。 */
+function voiceContext() {
+  return {
     inning: selected.value.inning,
     half: selected.value.half,
     batting: selected.value.side,
@@ -679,7 +680,31 @@ async function stopVoice(): Promise<void> {
       number: play.batter.number,
       result: PLAY_RESULTS[play.result].label,
     })),
-  })
+  }
+}
+
+async function stopVoice(): Promise<void> {
+  await voice.stop(voiceContext())
+}
+
+const audioInput = ref<HTMLInputElement | null>(null)
+
+/**
+ * 挑了錄音檔。**一個或好幾個都可以。**
+ *
+ * 錄法沒有規定：一個半局錄一個檔（錄音筆開著不關）、一個打席錄一段
+ * （每次下場按一下）、或混著來都行 —— 挑進來之後會照錄的時間排好，
+ * 接成一條音軌再送（見 `parseFiles()`）。
+ *
+ * ⚠️ 這和「現場錄音」是同一條辨識路徑，只是音訊來源不同 —— 結果一樣進
+ * 暫存卡片，一樣要人確認過才寫進半局。
+ */
+async function onAudioPicked(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  // 清空才挑得了同一個檔案第二次（change 比對的是 value）
+  input.value = ''
+  if (files.length) await voice.parseFiles(files, voiceContext())
 }
 
 type Suggestion = (typeof voice.suggestions.value)[number]
@@ -1237,10 +1262,43 @@ function suggestionText(item: Suggestion): string {
                     : '🎤 開始錄音'
               }}
             </button>
+            <!--
+              ⚠️ 上傳錄音檔不是「另一種語音功能」，是同一條路的另一個音訊來源。
+              人在場上打球時手機不在身邊，隨身錄音筆照樣錄得到他唸的那幾句；
+              下場之後把檔案挑進來，結果一樣進暫存卡片讓他確認。
+            -->
+            <input
+              ref="audioInput"
+              type="file"
+              accept="audio/*,.mp3,.m4a,.wav"
+              multiple
+              class="hidden"
+              @change="onAudioPicked"
+            />
+            <UiBaseButton
+              variant="secondary"
+              size="sm"
+              :disabled="voice.status.value !== 'idle'"
+              @click="audioInput?.click()"
+            >
+              📁 上傳錄音檔
+            </UiBaseButton>
+
             <span class="text-xs text-content-muted">
-              例如「24 號游擊方向滾地球出局、18 號左外野平飛安打得一分」
+              例如「24 號游擊方向滾地球出局、18 號左外野平飛安打得一分」。
+              錄音檔可以一次挑多個（一個打席一段也行），會照錄的時間排好。
             </span>
           </div>
+
+          <!--
+            解析長檔案會跑好幾十秒（一段一次呼叫），所以進度一定要看得到 ——
+            而且要寫出「挑出幾秒語音」，那是人唯一能判斷「它有沒有抓到我講的話」
+            的地方。
+          -->
+          <p v-if="voice.progress.value.total > 1" class="text-fluid-sm text-content-muted">
+            解析中 {{ voice.progress.value.done }} / {{ voice.progress.value.total }} 段（錄音裡
+            {{ Math.round(voice.speechSeconds.value) }} 秒有說話）
+          </p>
 
           <p v-if="voice.error.value" class="text-fluid-sm text-danger">
             {{ voice.error.value }}

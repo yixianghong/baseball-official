@@ -1,5 +1,14 @@
 import type { ParsePlaysRequest, ParsePlaysResponse } from '#shared/schemas/ai'
-import { blobToBase64, blobToWav } from '~/utils/wav'
+import { blobToBase64, blobToSamples, blobToWav, encodeWav, SPEECH_SAMPLE_RATE } from '~/utils/wav'
+import {
+  concatSamples,
+  findSpeechSegments,
+  groupIntoChunks,
+  joinSegments,
+  segmentsSeconds,
+  type Segment,
+} from '~/utils/audio-segments'
+import { sortByCapture } from '~/utils/clip-import'
 
 /**
  * 按「開始錄音」→ 說話 → 按「停止並辨識」→ 辨識出幾個打席。
@@ -195,6 +204,149 @@ export function useVoicePlayInput() {
     }
   }
 
+  /* ── 上傳錄音檔（隨身錄音筆錄的整個半局）──────────────────── */
+
+  /**
+   * 一次送多少秒的語音。
+   *
+   * 16kHz 單聲道 WAV 每秒 32KB，base64 之後 ×1.33 —— 90 秒約 3.8MB，
+   * 在 `maxUploadBytes`（8MB）之內還留了一倍的餘裕。
+   */
+  const CHUNK_SECONDS = 90
+
+  /**
+   * 最多送幾段。
+   *
+   * 挑段之後還有這麼多語音，代表不是「一個半局的登錄」而是別的東西
+   * （整場的檔案、或整段都是環境音）。擋住的不是正確性而是帳單與等待時間 ——
+   * 20 段大約 30 分鐘的語音、兩三分鐘的等待。
+   */
+  const MAX_CHUNKS = 20
+
+  /** 解析到第幾段／共幾段。畫面上一定要看得到，這會跑好幾十秒。 */
+  const progress = ref({ done: 0, total: 0 })
+  /** 這個檔案裡有多少秒真的在說話。和檔案長度一起寫出來，人才知道挑對了沒。 */
+  const speechSeconds = ref(0)
+
+  /**
+   * 解析錄音檔。**一個檔案或好幾個都可以。**
+   *
+   * ## 為什麼一支函式就吃得下兩種錄法
+   * 錄法沒有規定：可以一個半局錄一個檔（隨身錄音筆開著不關），也可以一個
+   * 打席錄一段（每次下場按一下），或者混著來。挑段之後本來就是「一串話接起來
+   * 分組」，**多個檔案只是多幾個來源** —— 全部接成一條音軌，後面的分組、
+   * 編碼、送辨識完全不必知道原本來自哪裡。
+   *
+   * 順帶的好處是**小檔案不會變成很多次呼叫**：四個三秒的片段加起來才十二秒，
+   * 還是一次就送完。一個檔案一次呼叫的做法會貴四倍，而且模型看不到前後文。
+   *
+   * ⚠️ **順序要照錄的時間排，不是照使用者挑的順序。** 打席天生有先後，
+   * 排錯的話出局數與棒次就跟著錯。用的是影片匯入那一支
+   * （`sortByCapture()`）—— 同一個問題：檔名規則各家錄音筆不同，
+   * 「先錄的排前面」才是每一台都成立的。
+   *
+   * ## 為什麼不是整段送上去
+   * 隨身錄音筆錄的是整個半局（十幾分鐘），而真正有用的只有登錄者唸出來的
+   * 那幾句。整段送有三個問題：超過上傳上限、音訊 token 貴、以及**切段時
+   * 會切在句子中間**。所以先挑出有說話的片段（`findSpeechSegments()`），
+   * 接起來、分組，每組送一次 —— 切點一律落在靜音處。
+   *
+   * ## ⚠️ 後面幾段要知道前面認出了什麼
+   * 每一組是獨立的一次呼叫，模型看不到前一組。所以把**已經登錄的打席
+   * 加上前面幾組認出來的**一起當成 `existing` 送下去 —— 它靠這個知道
+   * 現在幾出局、輪到誰，少了它後面幾段的判斷會從頭開始。
+   */
+  async function parseFiles(
+    files: File[],
+    context: {
+      inning: number
+      half: ParsePlaysRequest['half']
+      batting: ParsePlaysRequest['batting']
+      roster: ParsePlaysRequest['roster']
+      existing: ParsePlaysRequest['existing']
+    },
+  ): Promise<void> {
+    clear()
+    status.value = 'parsing'
+    progress.value = { done: 0, total: 0 }
+    speechSeconds.value = 0
+
+    try {
+      /*
+       * 每個檔案各自挑出語音，再接成一條連續的音軌。
+       * `utterances` 記的是每一句話在那條音軌上的位置 —— 分組要切在句子
+       * 之間，所以不能只留下一個長陣列。
+       */
+      const parts: Float32Array[] = []
+      const utterances: Segment[] = []
+      let offset = 0
+
+      for (const file of sortByCapture(files)) {
+        const samples = await blobToSamples(file)
+        for (const segment of findSpeechSegments(samples, SPEECH_SAMPLE_RATE)) {
+          const length = segment.end - segment.start
+          parts.push(samples.subarray(segment.start, segment.end))
+          utterances.push({ start: offset, end: offset + length })
+          offset += length
+        }
+      }
+
+      if (utterances.length === 0) {
+        error.value =
+          files.length > 1 ? '這些檔案裡沒有聽到說話的聲音。' : '這個檔案裡沒有聽到說話的聲音。'
+        return
+      }
+
+      const speech = concatSamples(parts)
+      speechSeconds.value = segmentsSeconds(utterances, SPEECH_SAMPLE_RATE)
+      const chunks = groupIntoChunks(utterances, SPEECH_SAMPLE_RATE, CHUNK_SECONDS)
+
+      if (chunks.length > MAX_CHUNKS) {
+        error.value = `挑進來的錄音裡有 ${Math.round(speechSeconds.value / 60)} 分鐘的語音，太長了。請一次處理一個半局。`
+        return
+      }
+
+      progress.value = { done: 0, total: chunks.length }
+
+      const collected: ParsePlaysResponse['plays'] = []
+      const notes: string[] = []
+      const transcripts: string[] = []
+
+      for (const chunk of chunks) {
+        const wav = encodeWav(joinSegments(speech, chunk), SPEECH_SAMPLE_RATE)
+        const result = await parsePlays({
+          audioBase64: await blobToBase64(wav),
+          mimeType: 'audio/wav',
+          ...context,
+          // 前面幾組認出來的也算「已經有的」，模型才接得上出局數與棒次
+          existing: [
+            ...context.existing,
+            ...collected.map((play) => ({
+              number: play.batter.number ?? '',
+              result: play.result ?? '',
+            })),
+          ],
+        })
+
+        collected.push(...result.plays)
+        notes.push(...result.warnings)
+        if (result.transcript) transcripts.push(result.transcript)
+        progress.value = { done: progress.value.done + 1, total: chunks.length }
+      }
+
+      suggestions.value = collected
+      transcript.value = transcripts.join('\n')
+      warnings.value = notes
+      if (collected.length === 0 && notes.length === 0) {
+        error.value = '沒有聽出任何打席，請確認錄音裡有唸出背號與結果。'
+      }
+    } catch {
+      error.value = '檔案讀不出來，請確認是錄音檔（mp3、m4a、wav 都可以）。'
+    } finally {
+      status.value = 'idle'
+    }
+  }
+
   function clear(): void {
     suggestions.value = []
     transcript.value = ''
@@ -213,8 +365,11 @@ export function useVoicePlayInput() {
     warnings,
     supported,
     elapsedMs,
+    progress,
+    speechSeconds,
     start,
     stop,
+    parseFiles,
     clear,
   }
 }
