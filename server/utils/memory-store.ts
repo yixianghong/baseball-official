@@ -167,7 +167,6 @@ function createSeedStore(): MemoryStore {
       doublePlay: () => near(cycle(['SS', '2B'] as const)),
       fieldersChoice: () => near('SS'),
       sacrificeBunt: () => ({ x: 0.05, y: 0.08 }),
-      popout: () => near(cycle(['2B', 'SS'] as const)),
       flyout: () => near(cycle(['CF', 'LF', 'RF'] as const)),
       lineout: () => near(cycle(['SS', 'LF', '2B'] as const)),
       sacrificeFly: () => near('RF'),

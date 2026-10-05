@@ -32,6 +32,39 @@ function play(result: PlayResult, overrides: Partial<Play> = {}): Play {
 }
 
 describe('PLAY_RESULTS（結果屬性表）', () => {
+  /**
+   * ⚠️ **沒有一個標籤可以是另一個標籤的開頭或子字串。**
+   *
+   * 這張表裡有三種飛球（外野接殺、平飛、內野高飛）。`flyout` 原本叫
+   * 「飛球出局」，而「平飛球出局」裡面就含有它 —— 落點選單上三個排在一起時，
+   * 第一個讀起來像是涵蓋另外兩個的上層分類，沒有人知道差在哪（實際被問過）。
+   *
+   * 這一條同時擋住另一個更安靜的問題：`normalizePlayResult()` 是拿標籤與別名
+   * 去比對的，短的標籤被包含在長的裡面時，靠的是「長的優先」那條排序撐著。
+   */
+  /**
+   * ⚠️ `popout`（內野高飛出局）已經拿掉了。
+   *
+   * 它和 `flyout` 的統計屬性一模一樣（1 出局、算打數、非安打、0 壘打數），
+   * `battedTypeOf()` 也一樣回 `'fly'` —— 唯一的差別是「在內野還是外野接到的」，
+   * 而**那正是落點記下來的東西**。多一顆按鈕要人每次多做一個不影響任何數字的
+   * 判斷。舊資料由 `migrateLegacyGame()` 轉成 `flyout`。
+   */
+  it('popout 不再是合法的結果，而「內野高飛」還聽得懂', () => {
+    expect(playResultSchema.options).not.toContain('popout')
+    // 別名留在 flyout 上，語音與 AI 照樣對得到
+    expect(PLAY_RESULTS.flyout.aliases).toContain('內野高飛')
+  })
+
+  it('沒有一個標籤是另一個標籤的子字串', () => {
+    const labels = playResultSchema.options.map((result) => PLAY_RESULTS[result].label)
+
+    for (const label of labels) {
+      const contained = labels.filter((other) => other !== label && other.includes(label))
+      expect(contained, `「${label}」被「${contained.join('、')}」包含`).toEqual([])
+    }
+  })
+
   it('每一個結果都有一組完整的屬性', () => {
     for (const result of playResultSchema.options) {
       const meta = PLAY_RESULTS[result]

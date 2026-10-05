@@ -217,12 +217,23 @@ onMounted(() => root.value?.scrollIntoView?.({ block: 'nearest', behavior: 'smoo
         處理的人只在出局、失誤、野選時記錄。出局點一下就登錄，安打會再問一次是怎麼打出去的。
       </p>
 
+      <!--
+        ⚠️ **安打和出局要一眼分得出來。** 這張選單上每一顆按鈕的字數都差不多
+        （「一壘安打」「滾地球出局」），全部長一樣的時候，場邊的人是在讀字
+        而不是在認按鈕 —— 而他正一邊看球一邊點。安打用實心的強調色，
+        出局與失誤維持線框。
+      -->
       <div class="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
         <button
           v-for="result in primary"
           :key="result"
           type="button"
-          class="min-h-12 rounded-lg border border-border px-2 text-fluid-sm font-bold transition hover:bg-surface-muted disabled:opacity-40"
+          class="min-h-12 rounded-lg border px-2 text-fluid-sm font-bold transition disabled:opacity-40"
+          :class="
+            PLAY_RESULTS[result].hit
+              ? 'border-brand-600 bg-brand-600 text-white hover:bg-brand-700'
+              : 'border-border hover:bg-surface-muted'
+          "
           :disabled="tooManyOuts(result)"
           :title="tooManyOuts(result) ? `只剩 ${remainingOuts} 個出局` : undefined"
           @click="pick(result)"
@@ -246,7 +257,12 @@ onMounted(() => root.value?.scrollIntoView?.({ block: 'nearest', behavior: 'smoo
           v-for="result in more"
           :key="result"
           type="button"
-          class="min-h-11 rounded-lg border border-border px-2 text-xs transition hover:bg-surface-muted disabled:opacity-40"
+          class="min-h-11 rounded-lg border px-2 text-xs transition disabled:opacity-40"
+          :class="
+            PLAY_RESULTS[result].hit
+              ? 'border-brand-600 text-brand-700 hover:bg-brand-600/10 dark:text-brand-300'
+              : 'border-border hover:bg-surface-muted'
+          "
           :disabled="tooManyOuts(result)"
           :title="tooManyOuts(result) ? `只剩 ${remainingOuts} 個出局` : undefined"
           @click="pick(result)"

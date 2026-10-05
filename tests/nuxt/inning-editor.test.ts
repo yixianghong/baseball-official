@@ -343,7 +343,7 @@ describe('AdminInningEditor 的球場拖曳登錄', () => {
     await dropAt(component, 0, 0.86)
 
     expect(component.find('[aria-label="安打類型"]').exists()).toBe(false)
-    await resultButton(component, '飛球出局')?.trigger('click')
+    await resultButton(component, '高飛球出局')?.trigger('click')
     expect(component.emitted('save')?.[0]?.[2]).toMatchObject([{ result: 'flyout', batted: null }])
   })
 
@@ -368,7 +368,7 @@ describe('AdminInningEditor 的球場拖曳登錄', () => {
       .findAll('button')
       .find((button) => button.text() === '改選其他結果')
       ?.trigger('click')
-    await resultButton(component, '飛球出局')?.trigger('click')
+    await resultButton(component, '高飛球出局')?.trigger('click')
     expect(component.emitted('save')?.[0]?.[2]).toMatchObject([{ result: 'flyout' }])
   })
 
@@ -714,6 +714,57 @@ describe('AdminInningEditor 三出局後鎖住', () => {
     })
   })
 
+  /**
+   * ⚠️ **安打和出局要一眼分得出來。**
+   *
+   * 這張選單上每顆按鈕的字數都差不多（「一壘安打」「滾地球出局」），全部長
+   * 一樣的時候，場邊的人是在**讀字**而不是在認按鈕 —— 而他正一邊看球一邊點。
+   */
+  it('落點選單上的安打是實心的強調色，出局不是', async () => {
+    const component = await mount()
+    await openTop(component)
+    await component.find('input[placeholder="例如 24"]').setValue('13')
+    // 內野（游擊附近）
+    component.findComponent({ name: 'AdminFieldPicker' }).vm.$emit('drop', { x: -0.13, y: 0.42 })
+    await nextTick()
+
+    const sheet = component.find('[aria-label$="的打席結果"]')
+    const classesOf = (label: string) =>
+      sheet
+        .findAll('button')
+        .find((button) => button.text() === label)!
+        .classes()
+        .join(' ')
+
+    expect(classesOf('一壘安打')).toContain('bg-brand-600')
+    expect(classesOf('滾地球出局')).not.toContain('bg-brand-600')
+  })
+
+  /**
+   * ⚠️ 第一層留給常按的那幾種。內野原本把「雙殺打、野手選擇」排在前面，
+   * 而**一壘安打排到第 7** —— 內野安打每次都要先點「更多結果」。
+   */
+  it('內野的第一層就有安打與失誤上壘，雙殺打收在第二層', async () => {
+    const component = await mount()
+    await openTop(component)
+    await component.find('input[placeholder="例如 24"]').setValue('13')
+    component.findComponent({ name: 'AdminFieldPicker' }).vm.$emit('drop', { x: -0.13, y: 0.42 })
+    await nextTick()
+
+    const sheet = component.find('[aria-label$="的打席結果"]')
+    const labels = () => sheet.findAll('button').map((button) => button.text())
+
+    expect(labels()).toContain('一壘安打')
+    expect(labels()).toContain('失誤上壘')
+    expect(labels()).not.toContain('雙殺打')
+
+    await sheet
+      .findAll('button')
+      .find((button) => button.text() === '更多結果')!
+      .trigger('click')
+    expect(labels()).toContain('雙殺打')
+  })
+
   it('兩出局時雙殺打按不下去（出局數不能超過三）', async () => {
     const component = await mount({
       plays: [makePlay(1, 'top', '11', 'strikeout'), makePlay(1, 'top', '12', 'groundout')],
@@ -724,8 +775,16 @@ describe('AdminInningEditor 三出局後鎖住', () => {
     await nextTick()
 
     const sheet = component.find('[aria-label$="的打席結果"]')
+
+    // 雙殺打收在第二層（第一層留給常按的那幾種），先展開
+    await sheet
+      .findAll('button')
+      .find((button) => button.text() === '更多結果')!
+      .trigger('click')
+
     const dp = sheet.findAll('button').find((button) => button.text() === '雙殺打')
     const go = sheet.findAll('button').find((button) => button.text() === '滾地球出局')
+    // ⚠️ 第二層也要擋 —— 收起來不等於按不下去
     expect(dp?.attributes('disabled')).toBeDefined()
     expect(go?.attributes('disabled')).toBeUndefined()
   })

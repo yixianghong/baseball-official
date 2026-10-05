@@ -86,10 +86,73 @@ describe('suggestResults（放開之後選單怎麼排）', () => {
     expect(suggestResults(gap)[0]).toBe('single')
   })
 
+  /**
+   * ⚠️ **前六個就是選單的第一層**（`AdminLandingSheet` 切在那裡）。
+   *
+   * 內野原本把「雙殺打、野手選擇」排在第 2、3 格，而**一壘安打排到第 7** ——
+   * 內野安打每次都要先點「更多結果」。雙殺打一場頂多一兩次，內野安打比它
+   * 常見得多。這一組守著「常按的那幾種不會被擠出第一層」。
+   */
+  describe('第一層（前六個）留給常用的結果', () => {
+    const first = (point: Parameters<typeof suggestResults>[0]) => suggestResults(point).slice(0, 6)
+
+    it.each([
+      ['內野', FIELDER_SPOTS.SS],
+      ['外野守備員附近', FIELDER_SPOTS.CF],
+      ['外野空檔', { x: -0.25, y: 0.9 }],
+    ])('%s：安打與失誤上壘都在第一層', (_label, point) => {
+      const results = first(point)
+      expect(results).toContain('single')
+      expect(results).toContain('reachedOnError')
+    })
+
+    it.each([
+      ['內野', FIELDER_SPOTS.SS],
+      ['外野守備員附近', FIELDER_SPOTS.CF],
+      ['外野空檔', { x: -0.25, y: 0.9 }],
+    ])('%s：雙殺打、三殺打、野手選擇不佔第一層', (_label, point) => {
+      const results = first(point)
+      expect(results).not.toContain('doublePlay')
+      expect(results).not.toContain('triplePlay')
+      expect(results).not.toContain('fieldersChoice')
+    })
+
+    it('內野的第一層同時有滾地球出局與高飛球出局', () => {
+      const results = first(FIELDER_SPOTS.SS)
+      expect(results).toContain('groundout')
+      expect(results).toContain('flyout')
+    })
+
+    /**
+     * ⚠️ **安打要排在一起。**
+     *
+     * 分開的話，要在六顆長度差不多的按鈕之間找第二顆安打 —— 而場邊的人
+     * 正一邊看球一邊點。相鄰才掃得到。
+     */
+    it.each([
+      ['內野', FIELDER_SPOTS.SS],
+      ['外野守備員附近', FIELDER_SPOTS.CF],
+      ['外野空檔', { x: -0.25, y: 0.9 }],
+    ])('%s：第一層的安打是連在一起的', (_label, point) => {
+      const results = first(point)
+      const positions = results
+        .map((result, index) => ({ result, index }))
+        .filter((item) => PLAY_RESULTS[item.result].hit)
+        .map((item) => item.index)
+
+      expect(positions.length).toBeGreaterThan(1)
+      // 連續代表最後一個減第一個剛好等於「個數 - 1」
+      expect(positions.at(-1)! - positions[0]!).toBe(positions.length - 1)
+    })
+  })
+
   it('是排序而不是過濾：打向外野手但他沒接到時，安打還選得到', () => {
     // 過濾掉的話，規則猜錯時就只能取消重拖
     expect(suggestResults(FIELDER_SPOTS.CF)).toContain('single')
     expect(suggestResults(FIELDER_SPOTS.SS)).toContain('single')
+    // 少見的那幾種也還在，只是收到第二層
+    expect(suggestResults(FIELDER_SPOTS.SS)).toContain('doublePlay')
+    expect(suggestResults(FIELDER_SPOTS.SS)).toContain('fieldersChoice')
   })
 
   it('建議的結果都不是「沒有落點」的那幾種', () => {

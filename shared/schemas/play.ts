@@ -44,7 +44,6 @@ export const playResultSchema = z.enum([
   'groundout',
   'flyout',
   'lineout',
-  'popout',
   'foulout',
   'doublePlay',
   'triplePlay',
@@ -176,14 +175,29 @@ export const PLAY_RESULTS: Record<PlayResult, PlayResultMeta> = {
     aliases: ['滾地', '滾地球', '滾地出局', '滾地球出局', '內野滾地球'],
   },
   flyout: {
-    label: '飛球出局',
+    /*
+     * ⚠️ **「飛球出局」不能當標籤**，要寫「高飛球出局」。
+     *
+     * 「平飛球出局」與「界外飛球出局」裡面都含有「飛球出局」—— 落點選單上
+     * 三個排在一起時，第一個讀起來像是**涵蓋另外兩個的上層分類**，
+     * 沒有人知道差在哪（實際被問過）。改成「高飛」之後三個就是平行的三種。
+     * 規則本身由 `tests/unit/play.test.ts` 的「沒有一個標籤是另一個的子字串」守著。
+     *
+     * ## ⚠️ 這裡原本還有一個 `popout`（內野高飛出局），已經拿掉了
+     * 它和 `flyout` 的統計屬性**一模一樣**（1 出局、算打數、非安打、0 壘打數），
+     * `battedTypeOf()` 也一樣回 `'fly'` —— 唯一的差別是「在內野還是外野接到的」，
+     * 而**那正是落點記下來的東西**。多一顆按鈕要人每次多做一個不影響任何數字的
+     * 判斷，和「欄位越多越沒人填」是同一條。舊資料的 `popout` 在
+     * `migrateLegacyGame()` 轉成 `flyout`。
+     */
+    label: '高飛球出局',
     short: 'FO',
     outs: 1,
     plateAppearance: true,
     atBat: true,
     hit: false,
     bases: 0,
-    aliases: ['飛球', '高飛', '飛球出局', '高飛球出局', '接殺'],
+    aliases: ['飛球', '高飛', '飛球出局', '高飛球出局', '外野飛球', '接殺', '內野高飛', '小飛球'],
   },
   lineout: {
     label: '平飛球出局',
@@ -194,16 +208,6 @@ export const PLAY_RESULTS: Record<PlayResult, PlayResultMeta> = {
     hit: false,
     bases: 0,
     aliases: ['平飛', '平飛球', '平飛球出局'],
-  },
-  popout: {
-    label: '內野高飛出局',
-    short: 'PO',
-    outs: 1,
-    plateAppearance: true,
-    atBat: true,
-    hit: false,
-    bases: 0,
-    aliases: ['內野高飛', '小飛球'],
   },
   foulout: {
     label: '界外飛球出局',
@@ -459,7 +463,6 @@ export function battedTypeOf(play: Pick<Play, 'result' | 'batted'>): BattedType 
     case 'sacrificeBunt':
       return 'ground'
     case 'flyout':
-    case 'popout':
     case 'foulout':
     case 'sacrificeFly':
       return 'fly'

@@ -311,6 +311,16 @@ export type StartingPitcher = z.infer<typeof startingPitcherSchema>
  *
  * 只在 `startingPitcher` **完全不存在**時才轉：存過一次之後它就是 `null` 或
  * 一個人，使用者清空的先發投手不能被舊資料偷偷補回來。
+ *
+ * ## ⚠️ 拿掉列舉值之前，先確認那個欄位到底有沒有資料
+ * `popout` 從 `playResultSchema` 拿掉時，這裡一度加了一段「舊打席的 popout
+ * 轉成 flyout」—— 因為不轉的話 `gameSchema.parse` 會丟出例外，整場比賽載不出來。
+ * 但 `plays` 是後來才有的欄位，正式站上**從來沒有逐打席資料**
+ * （`scripts/seed-firestore.mjs` 也不寫 `plays`），所以那段是永遠不會執行的
+ * 程式碼，掛在每一次讀取比賽的路徑上。已經拿掉了。
+ *
+ * 同一件事換成 `pitchers` 就不成立 —— 那個欄位正式站上真的有資料，所以下面
+ * 那一段必須留著。**差別在資料，不在「要不要保險」。**
  */
 export function migrateLegacyGame(raw: Record<string, unknown>): Record<string, unknown> {
   if (raw.startingPitcher !== undefined || !Array.isArray(raw.pitchers)) return raw

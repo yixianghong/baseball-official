@@ -126,26 +126,62 @@ export function suggestResults(point: FieldPoint): PlayResult[] {
 
   const near = nearestFielder(point).distance <= NEAR_FIELDER
 
+  /*
+   * ⚠️ **前六個就是選單第一層**（`AdminLandingSheet` 切在那裡），所以那六格
+   * 要留給**真的常按的那幾種**：安打、滾地球出局、飛球出局、失誤上壘。
+   *
+   * 內野原本把「雙殺打、野手選擇」排在第 2、3 格，而**一壘安打排到第 7**
+   * —— 也就是內野安打每次都要先點「更多結果」。雙殺打一場頂多一兩次，
+   * 內野安打比它常見得多。少見但合法的結果照樣在第二層，一個都沒有過濾掉
+   * （這條規則沒有變）。
+   *
+   * 區域還是會影響順序 —— 球落在內野時「滾地球出局」排第一、落在外野空檔時
+   * 「安打」排第一 —— 但**不會把常用的那幾種擠出第一層**。
+   */
   if (zone === 'infield') {
     return [
       'groundout',
-      'doublePlay',
-      'fieldersChoice',
-      'popout',
+      // 安打排在一起：分開的話要在六顆按鈕之間找第二顆
+      'single',
+      'double',
+      'flyout',
       'lineout',
       'reachedOnError',
-      'single',
+      // ── 以下第二層 ──
+      'doublePlay',
+      'fieldersChoice',
       'sacrificeBunt',
+      'triple',
       'triplePlay',
     ]
   }
 
   if (near) {
-    return ['flyout', 'lineout', 'sacrificeFly', 'single', 'double', 'reachedOnError', 'triple']
+    return [
+      'flyout',
+      'single',
+      'double',
+      'lineout',
+      'reachedOnError',
+      'sacrificeFly',
+      // ── 以下第二層 ──
+      'triple',
+      'doublePlay',
+    ]
   }
 
   // 外野空檔：安打排前面
-  return ['single', 'double', 'triple', 'homerun', 'flyout', 'lineout', 'reachedOnError']
+  return [
+    'single',
+    'double',
+    'triple',
+    'flyout',
+    'lineout',
+    'reachedOnError',
+    // ── 以下第二層 ──
+    'homerun',
+    'sacrificeFly',
+  ]
 }
 
 /**
