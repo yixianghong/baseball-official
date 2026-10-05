@@ -196,6 +196,44 @@ const canReportAttendance = computed(() => !attendanceClosed.value)
 function applyAttendance(entries: AttendanceEntry[]) {
   attendance.value = entries
 }
+
+/**
+ * ⚠️ **整頁載入時，出席名單要在瀏覽器端再抓一次。**
+ *
+ * 這一頁的 HTML 走 CDN（`s-maxage=60, stale-while-revalidate=600`），所以
+ * **重新載入拿到的名單最舊可以到 11 分鐘前**。對計分板、打線這種「教練改完
+ * 才會變」的東西沒差，但出席是**隊員自己按、而且會立刻回頭確認**的東西 ——
+ * 他按完、重新整理、看到自己還在「未回覆」，就會再按一次。
+ *
+ * 線上實際發生過（2026-10-05）：一位隊員對同一場按了 **九次** `yes`，九次都
+ * 成功寫進資料庫，而他每次重新載入看到的都是 CDN 上那份舊的。
+ *
+ * 補抓打的是 `/api/games/[id]`，那一支**刻意沒有 CDN 快取**（理由見 CLAUDE.md
+ * 的「部署」章節：後台讀的是同一支端點）。
+ *
+ * ⚠️ 兩個刻意的邊界：
+ * - **只在還能回報的場次補**。鎖盤之後那份名單是歷史紀錄，舊的也沒關係。
+ * - **失敗就維持畫面上那一份**，不顯示錯誤 —— 它只是「可能舊」，不是壞的，
+ *   而這一頁其餘的內容都還好好的。
+ *
+ * ⚠️ 站內換頁進來時 `useApiFetch` 的 `revalidateOnEnter` 已經重抓過一次，
+ * 所以那條路會多發一個請求。**本來想用 `useNuxtApp().isHydrating` 擋掉** ——
+ * 它的語意剛好就是「這份 payload 來自 SSR 的 HTML」，但那是框架內部狀態，
+ * 一旦在測試裡 mock 掉，`@nuxt/test-utils` 自己就壞了（它也讀同一個 app）。
+ * 為了省一個小 JSON 請求，換來一條測不到、而且綁在框架內部的判斷，不划算。
+ */
+const { fetchGame } = useGameActions()
+
+onMounted(async () => {
+  if (!canReportAttendance.value || !game.value) return
+
+  try {
+    const fresh = await fetchGame(game.value.id)
+    attendance.value = [...fresh.attendance]
+  } catch {
+    // 補抓失敗不影響這一頁的其他內容，靜靜地沿用 SSR 那一份
+  }
+})
 const hasScoreboard = computed(() => (game.value?.scoreboard.innings.length ?? 0) > 0)
 
 useHead({
