@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { MAX_GAME_QUERY_LIMIT } from '#shared/schemas/game'
+import { isNotPlayed, MAX_GAME_QUERY_LIMIT } from '#shared/schemas/game'
 import { describeHands, POSITION_LABELS } from '#shared/schemas/player'
 import { formatGameDate } from '~/utils/format'
 
@@ -10,6 +10,12 @@ import { formatGameDate } from '~/utils/format'
  * 比賽的打線裡存著 `playerId`，所以只要把已結束的比賽抓回來、過濾出
  * 打線中有這個人的場次就好 —— 不需要為了這一小段資訊多開一張資料表
  * 或多一支端點。球隊一季的場次是數十場的量級，在前端過濾完全划算。
+ *
+ * ⚠️ **沒有打成的場次（延賽、取消）要排掉。** `scope: 'past'` 只看日期，
+ * 所以那些場次也在裡面 —— 而打線是**賽前**排的，延賽的那一場照樣有他的名字。
+ * 不排掉的話，「共 12 場」裡會混著幾場根本沒打的，而畫面上完全看不出來
+ * （那一列和真的出賽過的長得一模一樣）。和 `tallyRecord()` 只算已結束場次
+ * 是同一條原則。
  */
 const route = useRoute()
 const playerId = computed(() => String(route.params.id))
@@ -19,6 +25,7 @@ const { data: games } = await useGames({ scope: 'past', limit: MAX_GAME_QUERY_LI
 
 const appearances = computed(() =>
   (games.value ?? [])
+    .filter((game) => !isNotPlayed(game))
     .map((game) => ({
       game,
       entry: game.lineup.find((item) => item.playerId === playerId.value),
