@@ -138,12 +138,22 @@ export function suggestResults(point: FieldPoint): PlayResult[] {
    * 區域還是會影響順序 —— 球落在內野時「滾地球出局」排第一、落在外野空檔時
    * 「安打」排第一 —— 但**不會把常用的那幾種擠出第一層**。
    */
+  /*
+   * ⚠️ **一壘安打與二壘安打固定排前兩個，不管球落在哪裡。**
+   *
+   * 區域原本會決定第一顆（內野→滾地出局、外野→飛球出局），但那讓**同一顆
+   * 按鈕每次都在不同位置** —— 場邊的人一邊看球一邊點，他要的是「安打永遠在
+   * 左上角」這種肌肉記憶，而不是每次重讀六顆按鈕。安打也是最不能點錯的那一種：
+   * 點成出局，出局數、打擊率、完整性一起錯。
+   *
+   * 區域仍然決定**清單裡有什麼、以及其餘怎麼排**（內野滾地出局排第三、外野
+   * 飛球出局排第三、外野空檔多一顆三壘安打），只是不再動前兩格。
+   */
   if (zone === 'infield') {
     return [
-      'groundout',
-      // 安打排在一起：分開的話要在六顆按鈕之間找第二顆
       'single',
       'double',
+      'groundout',
       'flyout',
       'lineout',
       'reachedOnError',
@@ -158,9 +168,9 @@ export function suggestResults(point: FieldPoint): PlayResult[] {
 
   if (near) {
     return [
-      'flyout',
       'single',
       'double',
+      'flyout',
       'lineout',
       'reachedOnError',
       'sacrificeFly',
@@ -170,7 +180,7 @@ export function suggestResults(point: FieldPoint): PlayResult[] {
     ]
   }
 
-  // 外野空檔：安打排前面
+  // 外野空檔：三壘安打也上得了第一層
   return [
     'single',
     'double',

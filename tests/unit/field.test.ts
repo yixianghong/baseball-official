@@ -71,19 +71,32 @@ describe('suggestResults（放開之後選單怎麼排）', () => {
     expect(results).not.toContain('groundout')
   })
 
-  it('內野：滾地球出局排第一', () => {
-    expect(suggestResults(FIELDER_SPOTS.SS)[0]).toBe('groundout')
+  /**
+   * ⚠️ **一壘安打與二壘安打固定排前兩個，不管球落在哪裡。**
+   *
+   * 區域原本會決定第一顆（內野→滾地出局、外野→飛球出局），但那讓同一顆按鈕
+   * 每次都在不同位置 —— 場邊的人一邊看球一邊點，要的是「安打永遠在左上角」
+   * 這種肌肉記憶。安打也是最不能點錯的：點成出局，出局數、打擊率、完整性
+   * 一起錯。
+   */
+  it.each([
+    ['內野', FIELDER_SPOTS.SS],
+    ['外野守備員附近', FIELDER_SPOTS.CF],
+    ['外野空檔', { x: -0.25, y: 0.9 }],
+  ])('%s：前兩個都是一壘安打與二壘安打', (_label, point) => {
+    expect(suggestResults(point).slice(0, 2)).toEqual(['single', 'double'])
   })
 
-  it('外野、打向守備員：飛球出局排第一', () => {
-    expect(suggestResults(FIELDER_SPOTS.CF)[0]).toBe('flyout')
+  it('區域仍然決定其餘怎麼排：內野是滾地出局、外野是飛球出局', () => {
+    expect(suggestResults(FIELDER_SPOTS.SS)[2]).toBe('groundout')
+    expect(suggestResults(FIELDER_SPOTS.CF)[2]).toBe('flyout')
   })
 
-  it('外野空檔：安打排第一', () => {
+  it('外野空檔多一顆三壘安打', () => {
     // 左中外野的深遠空檔，離 LF 與 CF 都超過 NEAR_FIELDER
     const gap = { x: -0.25, y: 0.9 }
     expect(nearestFielder(gap).distance).toBeGreaterThan(0.15)
-    expect(suggestResults(gap)[0]).toBe('single')
+    expect(suggestResults(gap)[2]).toBe('triple')
   })
 
   /**
