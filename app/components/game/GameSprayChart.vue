@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { HomeAway } from '#shared/schemas/half-inning'
 import { battingSide } from '#shared/schemas/half-inning'
-import { PLAY_RESULTS, sortPlays, type Play } from '#shared/schemas/play'
+import { describePerson, PLAY_RESULTS, sortPlays, type Play } from '#shared/schemas/play'
 
 /**
  * 落點圖：這一場每一球打到哪裡。
@@ -18,6 +18,20 @@ import { PLAY_RESULTS, sortPlays, type Play } from '#shared/schemas/play'
  * 三振、保送本來就沒有落點；用按鈕或語音登錄的打席也沒有。圖下方會講出
  * 「N 個打席裡有 M 個有落點」—— 少了這一句，一張只登了五個落點的圖看起來
  * 就像那一場只打了五球。
+ *
+ * ## 可以只看某一位打者
+ * 守備站位要看的是「這個人往哪裡打」，而不是整隊疊在一起。
+ *
+ * ⚠️ **選單只列「這一場有落點的打者」**，不是整份名單 —— 列出來卻一個點都
+ * 沒有的人，使用者會以為圖壞了。只有一位時整個選單不顯示（只有一個選項的
+ * 選單是噪音）。
+ *
+ * ⚠️ **打者的身分要用 `playerId || 背號 || 姓名`。** 對手沒有名冊，
+ * 打席上只有背號；我隊才有 `playerId`。只比對 `playerId` 的話，整隊對手會被
+ * 併成同一個「空字串」打者，圖上看起來完全正常（點都在），但那是全隊的點。
+ *
+ * ⚠️ 一場比賽裡一位打者只有三四個打席，所以**這張圖是用來回顧的，不足以
+ * 排守備站位** —— 那需要跨場次累計（和「季賽累計」是同一件事，還沒做）。
  */
 const props = defineProps<{
   plays: Play[]
@@ -39,13 +53,61 @@ const bySide = computed(() => {
   return groups
 })
 
-const located = computed(() => bySide.value[side.value].filter((play) => play.location))
+/** 選了哪一位打者。空字串＝全部。 */
+const batter = ref('')
+
+// 換一隊就把打者的選擇清掉 —— 兩隊的背號是各自的，留著一定對不到人
+watch(side, () => (batter.value = ''))
+
+/**
+ * 這一場有落點的打者。
+ *
+ * 只列有落點的人：列出來卻一個點都沒有，使用者會以為圖壞了。
+ * 括號裡的數字是他有幾個落點，挑之前就知道值不值得看。
+ */
+const batters = computed(() => {
+  const seen = new Map<string, { key: string; label: string; count: number }>()
+  for (const play of bySide.value[side.value]) {
+    if (!play.location) continue
+    const key = batterKey(play)
+    if (!key) continue
+    const found = seen.get(key)
+    if (found) found.count += 1
+    else seen.set(key, { key, label: describePerson(play.batter), count: 1 })
+  }
+  return [...seen.values()]
+})
+
+const batterOptions = computed(() => [
+  { value: '', label: `全部打者（${batters.value.length} 位）` },
+  ...batters.value.map((item) => ({ value: item.key, label: `${item.label}（${item.count}）` })),
+])
+
+/** 目前這張圖涵蓋的打席（選了打者就只算他的）。 */
+const scoped = computed(() =>
+  batter.value
+    ? bySide.value[side.value].filter((play) => batterKey(play) === batter.value)
+    : bySide.value[side.value],
+)
+
+const located = computed(() => scoped.value.filter((play) => play.location))
 
 const hasAny = computed(
   () =>
     bySide.value.our.some((play) => play.location) ||
     bySide.value.opponent.some((play) => play.location),
 )
+
+/**
+ * 打者的身分。
+ *
+ * ⚠️ **不能只用 `playerId`** —— 對手沒有名冊，打席上只有背號，所有對手打者的
+ * `playerId` 都是空字串。只比對它的話整隊會被併成同一個「打者」，而圖上看起來
+ * 完全正常（點都在），只是那是全隊的點。
+ */
+function batterKey(play: Play): string {
+  return play.batter.playerId || play.batter.number || play.batter.name
+}
 
 const tabs = computed(() => [
   { key: 'our' as const, label: props.ourName },
@@ -79,6 +141,19 @@ const tabs = computed(() => [
     </div>
 
     <!--
+      ⚠️ 只有一位打者時整個不顯示 —— 只有一個選項的選單是噪音。
+      用下拉而不是一排膠囊：一隊十幾個人，膠囊在手機上會排成三行，
+      把圖整個擠到螢幕外，而圖才是這一區的重點。
+    -->
+    <UiBaseSelect
+      v-if="batters.length > 1"
+      v-model="batter"
+      label="看哪一位打者"
+      class="max-w-xs"
+      :options="batterOptions"
+    />
+
+    <!--
       寬度綁著：落點圖放大之後點與點的距離不變、只是更稀疏，並不會更好讀。
       這個尺寸在手機上是滿版，在桌機上和出賽名單圖卡差不多寬。
     -->
@@ -100,7 +175,12 @@ const tabs = computed(() => [
     </ul>
 
     <p class="text-xs text-content-muted">
-      {{ bySide[side].length }} 個打席裡有 {{ located.length }} 個記了落點（三振、保送沒有落點）。
+      {{ scoped.length }} 個打席裡有 {{ located.length }} 個記了落點（三振、保送沒有落點）。
+      <!--
+        ⚠️ 一場比賽一位打者只有三四個打席，而排守備站位要看的是「他平常往哪裡打」。
+        不講的話，三個點的圖會被當成那個人的打擊傾向。
+      -->
+      <template v-if="batter">單場的點數本來就少，排守備站位請參考多場。</template>
     </p>
   </section>
 </template>
