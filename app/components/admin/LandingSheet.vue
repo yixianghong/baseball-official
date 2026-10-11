@@ -144,6 +144,12 @@ function pick(result: PlayResult): void {
 
 const root = ref<HTMLElement | null>(null)
 onMounted(() => root.value?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }))
+
+/**
+ * 按下去的那一刻要看得到 —— 這張選單上的按鈕是整個登錄流程的最後一下，
+ * 沒有回饋的話「按到了」和「沒按到」長得一模一樣（球場邊實際回報過）。
+ */
+const press = usePressFeedback()
 </script>
 
 <template>
@@ -194,11 +200,13 @@ onMounted(() => root.value?.scrollIntoView?.({ block: 'nearest', behavior: 'smoo
           :key="type"
           type="button"
           class="min-h-12 rounded-lg border text-fluid-sm font-bold transition"
-          :class="
+          :class="[
             batted === type
               ? 'border-brand-600 bg-brand-600 text-white'
-              : 'border-border hover:bg-surface-muted'
-          "
+              : 'border-border hover:bg-surface-muted',
+            { 'is-pressed': press.is(type) },
+          ]"
+          v-on="press.on(type)"
           @click="confirm(pendingHit, type)"
         >
           {{ BATTED_LABELS[type] }}
@@ -229,13 +237,15 @@ onMounted(() => root.value?.scrollIntoView?.({ block: 'nearest', behavior: 'smoo
           :key="result"
           type="button"
           class="min-h-12 rounded-lg border px-2 text-fluid-sm font-bold transition disabled:opacity-40"
-          :class="
+          :class="[
             PLAY_RESULTS[result].hit
               ? 'border-brand-600 bg-brand-600 text-white hover:bg-brand-700'
-              : 'border-border hover:bg-surface-muted'
-          "
+              : 'border-border hover:bg-surface-muted',
+            { 'is-pressed': press.is(result) },
+          ]"
           :disabled="tooManyOuts(result)"
           :title="tooManyOuts(result) ? `只剩 ${remainingOuts} 個出局` : undefined"
+          v-on="press.on(result)"
           @click="pick(result)"
         >
           {{ PLAY_RESULTS[result].label }}
@@ -258,13 +268,15 @@ onMounted(() => root.value?.scrollIntoView?.({ block: 'nearest', behavior: 'smoo
           :key="result"
           type="button"
           class="min-h-11 rounded-lg border px-2 text-xs transition disabled:opacity-40"
-          :class="
+          :class="[
             PLAY_RESULTS[result].hit
               ? 'border-brand-600 text-brand-700 hover:bg-brand-600/10 dark:text-brand-300'
-              : 'border-border hover:bg-surface-muted'
-          "
+              : 'border-border hover:bg-surface-muted',
+            { 'is-pressed': press.is(result) },
+          ]"
           :disabled="tooManyOuts(result)"
           :title="tooManyOuts(result) ? `只剩 ${remainingOuts} 個出局` : undefined"
+          v-on="press.on(result)"
           @click="pick(result)"
         >
           {{ PLAY_RESULTS[result].label }}

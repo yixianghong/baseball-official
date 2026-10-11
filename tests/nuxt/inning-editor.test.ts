@@ -239,7 +239,7 @@ describe('AdminInningEditor', () => {
 
   it('對手半局還沒填背號時不讓人登錄', async () => {
     const component = await mount()
-    expect(component.text()).toContain('請先填對手打者的背號')
+    expect(component.text()).toContain('請先填上面的「對手打者背號」')
     expect(resultButton(component, '三振')?.attributes('disabled')).toBeDefined()
   })
 
@@ -787,6 +787,136 @@ describe('AdminInningEditor 三出局後鎖住', () => {
     // ⚠️ 第二層也要擋 —— 收起來不等於按不下去
     expect(dp?.attributes('disabled')).toBeDefined()
     expect(go?.attributes('disabled')).toBeUndefined()
+  })
+})
+
+/**
+ * 按下去的回饋。
+ *
+ * 球場邊實測的回報是「按了有時候沒反應，不確定是自己沒按到，還是按了在等
+ * 伺服器」。登錄是樂觀更新（`usePlayLog` 先寫畫面才送伺服器），所以**從來
+ * 沒有在等 response** —— 缺的是兩件事：手指壓著的那一刻沒有任何變化，
+ * 以及**確認出現在看不到的地方**（新增的那一筆接在打席列表最後面，而列表在
+ * 球場上面 —— 實測 390×844 時它在結果鍵上方 784px、整個在畫面外）。
+ */
+describe('AdminInningEditor 的登錄回饋', () => {
+  async function openTop(component: Awaited<ReturnType<typeof mount>>) {
+    await component.findAll('[aria-label="半局"] [role="tab"]')[0]?.trigger('click')
+  }
+
+  async function openBottom(component: Awaited<ReturnType<typeof mount>>) {
+    await component.findAll('[aria-label="半局"] [role="tab"]')[1]?.trigger('click')
+  }
+
+  function noLandingButton(component: Awaited<ReturnType<typeof mount>>, label: string) {
+    return component
+      .find('[aria-label="沒有落點的結果"]')
+      .findAll('button')
+      .find((button) => button.text() === label)!
+  }
+
+  /** 球場與結果鍵之間那一行。手指在那裡，確認就要出現在那裡。 */
+  function status(component: Awaited<ReturnType<typeof mount>>) {
+    return component.findAll('[role="status"]')[0]!
+  }
+
+  it('登錄之後就在球場旁邊說出剛剛登錄了什麼', async () => {
+    const component = await mount()
+    await openBottom(component)
+    await noLandingButton(component, '保送').trigger('click')
+
+    // 提示寫的是結果的全名（按鈕上是放得下的簡稱「保送」）
+    expect(status(component).text()).toContain('已登錄 #7 張志豪 四壞球保送')
+    expect(status(component).text()).toContain('0 出局')
+  })
+
+  /**
+   * ⚠️ 走 `describePlay()`，和打席列表、半局賽況同一支 —— 跑者出局記在當時
+   * 打擊中的人身上，寫成「#7 張志豪 跑者出局」會被讀成 7 號出局了。
+   */
+  it('跑者出局不會寫成「#7 跑者出局」', async () => {
+    const component = await mount()
+    await openBottom(component)
+    await noLandingButton(component, '跑者出局').trigger('click')
+
+    expect(status(component).text()).toContain('已登錄 跑者出局')
+    expect(status(component).text()).not.toContain('#7 張志豪 跑者出局')
+  })
+
+  /**
+   * ⚠️ 第三個出局會自動跳到下一個半局 —— 畫面整個換掉，而那正是最需要
+   * 一句話解釋「剛剛發生了什麼」的時候，所以換半局**不能**把它清掉。
+   */
+  it('自動跳半局時說得出是為什麼', async () => {
+    const component = await mount({
+      plays: [makePlay(1, 'top', '11', 'strikeout'), makePlay(1, 'top', '12', 'groundout')],
+    })
+    await openTop(component)
+    await component.find('input[placeholder="例如 24"]').setValue('13')
+    await noLandingButton(component, '三振').trigger('click')
+    await nextTick()
+    await nextTick()
+
+    expect(component.find('h3').text()).toContain('第 1 局下')
+    expect(component.text()).toContain('已跳到下一個半局')
+  })
+
+  it('沒登錄過任何東西時那一行是空的（但高度留著，按鈕不會跳）', async () => {
+    const component = await mount()
+    await openBottom(component)
+
+    expect(status(component).text()).toBe('')
+    expect(status(component).classes()).toContain('min-h-5')
+  })
+
+  /**
+   * ⚠️ **不能用 CSS 的 `:active`** —— iOS Safari 對 `button` 不一定套用它
+   * （理由見 `usePressFeedback`），而登錄裝置正是 iPhone 的主畫面 PWA。
+   * 用 pointer 事件自己記，所以這裡測得到。
+   */
+  it('手指壓著的那一刻按鈕就有反應', async () => {
+    const component = await mount()
+    await openBottom(component)
+    const button = noLandingButton(component, '三振')
+
+    expect(button.classes()).not.toContain('is-pressed')
+    await button.trigger('pointerdown')
+    expect(button.classes()).toContain('is-pressed')
+    await button.trigger('pointerup')
+    expect(button.classes()).not.toContain('is-pressed')
+  })
+
+  /**
+   * ⚠️ 手指按在按鈕上往下捲時，瀏覽器會接管手勢並送出 `pointercancel`
+   * （`pointerup` 不會來）—— 少了這一條，那顆按鈕會一直停在「按下去」的樣子。
+   */
+  it('捲動打斷（pointercancel）也會回到原狀', async () => {
+    const component = await mount()
+    await openBottom(component)
+    const button = noLandingButton(component, '三振')
+
+    await button.trigger('pointerdown')
+    expect(button.classes()).toContain('is-pressed')
+    await button.trigger('pointercancel')
+    expect(button.classes()).not.toContain('is-pressed')
+  })
+
+  it('落點選單上的結果鍵也有同樣的回饋', async () => {
+    const component = await mount()
+    await openTop(component)
+    await component.find('input[placeholder="例如 24"]').setValue('13')
+    component.findComponent({ name: 'AdminFieldPicker' }).vm.$emit('drop', { x: -0.13, y: 0.42 })
+    await nextTick()
+
+    const button = component
+      .find('[aria-label$="的打席結果"]')
+      .findAll('button')
+      .find((item) => item.text() === '一壘安打')!
+
+    await button.trigger('pointerdown')
+    expect(button.classes()).toContain('is-pressed')
+    await button.trigger('pointerleave')
+    expect(button.classes()).not.toContain('is-pressed')
   })
 })
 

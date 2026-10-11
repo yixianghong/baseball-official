@@ -36,6 +36,7 @@ import {
   defaultRuns,
   describeBatter,
   describePerson,
+  describePlay,
   halfInningOuts,
   halfInningRuns,
   halfInningStatus,
@@ -535,6 +536,40 @@ const NO_LANDING_LABELS: Record<(typeof NO_LANDING_RESULTS)[number], string> = {
   other: '其他',
 }
 
+/**
+ * 按下去的那一刻要看得到（本壘旁那一排沒有落點的結果）。
+ * 落點選單上的結果鍵由 `AdminLandingSheet` 自己處理。
+ */
+const press = usePressFeedback()
+
+/**
+ * 「剛剛登錄了什麼」。
+ *
+ * ## 為什麼需要它
+ * 球場邊實測的回報是「按了有時候沒反應，不確定是自己沒按到，還是按了在等
+ * 伺服器」。登錄是樂觀更新（`usePlayLog` 先寫畫面與 IndexedDB 才送伺服器），
+ * 所以**從來沒有在等 response** —— 真正的問題是**確認在看不到的地方**：
+ * 新增的那一筆接在打席列表的最後面，而列表在球場**上面**。實測
+ * 390×844、把結果鍵捲到手指舒服的位置時，新增的那一列在**按鈕上方 784px，
+ * 整個在畫面外** —— 手指在這裡，而唯一的變化發生在螢幕外。
+ *
+ * 所以這一行就放在球場與結果鍵之間 —— 人在看哪裡，確認就出現在哪裡。
+ *
+ * ⚠️ **第三個出局之後不要清掉**：那一刻會自動跳到下一個半局，畫面整個換掉，
+ * 而那正是最需要一句話解釋「剛剛發生了什麼」的時候。
+ */
+const justAdded = ref('')
+let justAddedTimer: ReturnType<typeof setTimeout> | undefined
+
+function announceAdded(play: Play, outs: number): void {
+  const advanced = outs >= 3 ? '，已跳到下一個半局' : ''
+  justAdded.value = `已登錄 ${describePlay(play)} · ${outs} 出局${advanced}`
+  clearTimeout(justAddedTimer)
+  justAddedTimer = setTimeout(() => (justAdded.value = ''), 4000)
+}
+
+onBeforeUnmount(() => clearTimeout(justAddedTimer))
+
 function addPlay(result: PlayResult, landing: Landing = NO_LANDING): void {
   if (!canAdd.value || exceedsOuts(result)) return
 
@@ -557,6 +592,9 @@ function addPlay(result: PlayResult, landing: Landing = NO_LANDING): void {
   ]
   commit(next)
 
+  const outs = halfInningOuts(next)
+  announceAdded(next[next.length - 1]!, outs)
+
   // 登完一筆就重置：打者回到「自動帶下一棒」，得分回到 0。
   // 不重置的話，下一個打席會默默沿用上一個的得分。
   chosenSlot.value = null
@@ -569,7 +607,7 @@ function addPlay(result: PlayResult, landing: Landing = NO_LANDING): void {
   focusNumberField()
 
   // 第三個出局登錄完，直接跳到下一個半局 —— 下一筆一定是在那裡
-  if (halfInningOuts(next) >= 3) void nextTick(goToNextHalf)
+  if (outs >= 3) void nextTick(goToNextHalf)
 }
 
 // ── 在球場上拖曳 ────────────────────────────────────────────────
@@ -1189,13 +1227,31 @@ function suggestionText(item: Suggestion): string {
           </p>
 
           <!--
+            ── 剛剛登錄了什麼 ──
+            ⚠️ **位置就是重點**：新增的那一筆接在打席列表的最後面，而列表在
+            球場**上面** —— 實測 390×844 時它在這排按鈕上方 784px、整個在
+            畫面外。手指在這裡，而唯一的變化發生在螢幕外，看起來就是
+            「按了沒反應」。
+
+            高度固定住（`min-h-5`），不然每登錄一筆底下的按鈕就跳一次，
+            而那正是手指要再按下去的地方。
+          -->
+          <p
+            class="mt-2 min-h-5 text-fluid-sm font-bold text-brand-700 dark:text-brand-300"
+            role="status"
+            aria-live="polite"
+          >
+            <template v-if="justAdded">✓ {{ justAdded }}</template>
+          </p>
+
+          <!--
             沒有落點的結果放在本壘旁邊，點一下就好，不用拖。
             三振與保送佔一場打席的三成以上，而「投手前滾地」是真的會拖到
             投手身上的情況 —— 兩者混在同一個選單裡很容易點錯。
           -->
           <div
             v-if="!complete"
-            class="mt-2 grid grid-cols-5 gap-1.5"
+            class="grid grid-cols-5 gap-1.5"
             role="group"
             aria-label="沒有落點的結果"
           >
@@ -1204,12 +1260,31 @@ function suggestionText(item: Suggestion): string {
               :key="result"
               type="button"
               class="min-h-11 rounded-lg border border-border px-0.5 text-xs font-bold whitespace-nowrap transition hover:bg-surface-muted disabled:opacity-40"
+              :class="{ 'is-pressed': press.is(result) }"
               :disabled="!canAdd || exceedsOuts(result)"
+              v-on="press.on(result)"
               @click="addPlay(result)"
             >
               {{ NO_LANDING_LABELS[result] }}
             </button>
           </div>
+
+          <!--
+            ⚠️ **「為什麼按不下去」要寫在按不下去的東西旁邊。** 這兩句原本在
+            整個區塊的最底下（語音卡片之後），而手機上那裡離球場好幾個畫面遠 ——
+            按鈕只是淡了一點（`disabled:opacity-40`，陽光下幾乎看不出來），
+            原因卻在捲不到的地方，看起來就是「這顆按鈕壞了」。
+          -->
+          <p v-if="full" class="mt-2 text-fluid-sm text-warning">
+            這個半局已經有 {{ MAX_PLAYS_PER_HALF_INNING }} 個打席了，再多八成是登錯半局。
+          </p>
+          <p v-else-if="!canAdd && !complete" class="mt-2 text-fluid-sm text-warning">
+            {{
+              ourAtBat
+                ? '先到「打線」分頁排好先發陣容，這裡才輪得到人。'
+                : '請先填上面的「對手打者背號」，結果鍵才按得下去。'
+            }}
+          </p>
         </div>
 
         <AdminLandingSheet
@@ -1361,15 +1436,6 @@ function suggestionText(item: Suggestion): string {
             </div>
           </div>
         </section>
-
-        <p v-if="full" class="text-fluid-sm text-warning">
-          這個半局已經有 {{ MAX_PLAYS_PER_HALF_INNING }} 個打席了，再多八成是登錯半局。
-        </p>
-        <p v-else-if="!canAdd && !complete" class="text-fluid-sm text-content-muted">
-          {{
-            ourAtBat ? '先到「打線」分頁排好先發陣容，這裡才輪得到人。' : '請先填對手打者的背號。'
-          }}
-        </p>
       </div>
     </section>
   </div>

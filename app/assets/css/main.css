@@ -581,6 +581,42 @@
   }
 
   /**
+   * 按下去的那一刻。
+   *
+   * 逐局紀錄的結果按鈕在球場邊按下去如果毫無變化，「按到了」和「沒按到」
+   * 長得一模一樣（實際回報過）。縮一點＋暗一點，手指還壓著就看得到。
+   *
+   * ⚠️ **不用 `:active`** —— iOS Safari 對 `button` 不一定套用它，
+   * 理由與替代做法寫在 `app/composables/usePressFeedback.ts`。
+   * 所以這個 class 只負責長相，「按住了沒」由元件用 pointer 事件決定。
+   */
+  .is-pressed {
+    transform: scale(0.94);
+    filter: brightness(0.88);
+    /*
+     * ⚠️ **按下去必須是瞬間的。** 這些按鈕本來就帶 Tailwind 的 `transition`
+     * （150ms），不覆寫的話縮放是「慢慢縮」—— 實測按下去的下一幀只縮到
+     * `scale(0.998)`、第四幀 `0.97`，而一次短按大約只有這麼長，
+     * 也就是畫面上**幾乎什麼都沒發生**，正是這個 class 要解決的問題。
+     * 放開時 class 被移除，duration 回到 150ms，所以是「瞬間壓下、緩緩彈回」。
+     *
+     * ⚠️ **`!important` 在這裡是必要的，不是偷懶。** Tailwind v4 的
+     * `.transition`（`transition-duration: 150ms`）在 `@layer utilities`，
+     * 而這裡是 `@layer components` —— **後面的 layer 一律贏，和選擇器的
+     * 權重無關**。唯一的例外就是 `!important`：帶 `!important` 的宣告會
+     * 把 layer 的順序反過來比。拿掉它規則看起來還在，只是安靜地沒有效果。
+     */
+    transition-duration: 0s !important;
+  }
+
+  /* 縮放是動態效果，`filter` 不是 —— 關掉動態時只留亮度的變化 */
+  @media (prefers-reduced-motion: reduce) {
+    .is-pressed {
+      transform: none;
+    }
+  }
+
+  /**
    * 內容容器。行動裝置留 1rem 邊距，大螢幕置中並限制最大寬度。
    * 用 `@utility` 之外的方式定義是為了讓它能被 `@apply` 使用。
    */

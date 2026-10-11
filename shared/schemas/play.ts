@@ -533,6 +533,22 @@ export function describePerson(person: { name: string; number: string }): string
 }
 
 /**
+ * 一筆打席，一句話。「#24 張志豪 三壘安打（得 1 分）」
+ *
+ * ⚠️ **跑者出局不能寫成「#9 跑者出局」** —— 它記在當時打擊中的人身上
+ * （他還沒打完），寫成那樣會被讀成 9 號出局了。所以不是打席的結果只寫結果。
+ *
+ * 半局賽況與後台「剛剛登錄了什麼」的提示都走這一支：兩邊各寫一次的話，
+ * 遲早有一處把跑者出局寫成打者出局，而那是**看起來完全正常**的錯字。
+ */
+export function describePlay(play: Play): string {
+  const label = PLAY_RESULTS[play.result].label
+  const runs = play.runs > 0 ? `（得 ${play.runs} 分）` : ''
+  if (!PLAY_RESULTS[play.result].plateAppearance) return `${label}${runs}`
+  return `${describeBatter(play)} ${label}${runs}`
+}
+
+/**
  * 這半局的賽況，一句話。
  *
  * 「#24 三壘安打、#56 三振、#18 雙殺打（得 1 分）」—— 接在前台每一段
@@ -540,17 +556,7 @@ export function describePerson(person: { name: string; number: string }): string
  */
 export function describeHalfInning(plays: Play[]): string {
   if (plays.length === 0) return ''
-
-  const parts = plays.map((play) => {
-    const label = PLAY_RESULTS[play.result].label
-    const runs = play.runs > 0 ? `（得 ${play.runs} 分）` : ''
-    // 跑者出局記在「當時打擊中的人」身上，但出局的不是他 ——
-    // 寫成「#9 跑者出局」會被讀成 9 號出局了
-    if (!PLAY_RESULTS[play.result].plateAppearance) return `${label}${runs}`
-    return `${describeBatter(play)} ${label}${runs}`
-  })
-
-  return parts.join('、')
+  return plays.map(describePlay).join('、')
 }
 
 /** 把一場的打席依比賽順序排好（同一個半局內維持登錄順序）。 */
