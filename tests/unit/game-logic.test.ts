@@ -9,6 +9,7 @@ import {
   narrativeOf,
   orderedNarratives,
   deriveBench,
+  playerAppearance,
   deriveResult,
   emptyScoreboard,
   gameMapUrl,
@@ -814,6 +815,140 @@ describe('deriveBench', () => {
     })
 
     expect(bench[0]).toMatchObject({ number: '99', name: '王小明' })
+  })
+
+  /**
+   * ⚠️ 「有沒有出賽」和「是不是候補」是同一條規則的正反兩面，所以它們**必須**
+   * 在同一場比賽上互補。各寫各的話，遲早出現一個人同時出現在候補名單和
+   * 出賽紀錄上（或兩邊都沒有），而兩個畫面在不同頁面上，沒有人會同時看到。
+   */
+  it('⚠️ 在候補名單上 ⟺ playerAppearance 回 null（同一場比賽）', () => {
+    const roster = [
+      { id: 'p1', name: '先發游擊' },
+      { id: 'p2', name: '先發投手' },
+      { id: 'p3', name: '中繼投手' },
+      { id: 'p4', name: '代打' },
+      { id: 'p5', name: '坐板凳' },
+    ]
+    const game = {
+      attendance: roster.map((player) => attend(player.id, player.name)),
+      lineup: [bat(1, 'p1', '先發游擊')],
+      startingPitcher: starter('p2', '先發投手'),
+      plays: [pitched('p3', '中繼投手'), batted('p4', '代打')],
+    }
+
+    const benched = new Set(deriveBench(game).map((entry) => entry.playerId))
+
+    for (const player of roster) {
+      expect([player.name, benched.has(player.id)]).toEqual([
+        player.name,
+        playerAppearance(game, player) === null,
+      ])
+    }
+    // 真的有人在板凳上，否則這條會因為「兩邊都是空的」而通過
+    expect([...benched]).toEqual(['p5'])
+  })
+})
+
+/**
+ * 球員頁的「出賽紀錄」用它決定「這場有沒有他」。
+ *
+ * ⚠️ 原本那一頁只比對打線，於是 **DH 制下的先發投手整場都不會出現** ——
+ * 他投了七局，個人頁卻說那天沒有他的紀錄。
+ */
+describe('playerAppearance', () => {
+  const me = { id: 'p1', name: '張宏宇' }
+  const empty = { lineup: [], startingPitcher: null, plays: [] }
+  const bat = (order: number, playerId: string, name: string, position = 'SS' as const) => ({
+    order,
+    playerId,
+    name,
+    number: '',
+    position,
+  })
+  const pitched = (playerId: string, name: string) =>
+    playSchema.parse({
+      inning: 5,
+      half: 'top',
+      result: 'groundout',
+      batter: { number: '11' },
+      pitcher: { playerId, name },
+    })
+  const batted = (playerId: string, name: string) =>
+    playSchema.parse({ inning: 5, half: 'bottom', result: 'single', batter: { playerId, name } })
+
+  it('在打線上就帶出棒次與守位', () => {
+    expect(playerAppearance({ ...empty, lineup: [bat(3, 'p1', '張宏宇')] }, me)).toMatchObject({
+      order: 3,
+      position: 'SS',
+      startingPitcher: false,
+      relieved: false,
+      pinchHit: false,
+    })
+  })
+
+  it('⚠️ DH 制的先發投手不在打線裡，但他出賽了', () => {
+    const appearance = playerAppearance(
+      { ...empty, startingPitcher: { playerId: 'p1', name: '張宏宇', number: '28' } },
+      me,
+    )
+
+    expect(appearance).toMatchObject({ order: null, position: null, startingPitcher: true })
+  })
+
+  it('中繼、終結是比賽中才登錄到打席上的，賽前的打線裡沒有他', () => {
+    expect(playerAppearance({ ...empty, plays: [pitched('p1', '張宏宇')] }, me)).toMatchObject({
+      relieved: true,
+      order: null,
+    })
+  })
+
+  it('代打同理', () => {
+    expect(playerAppearance({ ...empty, plays: [batted('p1', '張宏宇')] }, me)).toMatchObject({
+      pinchHit: true,
+    })
+  })
+
+  /** 守二壘、後來上來投球的人，兩件事都發生過 —— 只記其中一件就漏了一半。 */
+  it('先發野手後援登板時，守位與「後援」都要留著', () => {
+    const appearance = playerAppearance(
+      { ...empty, lineup: [bat(5, 'p1', '張宏宇', '2B')], plays: [pitched('p1', '張宏宇')] },
+      me,
+    )
+
+    expect(appearance).toMatchObject({ position: '2B', relieved: true })
+  })
+
+  /** 沒有 DH 的先發投手本來就排在打線上，他不是「後援登板」。 */
+  it('打線上掛著投手的人投球不算後援', () => {
+    const appearance = playerAppearance(
+      { ...empty, lineup: [bat(9, 'p1', '張宏宇', 'P')], plays: [pitched('p1', '張宏宇')] },
+      me,
+    )
+
+    expect(appearance).toMatchObject({ relieved: false })
+  })
+
+  it('沒上場就是 null', () => {
+    expect(playerAppearance({ ...empty, lineup: [bat(1, 'p2', '別人')] }, me)).toBeNull()
+  })
+
+  /**
+   * 打線允許只有姓名（臨時支援的球友、後台直接手打的名字）——
+   * 少了姓名比對，那些場次會變成「沒出賽」。
+   */
+  it('打線上只有姓名、沒有 playerId 時也認得出來', () => {
+    expect(playerAppearance({ ...empty, lineup: [bat(1, '', '張宏宇')] }, me)).toMatchObject({
+      order: 1,
+    })
+  })
+
+  /**
+   * ⚠️ 反過來，**有 `playerId` 時就不能再看姓名** —— 隊上有兩個同名的人時，
+   * 一個人的出賽紀錄會混進另一個人的場次，而畫面上完全看不出來。
+   */
+  it('⚠️ playerId 不同就不是同一個人，即使同名', () => {
+    expect(playerAppearance({ ...empty, lineup: [bat(1, 'p9', '張宏宇')] }, me)).toBeNull()
   })
 })
 

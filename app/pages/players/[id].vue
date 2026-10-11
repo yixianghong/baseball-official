@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { isNotPlayed, MAX_GAME_QUERY_LIMIT } from '#shared/schemas/game'
+import {
+  isNotPlayed,
+  MAX_GAME_QUERY_LIMIT,
+  playerAppearance,
+  type PlayerAppearance,
+} from '#shared/schemas/game'
 import { describeHands, POSITION_LABELS } from '#shared/schemas/player'
 import { formatGameDate } from '~/utils/format'
 
@@ -7,9 +12,14 @@ import { formatGameDate } from '~/utils/format'
  * 球員個人頁。
  *
  * ## 出賽紀錄怎麼來的
- * 比賽的打線裡存著 `playerId`，所以只要把已結束的比賽抓回來、過濾出
- * 打線中有這個人的場次就好 —— 不需要為了這一小段資訊多開一張資料表
- * 或多一支端點。球隊一季的場次是數十場的量級，在前端過濾完全划算。
+ * 把已結束的比賽抓回來，逐場問 `playerAppearance()`「這個人上場了沒有」——
+ * 不需要為了這一小段資訊多開一張資料表或多一支端點。球隊一季的場次是數十場
+ * 的量級，在前端過濾完全划算。
+ *
+ * ⚠️ **判斷不能只看打線。** 原本是 `lineup.find(...)`，於是 **DH 制下的
+ * 先發投手整場都不會出現** —— 他投了七局，個人頁卻說那天沒有他的紀錄
+ * （中繼、終結與代打同理：他們是比賽中才登錄到打席上的）。那條規則住在
+ * `playerAppearance()`，和候補名單 `deriveBench()` 是同一條的正反兩面。
  *
  * ⚠️ **沒有打成的場次（延賽、取消）要排掉。** `scope: 'past'` 只看日期，
  * 所以那些場次也在裡面 —— 而打線是**賽前**排的，延賽的那一場照樣有他的名字。
@@ -23,15 +33,36 @@ const playerId = computed(() => String(route.params.id))
 const { data: player, error } = await usePlayer(playerId)
 const { data: games } = await useGames({ scope: 'past', limit: MAX_GAME_QUERY_LIMIT })
 
-const appearances = computed(() =>
-  (games.value ?? [])
+const appearances = computed(() => {
+  const self = player.value
+  if (!self) return []
+
+  return (games.value ?? [])
     .filter((game) => !isNotPlayed(game))
     .map((game) => ({
       game,
-      entry: game.lineup.find((item) => item.playerId === playerId.value),
+      appearance: playerAppearance(game, { id: self.id, name: self.name }),
     }))
-    .filter((item) => item.entry),
-)
+    .filter((item): item is { game: (typeof item)['game']; appearance: PlayerAppearance } =>
+      Boolean(item.appearance),
+    )
+})
+
+/**
+ * 「守備」欄的字。
+ *
+ * 打線上有守位就寫守位；DH 制的先發投手沒有打擊順位，但他的守位就是投手。
+ * **後援與代打接在後面而不是取代它** —— 一個守二壘、後來上來投球的人，
+ * 兩件事都發生過，只寫其中一件都是漏掉一半。
+ */
+function roleText(appearance: PlayerAppearance): string {
+  const parts: string[] = []
+  if (appearance.position) parts.push(POSITION_LABELS[appearance.position])
+  else if (appearance.startingPitcher) parts.push(POSITION_LABELS.P)
+  if (appearance.relieved) parts.push('後援')
+  if (appearance.pinchHit) parts.push('代打')
+  return parts.join('・')
+}
 
 const handText = computed(() =>
   player.value ? describeHands(player.value.throws, player.value.bats) : '',
@@ -180,10 +211,14 @@ useHead({ title: () => player.value?.name ?? '球員' })
                       vs {{ item.game.opponent }}
                     </NuxtLink>
                   </td>
-                  <td class="px-4 py-2.5 text-center tabular-nums">{{ item.entry?.order }}</td>
-                  <td class="px-4 py-2.5 text-content-muted">
-                    {{ item.entry ? POSITION_LABELS[item.entry.position] : '' }}
+                  <!--
+                    ⚠️ 棒次是**選填**的：DH 制的先發投手不打擊，後援與代打也
+                    不在賽前的打線上。空著會讓那一格看起來像漏資料，所以寫「—」。
+                  -->
+                  <td class="px-4 py-2.5 text-center tabular-nums">
+                    {{ item.appearance.order ?? '—' }}
                   </td>
+                  <td class="px-4 py-2.5 text-content-muted">{{ roleText(item.appearance) }}</td>
                 </tr>
               </tbody>
             </table>

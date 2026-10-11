@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { patchSchemaOf } from './common'
 import { citySchema } from './weather'
-import { positionSchema } from './player'
+import { positionSchema, type Position } from './player'
 import { gameHalfSchema, halfInningOrder, homeAwaySchema, type GameHalf } from './half-inning'
 import { MAX_PLAYS_PER_GAME, playSchema } from './play'
 
@@ -765,6 +765,73 @@ export function deriveBench(
     if (entry.playerId && playingIds.has(entry.playerId)) return false
     return !playingNames.has(entry.name.trim())
   })
+}
+
+/**
+ * 這個人在這場比賽上場了沒有，以及是用什麼身分。沒上場回 `null`。
+ *
+ * ## ⚠️ 「有沒有出賽」不等於「在不在打線上」
+ * 這是 `deriveBench()` 那條規則的**正面**：候補是「有到、但不在
+ * 打線 ∪ 先發投手 ∪ 打席上出現過的人」裡面，所以出賽就是那個聯集本身。
+ *
+ * 球員頁的「出賽紀錄」原本只比對打線，於是 **DH 制下的先發投手整場都不會
+ * 出現** —— 他投了七局，個人頁卻說那天沒有他的紀錄。中繼、終結與代打同理
+ * （他們是比賽中才登錄到打席上的，賽前的打線裡本來就沒有）。
+ * `tests/unit/game-logic.test.ts` 直接拿同一場比賽驗
+ * 「在候補名單上 ⟺ 這支回 `null`」，兩邊不可能各自漂走。
+ *
+ * ## 比對方式：有 `playerId` 就只認 `playerId`，沒有才退回姓名
+ * 打線、先發投手、打席都允許沒有 `playerId`（後台可以直接手打名字，
+ * 臨時來支援的球友也不在名冊裡），少了姓名比對，那些場次會變成沒出賽。
+ * 反過來，**有 `playerId` 時就不該再看姓名** —— 隊上有兩個同名的人時，
+ * 一個人的出賽紀錄會混進另一個人的場次，而畫面上完全看不出來。
+ *
+ * ⚠️ **到場但沒上場的不算**（那正是 `deriveBench()` 的那群人）。
+ * 這張表叫「出賽紀錄」，把坐在板凳上的那幾場列進去，「共 12 場」就不再是
+ * 任何人想知道的那個數字了。
+ */
+export interface PlayerAppearance {
+  /** 打線上的棒次。DH 制的先發投手、中途上場的後援都沒有，所以是 `null`。 */
+  order: number | null
+  /** 打線上的守位。同上。 */
+  position: Position | null
+  /** 賽前就登錄的先發投手。 */
+  startingPitcher: boolean
+  /** 不是先發投手，卻在某個打席上投球 —— 中繼或終結。 */
+  relieved: boolean
+  /** 不在打線上，卻在某個打席上打擊 —— 代打。 */
+  pinchHit: boolean
+}
+
+export function playerAppearance(
+  game: Pick<Game, 'lineup' | 'startingPitcher'> & { plays?: Game['plays'] },
+  player: { id: string; name: string },
+): PlayerAppearance | null {
+  const is = (entry: { playerId: string; name: string }): boolean => {
+    if (entry.playerId) return entry.playerId === player.id
+    const name = entry.name.trim()
+    return name.length > 0 && name === player.name.trim()
+  }
+
+  const entry = game.lineup.find(is) ?? null
+  const startingPitcher = game.startingPitcher ? is(game.startingPitcher) : false
+  const plays = game.plays ?? []
+
+  // 在打線上就掛著投手的，是沒有 DH 的先發 —— 即使 `startingPitcher` 沒填，
+  // 他也不是「後援登板」
+  const relieved =
+    !startingPitcher && entry?.position !== 'P' && plays.some((play) => is(play.pitcher))
+  const pinchHit = !entry && plays.some((play) => is(play.batter))
+
+  if (!entry && !startingPitcher && !relieved && !pinchHit) return null
+
+  return {
+    order: entry?.order ?? null,
+    position: entry?.position ?? null,
+    startingPitcher,
+    relieved,
+    pinchHit,
+  }
 }
 
 /** 沒有打成的場次（延賽或取消）—— 不該顯示比數，也不列入戰績。 */
