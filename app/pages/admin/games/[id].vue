@@ -31,6 +31,7 @@ import {
 } from '#shared/schemas/attendance'
 import { dugoutLabel, matchupOrder } from '#shared/schemas/half-inning'
 import { formatGameDateLong } from '~/utils/format'
+import { gameStatusTone } from '~/utils/game-status'
 
 /**
  * 編輯比賽。
@@ -493,12 +494,31 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         back-to="/admin/games"
         back-label="回到賽事列表"
       >
+        <template #meta>
+          <!-- 跟著表單上的值（`basic.status`、`board`）走，按下狀態鈕當下就變 -->
+          <GameLiveBadge v-if="basic.status === 'live'" size="sm" />
+          <UiBaseBadge v-else :tone="gameStatusTone(basic.status)" size="sm">
+            {{ GAME_STATUS_LABELS[basic.status] }}
+          </UiBaseBadge>
+          <span
+            v-if="basic.status === 'live' || basic.status === 'finished'"
+            class="text-fluid-lg font-bold tabular-nums"
+          >
+            {{
+              matchupOrder(basic.homeAway, board.totals.our.r, board.totals.opponent.r).join(' : ')
+            }}
+          </span>
+        </template>
+
         <template #actions>
           <!--
             錄影與上傳影片檔的入口收在「錄影管理」分頁裡，不放在這裡 ——
             它們和賽事錄影清單是同一件事，分散在兩個地方只會讓人找不到。
+
+            「前台預覽」原本是 ghost 樣式：在手機上它換到日期下面，變成一行
+            沒有框的字懸在那裡，看不出是按鈕。
           -->
-          <UiBaseButton variant="ghost" @click="navigateTo(`/games/${game.id}`)">
+          <UiBaseButton variant="secondary" size="sm" @click="navigateTo(`/games/${game.id}`)">
             前台預覽
           </UiBaseButton>
         </template>

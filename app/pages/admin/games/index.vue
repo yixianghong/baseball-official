@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { GameStatus } from '#shared/schemas/game'
 import {
   GAME_RESULT_LABELS,
   GAME_STATUS_LABELS,
@@ -9,6 +8,7 @@ import {
   needsResultUpdate,
 } from '#shared/schemas/game'
 import { formatGameDate } from '~/utils/format'
+import { gameStatusTone } from '~/utils/game-status'
 
 /**
  * 賽事管理。
@@ -31,22 +31,35 @@ const {
 })
 const { removeGame, loading: deleting } = useGameActions()
 
-const filter = ref<'all' | GameStatus>('all')
-
 const filterOptions = [
   { value: 'all', label: '全部' },
   { value: 'scheduled', label: GAME_STATUS_LABELS.scheduled },
   { value: 'live', label: GAME_STATUS_LABELS.live },
   { value: 'finished', label: GAME_STATUS_LABELS.finished },
 ] as const
+type FilterValue = (typeof filterOptions)[number]['value']
 
-/** 狀態對應的標籤色：延賽要看得出是「出事了」，取消則是中性的結束。 */
-function statusTone(status: GameStatus) {
-  if (status === 'finished') return 'success' as const
-  if (status === 'postponed') return 'warning' as const
-  if (status === 'canceled') return 'neutral' as const
-  return 'brand' as const
-}
+/**
+ * 篩選條件存在網址上（`?status=finished`），不存在元件狀態裡。
+ *
+ * 存在 `ref` 裡的話，點進一場比賽再按「回到賽事列表」、或重新整理，篩選就
+ * 安靜地回到「全部」—— 剛剛在看「比賽結束」的那幾場，回來變成整張表。
+ * 用 `replace` 而不是 `push`：切篩選不該在上一頁的歷史裡留一串紀錄。
+ * 網址上的值不在選項裡（手打、舊連結）就當成「全部」。
+ */
+const route = useRoute()
+const filter = computed<FilterValue>({
+  get: () => {
+    const value = route.query.status
+    return filterOptions.find((option) => option.value === value)?.value ?? 'all'
+  },
+  set: (value) => {
+    const query = { ...route.query }
+    if (value === 'all') delete query.status
+    else query.status = value
+    navigateTo({ query }, { replace: true })
+  },
+})
 
 const filtered = computed(() => {
   const list = games.value ?? []
@@ -88,7 +101,7 @@ useHead({ title: '賽事管理' })
             : 'border-border text-content-muted hover:bg-surface'
         "
         :aria-pressed="filter === option.value"
-        @click="filter = option.value as typeof filter"
+        @click="filter = option.value"
       >
         {{ option.label }}
       </button>
@@ -106,10 +119,15 @@ useHead({ title: '賽事管理' })
         <thead>
           <tr class="bg-surface-muted text-left">
             <th scope="col" class="px-4 py-3 font-semibold">日期</th>
+            <!--
+              欄位順序是「依重要性」排的：場地放最後。手機上表格是橫向捲動的，
+              一進來看得到的只有前三、四欄 —— 原本場地排第三，把狀態和比數
+              擠到畫面外，而這一頁最常要確認的正是「哪幾場還沒按結束」。
+            -->
             <th scope="col" class="px-4 py-3 font-semibold">對手</th>
-            <th scope="col" class="px-4 py-3 font-semibold">場地</th>
             <th scope="col" class="px-4 py-3 font-semibold">狀態</th>
             <th scope="col" class="px-4 py-3 font-semibold">比數</th>
+            <th scope="col" class="px-4 py-3 font-semibold">場地</th>
             <!--
               操作**黏在右邊**（`sticky right-0`）。這一欄在最後，而表格在手機上
               是橫向捲動的 —— 不黏住的話，手機使用者得先把整張表往左拖到底
@@ -134,23 +152,40 @@ useHead({ title: '賽事管理' })
             class="border-t border-border"
             :class="needsResultUpdate(game, today) ? 'bg-warning/5' : ''"
           >
+            <!--
+              手機上時間換到日期下面：這一欄若是「10/21（三） 15:00」一整行，
+              光它就吃掉三分之一的螢幕，狀態欄又被擠出畫面（欄位順序已經
+              把它排到第三了，還是不夠）。
+            -->
             <td class="px-4 py-3 whitespace-nowrap tabular-nums">
               {{ formatGameDate(game.date) }}
-              <span class="ml-1 text-content-muted">{{ game.time }}</span>
+              <span class="block text-xs text-content-muted sm:ml-1 sm:inline sm:text-fluid-sm">
+                {{ game.time }}
+              </span>
             </td>
-            <td class="px-4 py-3 font-medium">{{ game.opponent }}</td>
-            <td class="px-4 py-3 text-content-muted">{{ game.venue || '—' }}</td>
-            <td class="px-4 py-3">
+            <!--
+              對手名字直接是編輯頁的連結：「點進去改」是這張表最常做的事，
+              不該每次都要先打開右邊的 ⋮ 選單。選單仍然保留（刪除在那裡）。
+            -->
+            <td class="px-4 py-3 font-medium">
+              <NuxtLink
+                :to="`/admin/games/${game.id}`"
+                class="underline-offset-4 hover:text-brand-600 hover:underline dark:hover:text-brand-300"
+              >
+                {{ game.opponent }}
+              </NuxtLink>
+            </td>
+            <td class="px-4 py-3 whitespace-nowrap">
               <!-- 進行中的那一場在整張表裡要最先被看到，所以用和前台一樣的 LIVE -->
               <GameLiveBadge v-if="game.status === 'live'" size="sm" />
-              <UiBaseBadge v-else :tone="statusTone(game.status)" size="sm">
+              <UiBaseBadge v-else :tone="gameStatusTone(game.status)" size="sm">
                 {{ GAME_STATUS_LABELS[game.status] }}
               </UiBaseBadge>
               <span v-if="needsResultUpdate(game, today)" class="ml-2 text-xs text-warning">
                 待補登
               </span>
             </td>
-            <td class="px-4 py-3 tabular-nums">
+            <td class="px-4 py-3 whitespace-nowrap tabular-nums">
               <template v-if="hasScore(game)">
                 {{ game.scoreboard.totals.our.r }} : {{ game.scoreboard.totals.opponent.r }}
                 <!-- 勝敗是推導的，而且只有結束的比賽才有 —— 領先不等於贏了 -->
@@ -160,6 +195,7 @@ useHead({ title: '賽事管理' })
               </template>
               <span v-else class="text-content-muted">—</span>
             </td>
+            <td class="px-4 py-3 text-content-muted">{{ game.venue || '—' }}</td>
             <!--
               黏著欄的背景**必須是不透明的**，否則捲過去的儲存格會透出來。
               所以待補登那一列不能沿用 `bg-warning/5`（半透明），

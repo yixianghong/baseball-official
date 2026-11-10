@@ -64,17 +64,32 @@ async function handleFile(event: Event) {
 
     <div class="flex flex-wrap items-start gap-4">
       <div
+        v-if="model"
         class="flex size-28 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-muted"
       >
         <img
-          v-if="model"
           :src="model"
           alt="目前的圖片"
           class="size-full"
           :class="props.fit === 'contain' ? 'object-contain' : 'object-cover'"
         />
-        <AdminIcon v-else name="image" class="size-7 text-content-muted" />
       </div>
+      <!--
+        空的時候是一個**虛線的、可以點的**方框，而且寫出「尚未設定」。
+        原本是實線框裡放一個圖片 emoji，看起來像一張載入失敗的圖 ——
+        分不出是「沒有設定」還是「設定了但壞掉」，而這兩者的處理方式完全不同。
+        點方框和點「選擇圖片」是同一件事：它是畫面上最大的目標。
+      -->
+      <button
+        v-else
+        type="button"
+        class="flex size-28 shrink-0 flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-border text-content-muted transition-colors hover:border-brand-400 hover:text-content disabled:opacity-60"
+        :disabled="loading"
+        @click="fileInput?.click()"
+      >
+        <AdminIcon name="image" class="size-6" />
+        <span class="text-xs">尚未設定</span>
+      </button>
 
       <div class="flex min-w-0 flex-1 flex-col gap-2">
         <div class="flex flex-wrap gap-2">

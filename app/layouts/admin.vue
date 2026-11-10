@@ -83,7 +83,7 @@ function isActive(link: (typeof links)[number]): boolean {
           配合 `<nav>` 上的 `w-full`，展開時它會自己換到下一整行。
         -->
         <div
-          class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 md:flex-col md:flex-nowrap md:items-stretch md:gap-4 md:px-4 md:py-5"
+          class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 md:h-full md:flex-col md:flex-nowrap md:items-stretch md:gap-4 md:px-4 md:py-5"
         >
           <NuxtLink to="/admin" class="flex items-center gap-2">
             <span
@@ -139,7 +139,7 @@ function isActive(link: (typeof links)[number]): boolean {
 
           <nav
             id="admin-menu"
-            class="w-full flex-col gap-1 md:flex md:w-auto"
+            class="w-full flex-col gap-1 md:flex md:min-h-0 md:w-auto md:flex-1"
             :class="mobileMenuOpen ? 'flex' : 'hidden'"
             aria-label="後台導覽"
           >
@@ -158,35 +158,46 @@ function isActive(link: (typeof links)[number]): boolean {
               {{ link.label }}
             </NuxtLink>
 
-            <hr class="my-2 border-border" />
+            <!--
+              次要的那一組（回到前台、配色、帳號）在桌機上沉到側欄底部。
+              原本緊接在主要導覽下面、長得一模一樣，七個「去哪一頁」和三個
+              「關於這個工具本身」的東西排成同一串，掃過去分不出哪裡是分界。
+              手機版選單是展開的一整列，沒有「底部」，所以只有 `md:mt-auto`。
+            -->
+            <div class="mt-2 flex flex-col gap-1 border-t border-border pt-2 md:mt-auto">
+              <NuxtLink
+                to="/"
+                class="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-fluid-sm text-content-muted transition hover:bg-surface-muted"
+              >
+                <AdminIcon name="home" class="size-5" />
+                回到前台
+              </NuxtLink>
 
-            <NuxtLink
-              to="/"
-              class="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-fluid-sm text-content-muted transition hover:bg-surface-muted"
-            >
-              <AdminIcon name="home" class="size-5" />
-              回到前台
-            </NuxtLink>
-
-            <button
-              type="button"
-              class="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-left text-fluid-sm text-content-muted transition hover:bg-surface-muted"
-              @click="toggleTheme"
-            >
-              <AdminIcon :name="isDark ? 'moon' : 'sun'" class="size-5" />
-              {{ isDark ? '深色模式' : '亮色模式' }}
-            </button>
-
-            <div class="mt-2 border-t border-border pt-3">
-              <p class="truncate px-3 text-xs text-content-muted">{{ displayName }}</p>
               <button
                 type="button"
-                class="mt-1 flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-fluid-sm text-content-muted transition hover:bg-surface-muted"
-                @click="logout()"
+                class="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-left text-fluid-sm text-content-muted transition hover:bg-surface-muted"
+                @click="toggleTheme"
               >
-                <AdminIcon name="logout" class="size-5" />
-                登出
+                <!--
+                寫「按下去會怎樣」，不寫「現在是什麼」。原本的「深色模式」分不出
+                是目前的狀態還是要切過去的那一個 —— 而在深色畫面上看到
+                「深色模式」，多數人會以為按了才是深色。圖示同理，畫的是目標。
+              -->
+                <AdminIcon :name="isDark ? 'sun' : 'moon'" class="size-5" />
+                {{ isDark ? '切換為亮色' : '切換為深色' }}
               </button>
+
+              <div class="mt-1 border-t border-border pt-2">
+                <p class="truncate px-3 text-xs text-content-muted">{{ displayName }}</p>
+                <button
+                  type="button"
+                  class="mt-1 flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-fluid-sm text-content-muted transition hover:bg-surface-muted"
+                  @click="logout()"
+                >
+                  <AdminIcon name="logout" class="size-5" />
+                  登出
+                </button>
+              </div>
             </div>
           </nav>
         </div>

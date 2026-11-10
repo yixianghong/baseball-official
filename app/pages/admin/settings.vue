@@ -34,9 +34,23 @@ const form = reactive<SiteSettingsForm>({
   socialLinks: [],
 })
 
+/**
+ * 「有沒有改過」的基準：最後一次從伺服器灌進表單時的樣子。
+ *
+ * 這一頁是後台唯一一個要按儲存的表單（其餘都是自動儲存），而儲存鈕在
+ * 很長的表單最底下 —— 改了最上面的隊名就離開，是這一頁最可能發生的失誤。
+ * 底部的儲存列因此要講出「有沒有東西還沒存」，而不只是一顆按鈕。
+ * 用整份表單的 JSON 比較：欄位少、而且社群連結是陣列，逐欄比反而容易漏。
+ *
+ * ⚠️ 要宣告在 `watchEffect` **前面**：它會立刻執行一次並寫入這個 ref，
+ * 放在後面就是暫時性死區（見 CLAUDE.md）。
+ */
+const baseline = ref('')
+const dirty = computed(() => baseline.value !== '' && JSON.stringify(form) !== baseline.value)
+
 watchEffect(() => {
   if (!settings.value) return
-  Object.assign(form, {
+  const snapshot: SiteSettingsForm = {
     teamName: settings.value.teamName,
     shortName: settings.value.shortName,
     aliases: settings.value.aliases,
@@ -50,7 +64,12 @@ watchEffect(() => {
     homeCity: settings.value.homeCity,
     contactEmail: settings.value.contactEmail,
     socialLinks: settings.value.socialLinks.map((link) => ({ ...link })),
-  })
+  }
+  Object.assign(form, snapshot)
+  // ⚠️ 從 snapshot 算，不能讀 `form`：在 watchEffect 裡讀它，表單就成了依賴，
+  // 每打一個字都會重跑這段、把表單蓋回伺服器上的值。
+  // 鍵的順序和 `form` 的初始值一致，所以兩邊的 JSON 可以直接比。
+  baseline.value = JSON.stringify(snapshot)
 })
 
 const savedMessage = ref('')
@@ -74,14 +93,6 @@ useHead({ title: '網站設定' })
 <template>
   <div>
     <AdminHeader title="網站設定" description="球隊名稱、識別圖與聯絡資訊，改了全站立即生效。" />
-
-    <p
-      v-if="savedMessage"
-      class="mb-4 rounded-lg bg-success/10 px-4 py-2 text-fluid-sm text-success"
-      role="status"
-    >
-      <AdminIcon name="check" class="mr-1 inline size-4 align-[-0.15em]" />{{ savedMessage }}
-    </p>
 
     <form class="max-w-2xl space-y-8" @submit.prevent="submit">
       <!-- ── 球隊識別 ───────────────────────────────────────────── -->
@@ -201,7 +212,25 @@ useHead({ title: '網站設定' })
         </div>
       </section>
 
-      <UiBaseButton type="submit" :loading="saving">儲存設定</UiBaseButton>
+      <!--
+        儲存列黏在畫面底部（`sticky`，範圍是這個 form）：捲到表單哪裡都按得到，
+        捲過表單結尾就停在原位。「已儲存」的確認也放在這裡 —— 原本它在頁首，
+        而按下儲存的那一刻，使用者正停在表單最底下，看不到頁首。
+      -->
+      <div
+        class="sticky bottom-[calc(1rem+env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-lg"
+      >
+        <p class="text-fluid-sm" role="status">
+          <span v-if="dirty" class="font-medium text-warning">有尚未儲存的變更</span>
+          <span v-else-if="savedMessage" class="inline-flex items-center gap-1 text-success">
+            <AdminIcon name="check" class="size-4" />{{ savedMessage }}
+          </span>
+          <span v-else class="text-content-muted">所有變更都已儲存</span>
+        </p>
+        <UiBaseButton type="submit" :loading="saving" :variant="dirty ? 'primary' : 'secondary'">
+          儲存設定
+        </UiBaseButton>
+      </div>
     </form>
   </div>
 </template>

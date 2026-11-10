@@ -178,35 +178,47 @@ async function handleFile(event: Event) {
 
 <template>
   <div class="space-y-4">
-    <!-- ── AI 辨識 ─────────────────────────────────────────────── -->
-    <div class="rounded-xl border border-dashed border-brand-300 bg-brand-600/5 p-4">
-      <div class="flex flex-wrap items-center gap-3">
-        <div class="min-w-0 flex-1">
-          <p class="font-medium">用照片自動填入</p>
-          <p class="mt-0.5 text-fluid-sm text-content-muted">
-            上傳計分板照片，系統會讀出逐局得分與 H／E 填進下方欄位，儲存前仍可修改。
-          </p>
-        </div>
-        <UiBaseButton :loading="aiLoading" @click="fileInput?.click()">
-          {{ aiLoading ? '辨識中…' : '選擇計分板照片' }}
-        </UiBaseButton>
-        <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="handleFile" />
-      </div>
+    <!--
+      ── AI 辨識 ─────────────────────────────────────────────
 
-      <p v-if="aiLoading" class="mt-3 text-fluid-sm text-content-muted">
-        辨識通常需要 10～30 秒，請不要關閉頁面。
+      一顆次要按鈕加一行說明，不再是一整塊虛線框。原本那塊框排在計分板上方、
+      而且永遠在 —— 有沒有打席資料都一樣大，可是這個分頁真正的主角是下面的
+      計分板與逐打席登錄，照片辨識是「沒有逐打席時的補救」。
+      結果訊息只在辨識過之後才出現。
+    -->
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <UiBaseButton variant="secondary" size="sm" :loading="aiLoading" @click="fileInput?.click()">
+        <AdminIcon v-if="!aiLoading" name="camera" />
+        {{ aiLoading ? '辨識中…' : '用計分板照片填入' }}
+      </UiBaseButton>
+      <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="handleFile" />
+      <p class="min-w-0 flex-1 text-xs text-content-muted">
+        <template v-if="aiLoading">辨識通常需要 10～30 秒，請不要關閉頁面。</template>
+        <template v-else>
+          上傳計分板照片，系統會讀出逐局得分與 H／E 填進下方欄位，儲存前仍可修改。
+        </template>
       </p>
+    </div>
 
-      <p v-if="aiMessage" class="mt-3 text-fluid-sm">{{ aiMessage }}</p>
+    <div
+      v-if="
+        aiMessage ||
+        aiWarnings.length ||
+        (aiConfidence !== null && aiConfidence < LOW_CONFIDENCE_THRESHOLD)
+      "
+      class="space-y-2 rounded-xl bg-surface-muted p-3"
+      role="status"
+    >
+      <p v-if="aiMessage" class="text-fluid-sm">{{ aiMessage }}</p>
 
       <p
         v-if="aiConfidence !== null && aiConfidence < LOW_CONFIDENCE_THRESHOLD"
-        class="mt-2 rounded-lg bg-warning/15 px-3 py-2 text-fluid-sm text-warning"
+        class="rounded-lg bg-warning/15 px-3 py-2 text-fluid-sm text-warning"
       >
         辨識信心偏低（{{ Math.round(aiConfidence * 100) }}%），請仔細核對每一格數字。
       </p>
 
-      <ul v-if="aiWarnings.length" class="mt-2 space-y-1">
+      <ul v-if="aiWarnings.length" class="space-y-1">
         <li v-for="warning in aiWarnings" :key="warning" class="text-fluid-sm text-warning">
           ・{{ warning }}
         </li>

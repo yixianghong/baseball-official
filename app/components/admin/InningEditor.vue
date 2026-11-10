@@ -1095,7 +1095,7 @@ function suggestionText(item: Suggestion): string {
 
         <p v-if="narrativeError" class="text-fluid-sm text-danger">{{ narrativeError }}</p>
 
-        <div v-if="narrative" class="space-y-2 rounded-xl border border-border bg-surface p-3">
+        <div v-if="narrative" class="space-y-2 rounded-lg bg-surface-muted p-3">
           <p class="text-fluid-sm whitespace-pre-wrap">{{ narrative }}</p>
           <div class="flex flex-wrap items-center gap-2">
             <UiBaseButton variant="ghost" size="sm" @click="copyNarrative">
@@ -1149,11 +1149,14 @@ function suggestionText(item: Suggestion): string {
         </UiBaseButton>
       </div>
 
-      <!-- ── 新增打席 ──────────────────────────────────────── -->
-      <div
-        v-if="!complete || editUnlocked"
-        class="space-y-3 rounded-xl border border-dashed border-border p-3"
-      >
+      <!--
+        ── 新增打席 ────────────────────────────────────────
+
+        用一條分隔線和上面的打席列表分開，不再包一層虛線框。原本這裡是
+        「半局卡片 → 虛線框 → 語音卡片」三層框套在一起，手機上每一層各吃掉
+        左右 12px，球場被擠得更小，而三層框並沒有多說任何一件事。
+      -->
+      <div v-if="!complete || editUnlocked" class="space-y-3 border-t border-border pt-4">
         <!--
           ⚠️ 我隊進攻時**預設帶下一棒**，所以多數打席只要按一個結果鍵。
           這是整個功能能不能被實際使用的關鍵，不是可有可無的便利。
@@ -1331,7 +1334,7 @@ function suggestionText(item: Suggestion): string {
         -->
         <section
           v-if="!complete && voice.supported.value"
-          class="space-y-2 rounded-xl border border-border bg-surface p-3"
+          class="space-y-2 border-t border-border pt-3"
           aria-label="語音登錄"
         >
           <div class="flex flex-wrap items-center gap-3">
