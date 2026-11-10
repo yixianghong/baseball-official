@@ -293,7 +293,7 @@ function fillFromRoster() {
     </p>
 
     <p v-else class="text-fluid-sm text-content-muted">
-      還沒有人回報出席，目前可挑選全隊球員。到「出席統計」登記之後，這裡會自動只列當天會到的人。
+      還沒有人回報出席，先列出全隊。登記出席之後，這裡只會列當天會到的人。
     </p>
 
     <p v-if="model.length > 1" class="text-fluid-sm text-content-muted">

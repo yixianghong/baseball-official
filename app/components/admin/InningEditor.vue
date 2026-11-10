@@ -898,8 +898,15 @@ function suggestionText(item: Suggestion): string {
     </div>
 
     <!-- ══ 選到的半局 ══════════════════════════════════════════ -->
-    <section class="space-y-4 rounded-xl border border-border bg-surface p-4">
-      <div class="flex flex-wrap items-baseline justify-between gap-2">
+    <section
+      class="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4"
+      :class="
+        complete && !editUnlocked
+          ? ''
+          : 'xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:items-start xl:gap-x-6'
+      "
+    >
+      <div class="xl:col-span-2 flex flex-wrap items-baseline justify-between gap-2">
         <h3 class="text-fluid-lg font-bold">
           {{ halfInningLabel(selected.inning, selected.half) }}
           <span class="ml-2 text-fluid-sm font-normal text-content-muted">
@@ -917,334 +924,174 @@ function suggestionText(item: Suggestion): string {
       </div>
 
       <!--
-        這半局的影片。賽後對著它登錄就是整個「逐局維護」的用意 ——
-        暫停、重看、登錄都在同一個畫面上。
+        ── 版面：手機一欄、桌機（xl）兩欄 ──────────────────────
+
+        桌機上左欄是「登錄」（投手、鎖定狀態、球場與語音），右欄是「紀錄」
+        （這半局的影片、已登錄的打席、敘述）。一欄的時候球場在畫面中間只佔
+        512px，兩側全是空白，而打席列表在球場**上面** —— 登完一筆要往上捲才
+        看得到它進了列表。兩欄之後，對著右邊的影片在左邊登錄，結果立刻出現在
+        影片下面。
+
+        ⚠️ 手機上兩個包裝是 `display: contents`，裡面的區塊直接參與外層的
+        flex 排列，順序靠 `order-*` 排回原本的樣子（影片 → 投手 → 打席 →
+        敘述 → 鎖定 → 新增）。**新增區塊時要一起給它 order**，否則它會跑到
+        order-0 的位置（標題下面第一個）。DOM 的順序是左欄在前，所以桌機上
+        Tab 鍵會先走登錄、再走紀錄。
+
+        鎖住的半局（三出局、沒有解鎖）不分欄：左欄只剩一行「已鎖住」，
+        分欄的話整個左半邊是空的，影片卻被擠成一半寬。
       -->
-      <div v-if="selectedClip" class="overflow-hidden rounded-xl bg-ink">
-        <div class="relative aspect-video">
-          <iframe
-            v-if="playingClip === selectedClip.videoId"
-            :src="clipEmbedUrl(selectedClip.videoId)"
-            :title="halfInningLabel(selected.inning, selected.half)"
-            class="absolute inset-0 size-full"
-            allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen
-          />
-          <button
-            v-else
-            type="button"
-            class="absolute inset-0 grid size-full place-items-center text-white"
-            @click="playingClip = selectedClip.videoId"
-          >
-            <span class="rounded-full bg-danger px-5 py-2 text-fluid-sm font-bold">
-              ▶ 播放這半局
-            </span>
-          </button>
-        </div>
-      </div>
+      <div class="contents xl:col-start-1 xl:row-start-2 xl:flex xl:flex-col xl:gap-4">
+        <!-- 我隊防守的半局才問投手：對手的投手我們沒有名冊，記了也推不出東西 -->
+        <UiBaseSelect
+          v-if="!ourAtBat && !complete && pitcherOptions.length"
+          v-model="pitcherOverride"
+          label="我隊投手"
+          class="order-2 sm:max-w-xs"
+          :options="pitcherOptions"
+          :placeholder="
+            currentPitcher.name
+              ? `沿用 #${currentPitcher.number} ${currentPitcher.name}`
+              : '— 尚未指定 —'
+          "
+          hint="換投時改這裡，之後登錄的打席就會記到新的投手身上。"
+        />
 
-      <!-- 我隊防守的半局才問投手：對手的投手我們沒有名冊，記了也推不出東西 -->
-      <UiBaseSelect
-        v-if="!ourAtBat && !complete && pitcherOptions.length"
-        v-model="pitcherOverride"
-        label="我隊投手"
-        class="sm:max-w-xs"
-        :options="pitcherOptions"
-        :placeholder="
-          currentPitcher.name
-            ? `沿用 #${currentPitcher.number} ${currentPitcher.name}`
-            : '— 尚未指定 —'
-        "
-        hint="換投時改這裡，之後登錄的打席就會記到新的投手身上。"
-      />
-
-      <!-- ── 已登錄的打席 ──────────────────────────────────── -->
-      <ol v-if="rows.length" class="space-y-1.5">
-        <li
-          v-for="(play, index) in rows"
-          :key="index"
-          class="space-y-1.5 rounded-lg px-3 py-2 text-fluid-sm transition"
-          :class="activeIndex === index ? 'bg-danger/10' : 'bg-surface-muted'"
-          @click="activeIndex = activeIndex === index ? null : index"
-        >
-          <!--
-            固定兩列：上面是這個打席是什麼（＋改落點、刪除），下面是得分與打點。
-            讓 ＋／－ 在每一筆都落在同一個位置 —— 一整列 flex-wrap 的話，有沒有
-            「改落點」那顆按鈕會讓它們在不同筆之間跳來跳去，連點時很容易點錯。
-          -->
-          <div class="flex items-center gap-2">
-            <span class="w-5 shrink-0 tabular-nums text-content-muted">{{ index + 1 }}.</span>
-            <p class="min-w-0 flex-1">
-              <!--
-                跑者出局記在當時打擊中的人身上（他還沒打完），但出局的不是他。
-                寫成「#9 李承翰 跑者出局」會被讀成 9 號出局了。
-              -->
-              <template v-if="PLAY_RESULTS[play.result].plateAppearance">
-                <span class="font-bold">{{ describeBatter(play) }}</span>
-                {{ PLAY_RESULTS[play.result].label }}
-              </template>
-              <template v-else>
-                <span class="font-bold">{{ PLAY_RESULTS[play.result].label }}</span>
-                <span class="text-content-muted">（{{ describeBatter(play) }} 打擊中）</span>
-              </template>
-              <span v-if="landingText(play)" class="ml-1 text-content-muted">
-                {{ landingText(play) }}</span
-              >
-              <span v-if="PLAY_RESULTS[play.result].outs" class="text-content-muted">
-                · {{ PLAY_RESULTS[play.result].outs }} 出局</span
-              >
-            </p>
-
-            <!--
-              補落點／改落點：按下去之後，下一次在球場上放開改的是這一筆。
-              沒有落點的結果（三振、保送）不給這顆按鈕 —— 它們本來就沒有落點。
-            -->
-            <button
-              v-if="!rowsLocked && !(NO_LANDING_RESULTS as readonly string[]).includes(play.result)"
-              type="button"
-              class="min-h-8 shrink-0 rounded-lg px-1 text-xs text-content-muted underline underline-offset-4 hover:text-brand-600"
-              @click.stop="startRelocate(index)"
-            >
-              {{ play.location ? '改落點' : '補落點' }}
-            </button>
-            <button
-              v-if="!rowsLocked"
-              type="button"
-              class="min-h-8 shrink-0 rounded-lg px-2 text-content-muted hover:text-danger"
-              :aria-label="`移除第 ${index + 1} 個打席`"
-              @click.stop="removeAt(index)"
-            >
-              <AdminIcon name="x" class="size-4" />
-            </button>
-          </div>
-
-          <!--
-            得分與打點都在這一筆上調，登錄之後隨時回頭改（三出局後要先解鎖）。
-            得分＝這個打席有幾人跑回本壘（計分板用），打點＝其中算在打者身上的。
-            用 ＋／－ 而不是數字輸入框：手機上點一下比叫出鍵盤快，也不會打出 5。
-          -->
-          <div class="flex items-center gap-5 pl-7" @click.stop>
-            <div
-              v-for="field in (['runs', 'rbi'] as const).filter(
-                (f) => f === 'runs' || PLAY_RESULTS[play.result].plateAppearance,
-              )"
-              :key="field"
-              class="flex items-center gap-1 text-xs"
-              role="group"
-              :aria-label="`第 ${index + 1} 個打席的${field === 'runs' ? '得分' : '打點'}`"
-            >
-              <span class="text-content-muted">{{ field === 'runs' ? '得分' : '打點' }}</span>
-              <button
-                v-if="!rowsLocked"
-                type="button"
-                class="size-8 rounded-lg border border-border bg-surface text-fluid-sm disabled:opacity-30"
-                :disabled="!canStep(play, field, -1)"
-                :aria-label="`${field === 'runs' ? '得分' : '打點'}減一`"
-                @click="step(index, field, -1)"
-              >
-                −
-              </button>
-              <span
-                class="w-5 text-center text-fluid-sm font-bold"
-                :class="field === 'runs' && play.runs ? 'text-brand-600 dark:text-brand-300' : ''"
-              >
-                {{ play[field] }}
-              </span>
-              <button
-                v-if="!rowsLocked"
-                type="button"
-                class="size-8 rounded-lg border border-border bg-surface text-fluid-sm disabled:opacity-30"
-                :disabled="!canStep(play, field, 1)"
-                :aria-label="`${field === 'runs' ? '得分' : '打點'}加一`"
-                @click="step(index, field, 1)"
-              >
-                ＋
-              </button>
-            </div>
-          </div>
-        </li>
-      </ol>
-
-      <p
-        v-else
-        class="rounded-lg bg-surface-muted px-3 py-4 text-center text-fluid-sm text-content-muted"
-      >
-        這個半局還沒有紀錄。
-      </p>
-
-      <!--
-        ── 單局敘述（AI 產生的草稿）────────────────────────
-        產生出來**不存回資料庫**：它是從打席生出來的，打席一改就過時，
-        存起來等於多一份會和真相對不上的資料。要用的人自己複製。
-      -->
-      <div v-if="rows.length" class="space-y-2">
-        <div class="flex flex-wrap items-center gap-2">
-          <UiBaseButton
-            variant="secondary"
-            size="sm"
-            :loading="describing"
-            @click="generateNarrative"
-          >
-            <AdminIcon name="sparkles" />
-            產生這半局的敘述
-          </UiBaseButton>
-          <span v-if="narrative" class="text-xs text-content-muted">
-            AI 產生的草稿，貼出去之前請看過一遍
-          </span>
-        </div>
-
-        <p v-if="narrativeError" class="text-fluid-sm text-danger">{{ narrativeError }}</p>
-
-        <div v-if="narrative" class="space-y-2 rounded-lg bg-surface-muted p-3">
-          <p class="text-fluid-sm whitespace-pre-wrap">{{ narrative }}</p>
-          <div class="flex flex-wrap items-center gap-2">
-            <UiBaseButton variant="ghost" size="sm" @click="copyNarrative">
-              {{ copied ? '已複製' : '複製' }}
-            </UiBaseButton>
-            <UiBaseButton
-              variant="ghost"
-              size="sm"
-              :loading="describing"
-              @click="generateNarrative"
-            >
-              重新產生
-            </UiBaseButton>
-          </div>
-        </div>
-      </div>
-
-      <!--
+        <!--
         ── 三出局：鎖住 ──
         三出局之後不能再新增打席（棒球規則本身）。已登錄的也一併鎖住，
         避免場邊手滑刪到上一局；要修正時才解鎖，換半局自動重新鎖上。
       -->
-      <div
-        v-if="complete"
-        class="flex flex-wrap items-center gap-3 rounded-xl bg-brand-600/10 px-3 py-3 text-fluid-sm"
-        role="status"
-      >
-        <p v-if="!editUnlocked" class="min-w-0 flex-1 text-brand-700 dark:text-brand-300">
-          <AdminIcon
-            name="lock"
-            class="mr-1 inline size-4 align-[-0.15em]"
-          />這個半局已經三出局，登錄已鎖住。
-        </p>
-        <p v-else class="min-w-0 flex-1 text-warning">
-          解鎖中：可以修改或刪除這個半局的打席，但不能再新增（已經三出局）。
-        </p>
-
-        <template v-if="!editUnlocked">
-          <UiBaseButton size="sm" @click="goToNextHalf">前往下一個半局</UiBaseButton>
-          <UiBaseButton variant="ghost" size="sm" @click="editUnlocked = true"
-            >解鎖修改</UiBaseButton
-          >
-        </template>
-        <UiBaseButton
-          v-else
-          variant="secondary"
-          size="sm"
-          @click="((editUnlocked = false), (relocateIndex = null), (activeIndex = null))"
+        <div
+          v-if="complete"
+          class="order-5 flex flex-wrap items-center gap-3 rounded-xl bg-brand-600/10 px-3 py-3 text-fluid-sm"
+          role="status"
         >
-          完成，重新鎖上
-        </UiBaseButton>
-      </div>
+          <p v-if="!editUnlocked" class="min-w-0 flex-1 text-brand-700 dark:text-brand-300">
+            <AdminIcon
+              name="lock"
+              class="mr-1 inline size-4 align-[-0.15em]"
+            />這個半局已經三出局，登錄已鎖住。
+          </p>
+          <p v-else class="min-w-0 flex-1 text-warning">
+            解鎖中：可以修改或刪除這個半局的打席，但不能再新增（已經三出局）。
+          </p>
 
-      <!--
+          <template v-if="!editUnlocked">
+            <UiBaseButton size="sm" @click="goToNextHalf">前往下一個半局</UiBaseButton>
+            <UiBaseButton variant="ghost" size="sm" @click="editUnlocked = true"
+              >解鎖修改</UiBaseButton
+            >
+          </template>
+          <UiBaseButton
+            v-else
+            variant="secondary"
+            size="sm"
+            @click="((editUnlocked = false), (relocateIndex = null), (activeIndex = null))"
+          >
+            完成，重新鎖上
+          </UiBaseButton>
+        </div>
+
+        <!--
         ── 新增打席 ────────────────────────────────────────
 
         用一條分隔線和上面的打席列表分開，不再包一層虛線框。原本這裡是
         「半局卡片 → 虛線框 → 語音卡片」三層框套在一起，手機上每一層各吃掉
         左右 12px，球場被擠得更小，而三層框並沒有多說任何一件事。
       -->
-      <div v-if="!complete || editUnlocked" class="space-y-3 border-t border-border pt-4">
-        <!--
+        <div
+          v-if="!complete || editUnlocked"
+          class="order-6 xl:first:border-t-0 xl:first:pt-0 space-y-3 border-t border-border pt-4"
+        >
+          <!--
           ⚠️ 我隊進攻時**預設帶下一棒**，所以多數打席只要按一個結果鍵。
           這是整個功能能不能被實際使用的關鍵，不是可有可無的便利。
           打線整份列出來、輪到的亮起來；代打在亮起來的那一棒上按。
         -->
-        <template v-if="!complete">
-          <AdminBattingOrder
-            v-if="ourAtBat && order.slots.length && order.nextSlot !== null"
-            v-model:slot="selectedSlot"
-            v-model:pinch="pinch"
-            :slots="order.slots"
-            :next-slot="order.nextSlot"
-            :bench="bench"
-          />
-        </template>
+          <template v-if="!complete">
+            <AdminBattingOrder
+              v-if="ourAtBat && order.slots.length && order.nextSlot !== null"
+              v-model:slot="selectedSlot"
+              v-model:pinch="pinch"
+              :slots="order.slots"
+              :next-slot="order.nextSlot"
+              :bench="bench"
+            />
+          </template>
 
-        <!--
+          <!--
           上下排而不是並排：背號框在寬螢幕上會被撐得很長，得分按鈕被擠到最右邊，
           視線要左右跳。上下排之後兩個欄位都在左邊對齊，由上往下填。
         -->
-        <div v-if="!complete" class="flex flex-col items-start gap-3">
-          <div v-if="!ourAtBat" class="w-full max-w-xs">
-            <UiBaseInput
-              ref="numberField"
-              v-model="opponentNumber"
-              label="對手打者背號"
-              digits
-              :maxlength="3"
-              placeholder="例如 24"
-              hint="對手沒有名冊，記背號就夠了。"
-            />
-          </div>
+          <div v-if="!complete" class="flex flex-col items-start gap-3">
+            <div v-if="!ourAtBat" class="w-full max-w-xs">
+              <UiBaseInput
+                ref="numberField"
+                v-model="opponentNumber"
+                label="對手打者背號"
+                digits
+                :maxlength="3"
+                placeholder="例如 24"
+                hint="對手沒有名冊，記背號就夠了。"
+              />
+            </div>
 
-          <!-- 左右開弓的人每個打席可能站不同邊，只有他們需要問 -->
-          <div v-if="isSwitchHitter">
-            <span class="mb-1 block text-fluid-sm font-medium">這個打席站</span>
-            <div class="flex gap-1" role="group" aria-label="這個打席站哪邊打">
-              <button
-                v-for="side in ['L', 'R'] as const"
-                :key="side"
-                type="button"
-                class="min-h-11 rounded-lg border px-3 text-fluid-sm transition"
-                :class="
-                  switchSide === side
-                    ? 'border-brand-600 bg-brand-600 text-white'
-                    : 'border-border text-content-muted hover:bg-surface-muted'
-                "
-                :aria-pressed="switchSide === side"
-                @click="switchSide = side"
-              >
-                {{ side === 'L' ? '左打' : '右打' }}
-              </button>
+            <!-- 左右開弓的人每個打席可能站不同邊，只有他們需要問 -->
+            <div v-if="isSwitchHitter">
+              <span class="mb-1 block text-fluid-sm font-medium">這個打席站</span>
+              <div class="flex gap-1" role="group" aria-label="這個打席站哪邊打">
+                <button
+                  v-for="side in ['L', 'R'] as const"
+                  :key="side"
+                  type="button"
+                  class="min-h-11 rounded-lg border px-3 text-fluid-sm transition"
+                  :class="
+                    switchSide === side
+                      ? 'border-brand-600 bg-brand-600 text-white'
+                      : 'border-border text-content-muted hover:bg-surface-muted'
+                  "
+                  :aria-pressed="switchSide === side"
+                  @click="switchSide = side"
+                >
+                  {{ side === 'L' ? '左打' : '右打' }}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!--
+          <!--
           ⚾ 主要的登錄方式：從本壘的球拖到落點，放開後在選單上點結果。
           常見的情況是「拖一次、點一次」。落點會存進資料庫，前台畫成落點圖。
         -->
-        <div class="mx-auto max-w-lg">
-          <p v-if="relocateIndex !== null" class="mb-2 text-fluid-sm text-danger">
-            把球拖到第 {{ relocateIndex + 1 }} 個打席的新落點。
-            <button
-              type="button"
-              class="ml-2 underline underline-offset-4"
-              @click="((relocateIndex = null), (activeIndex = null))"
+          <div class="mx-auto max-w-lg">
+            <p v-if="relocateIndex !== null" class="mb-2 text-fluid-sm text-danger">
+              把球拖到第 {{ relocateIndex + 1 }} 個打席的新落點。
+              <button
+                type="button"
+                class="ml-2 underline underline-offset-4"
+                @click="((relocateIndex = null), (activeIndex = null))"
+              >
+                取消
+              </button>
+            </p>
+
+            <AdminFieldPicker
+              :plays="rows"
+              :active-index="activeIndex"
+              :bats="currentBats"
+              :disabled="relocateIndex === null && !canAdd"
+              @drop="onDrop"
+            />
+
+            <p
+              v-if="complete && relocateIndex === null"
+              class="mt-2 text-fluid-sm text-content-muted"
             >
-              取消
-            </button>
-          </p>
+              在列表上按「改落點」，再把球拖到新的位置。
+            </p>
 
-          <AdminFieldPicker
-            :plays="rows"
-            :active-index="activeIndex"
-            :bats="currentBats"
-            :disabled="relocateIndex === null && !canAdd"
-            @drop="onDrop"
-          />
-
-          <p
-            v-if="complete && relocateIndex === null"
-            class="mt-2 text-fluid-sm text-content-muted"
-          >
-            在列表上按「改落點」，再把球拖到新的位置。
-          </p>
-
-          <!--
+            <!--
             ── 剛剛登錄了什麼 ──
             ⚠️ **位置就是重點**：新增的那一筆接在打席列表的最後面，而列表在
             球場**上面** —— 實測 390×844 時它在這排按鈕上方 784px、整個在
@@ -1254,69 +1101,69 @@ function suggestionText(item: Suggestion): string {
             高度固定住（`min-h-5`），不然每登錄一筆底下的按鈕就跳一次，
             而那正是手指要再按下去的地方。
           -->
-          <p
-            class="mt-2 min-h-5 text-fluid-sm font-bold text-brand-700 dark:text-brand-300"
-            role="status"
-            aria-live="polite"
-          >
-            <template v-if="justAdded">
-              <AdminIcon name="check" class="mr-1 inline size-4 align-[-0.15em]" />{{ justAdded }}
-            </template>
-          </p>
+            <p
+              class="mt-2 min-h-5 text-fluid-sm font-bold text-brand-700 dark:text-brand-300"
+              role="status"
+              aria-live="polite"
+            >
+              <template v-if="justAdded">
+                <AdminIcon name="check" class="mr-1 inline size-4 align-[-0.15em]" />{{ justAdded }}
+              </template>
+            </p>
 
-          <!--
+            <!--
             沒有落點的結果放在本壘旁邊，點一下就好，不用拖。
             三振與保送佔一場打席的三成以上，而「投手前滾地」是真的會拖到
             投手身上的情況 —— 兩者混在同一個選單裡很容易點錯。
           -->
-          <div
-            v-if="!complete"
-            class="grid grid-cols-5 gap-1.5"
-            role="group"
-            aria-label="沒有落點的結果"
-          >
-            <button
-              v-for="result in NO_LANDING_RESULTS"
-              :key="result"
-              type="button"
-              class="min-h-11 rounded-lg border border-border px-0.5 text-xs font-bold whitespace-nowrap transition hover:bg-surface-muted disabled:opacity-40"
-              :class="{ 'is-pressed': press.is(result) }"
-              :disabled="!canAdd || exceedsOuts(result)"
-              v-on="press.on(result)"
-              @click="addPlay(result)"
+            <div
+              v-if="!complete"
+              class="grid grid-cols-5 gap-1.5"
+              role="group"
+              aria-label="沒有落點的結果"
             >
-              {{ NO_LANDING_LABELS[result] }}
-            </button>
-          </div>
+              <button
+                v-for="result in NO_LANDING_RESULTS"
+                :key="result"
+                type="button"
+                class="min-h-11 rounded-lg border border-border px-0.5 text-xs font-bold whitespace-nowrap transition hover:bg-surface-muted disabled:opacity-40"
+                :class="{ 'is-pressed': press.is(result) }"
+                :disabled="!canAdd || exceedsOuts(result)"
+                v-on="press.on(result)"
+                @click="addPlay(result)"
+              >
+                {{ NO_LANDING_LABELS[result] }}
+              </button>
+            </div>
 
-          <!--
+            <!--
             ⚠️ **「為什麼按不下去」要寫在按不下去的東西旁邊。** 這兩句原本在
             整個區塊的最底下（語音卡片之後），而手機上那裡離球場好幾個畫面遠 ——
             按鈕只是淡了一點（`disabled:opacity-40`，陽光下幾乎看不出來），
             原因卻在捲不到的地方，看起來就是「這顆按鈕壞了」。
           -->
-          <p v-if="full" class="mt-2 text-fluid-sm text-warning">
-            這個半局已經有 {{ MAX_PLAYS_PER_HALF_INNING }} 個打席了，再多八成是登錯半局。
-          </p>
-          <p v-else-if="!canAdd && !complete" class="mt-2 text-fluid-sm text-warning">
-            {{
-              ourAtBat
-                ? '先到「打線」分頁排好先發陣容，這裡才輪得到人。'
-                : '請先填上面的「對手打者背號」，結果鍵才按得下去。'
-            }}
-          </p>
-        </div>
+            <p v-if="full" class="mt-2 text-fluid-sm text-warning">
+              這個半局已經有 {{ MAX_PLAYS_PER_HALF_INNING }} 個打席了，再多八成是登錯半局。
+            </p>
+            <p v-else-if="!canAdd && !complete" class="mt-2 text-fluid-sm text-warning">
+              {{
+                ourAtBat
+                  ? '先到「打線」分頁排好先發陣容，這裡才輪得到人。'
+                  : '請先填上面的「對手打者背號」，結果鍵才按得下去。'
+              }}
+            </p>
+          </div>
 
-        <AdminLandingSheet
-          v-if="pendingPoint"
-          :point="pendingPoint"
-          :batter-label="batterLabel"
-          :remaining-outs="remainingOuts"
-          @confirm="onLandingConfirm"
-          @cancel="pendingPoint = null"
-        />
+          <AdminLandingSheet
+            v-if="pendingPoint"
+            :point="pendingPoint"
+            :batter-label="batterLabel"
+            :remaining-outs="remainingOuts"
+            @confirm="onLandingConfirm"
+            @cancel="pendingPoint = null"
+          />
 
-        <!--
+          <!--
           ── 語音登錄（常駐）──
           球場拖曳之外唯一的輸入方式。一次可以連著講三四個打席
           （「24 號三壘安打、56 號三振」），模型自己斷句；講到的欄位
@@ -1332,132 +1179,327 @@ function suggestionText(item: Suggestion): string {
           按著一顆按鈕。按鈕上帶計時，因為手指放開不再是「還在錄嗎」的答案；
           錄到上限會自己停下來送辨識（見 `MAX_RECORDING_MS`）。
         -->
-        <section
-          v-if="!complete && voice.supported.value"
-          class="space-y-2 border-t border-border pt-3"
-          aria-label="語音登錄"
-        >
-          <div class="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              class="inline-flex min-h-12 items-center gap-2 rounded-full border px-5 text-fluid-sm font-bold transition select-none"
-              :class="
-                voice.status.value === 'recording'
-                  ? 'border-danger bg-danger text-white'
-                  : 'border-border hover:bg-surface-muted'
-              "
-              :disabled="voice.status.value === 'parsing'"
-              @click="toggleVoice"
-            >
-              <AdminIcon v-if="voice.status.value === 'idle'" name="mic" />
-              {{
-                voice.status.value === 'recording'
-                  ? `停止並辨識 ${elapsedLabel}`
-                  : voice.status.value === 'parsing'
-                    ? '辨識中…'
-                    : '開始錄音'
-              }}
-            </button>
-            <!--
+          <section
+            v-if="!complete && voice.supported.value"
+            class="space-y-2 border-t border-border pt-3"
+            aria-label="語音登錄"
+          >
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                class="inline-flex min-h-12 items-center gap-2 rounded-full border px-5 text-fluid-sm font-bold transition select-none"
+                :class="
+                  voice.status.value === 'recording'
+                    ? 'border-danger bg-danger text-white'
+                    : 'border-border hover:bg-surface-muted'
+                "
+                :disabled="voice.status.value === 'parsing'"
+                @click="toggleVoice"
+              >
+                <AdminIcon v-if="voice.status.value === 'idle'" name="mic" />
+                {{
+                  voice.status.value === 'recording'
+                    ? `停止並辨識 ${elapsedLabel}`
+                    : voice.status.value === 'parsing'
+                      ? '辨識中…'
+                      : '開始錄音'
+                }}
+              </button>
+              <!--
               ⚠️ 上傳錄音檔不是「另一種語音功能」，是同一條路的另一個音訊來源。
               人在場上打球時手機不在身邊，隨身錄音筆照樣錄得到他唸的那幾句；
               下場之後把檔案挑進來，結果一樣進暫存卡片讓他確認。
             -->
-            <input
-              ref="audioInput"
-              type="file"
-              accept="audio/*,.mp3,.m4a,.wav"
-              multiple
-              class="hidden"
-              @change="onAudioPicked"
-            />
-            <UiBaseButton
-              variant="secondary"
-              size="sm"
-              :disabled="voice.status.value !== 'idle'"
-              @click="audioInput?.click()"
-            >
-              <AdminIcon name="folder" />
-              上傳錄音檔
-            </UiBaseButton>
+              <input
+                ref="audioInput"
+                type="file"
+                accept="audio/*,.mp3,.m4a,.wav"
+                multiple
+                class="hidden"
+                @change="onAudioPicked"
+              />
+              <UiBaseButton
+                variant="secondary"
+                size="sm"
+                :disabled="voice.status.value !== 'idle'"
+                @click="audioInput?.click()"
+              >
+                <AdminIcon name="folder" />
+                上傳錄音檔
+              </UiBaseButton>
 
-            <span class="text-xs text-content-muted">
-              例如「24 號游擊方向滾地球出局、18 號左外野平飛安打得一分」。
-              錄音檔可以一次挑多個（一個打席一段也行），會照錄的時間排好。
-            </span>
-          </div>
+              <span class="text-xs text-content-muted">
+                例如「24 號游擊方向滾地球出局、18 號左外野平飛安打得一分」。
+                錄音檔可以一次挑多個（一個打席一段也行），會照錄的時間排好。
+              </span>
+            </div>
 
-          <!--
+            <!--
             解析長檔案會跑好幾十秒（一段一次呼叫），所以進度一定要看得到 ——
             而且要寫出「挑出幾秒語音」，那是人唯一能判斷「它有沒有抓到我講的話」
             的地方。
           -->
-          <p v-if="voice.progress.value.total > 1" class="text-fluid-sm text-content-muted">
-            解析中 {{ voice.progress.value.done }} / {{ voice.progress.value.total }} 段（錄音裡
-            {{ Math.round(voice.speechSeconds.value) }} 秒有說話）
-          </p>
-
-          <p v-if="voice.error.value" class="text-fluid-sm text-danger">
-            {{ voice.error.value }}
-          </p>
-
-          <!-- 辨識結果：**確認過才寫進去**，不自動採用 -->
-          <div
-            v-if="voice.suggestions.value.length"
-            class="space-y-2 rounded-lg border border-brand-600/40 bg-brand-600/5 p-3"
-          >
-            <p class="text-fluid-sm font-bold">聽到這些打席，確認後再採用：</p>
-            <p v-if="voice.transcript.value" class="text-xs text-content-muted">
-              原話：{{ voice.transcript.value }}
+            <p v-if="voice.progress.value.total > 1" class="text-fluid-sm text-content-muted">
+              解析中 {{ voice.progress.value.done }} / {{ voice.progress.value.total }} 段（錄音裡
+              {{ Math.round(voice.speechSeconds.value) }} 秒有說話）
             </p>
 
-            <ul class="space-y-1">
-              <li
-                v-for="(item, index) in voice.suggestions.value"
-                :key="index"
-                class="flex flex-wrap items-center gap-2 text-fluid-sm"
+            <p v-if="voice.error.value" class="text-fluid-sm text-danger">
+              {{ voice.error.value }}
+            </p>
+
+            <!-- 辨識結果：**確認過才寫進去**，不自動採用 -->
+            <div
+              v-if="voice.suggestions.value.length"
+              class="space-y-2 rounded-lg border border-brand-600/40 bg-brand-600/5 p-3"
+            >
+              <p class="text-fluid-sm font-bold">聽到這些打席，確認後再採用：</p>
+              <p v-if="voice.transcript.value" class="text-xs text-content-muted">
+                原話：{{ voice.transcript.value }}
+              </p>
+
+              <ul class="space-y-1">
+                <li
+                  v-for="(item, index) in voice.suggestions.value"
+                  :key="index"
+                  class="flex flex-wrap items-center gap-2 text-fluid-sm"
+                >
+                  <span>{{ suggestionText(item) }}</span>
+                  <UiBaseBadge v-if="suggestionProblem(item)" tone="danger" size="sm">
+                    {{ suggestionProblem(item) }}
+                  </UiBaseBadge>
+                  <!-- 把握度低的要講出來，不要讓它混在確定的那幾筆裡 -->
+                  <UiBaseBadge
+                    v-else-if="item.confidence < LOW_CONFIDENCE_THRESHOLD"
+                    tone="warning"
+                    size="sm"
+                  >
+                    請確認
+                  </UiBaseBadge>
+                  <button
+                    type="button"
+                    class="ml-auto min-h-8 rounded-lg px-2 text-content-muted hover:text-danger"
+                    :aria-label="`不要這一筆：${item.sourceText || suggestionText(item)}`"
+                    @click="dropSuggestion(index)"
+                  >
+                    <AdminIcon name="x" class="size-4" />
+                  </button>
+                </li>
+              </ul>
+
+              <p class="text-xs text-content-muted">
+                沒講到的欄位採用時才補：得分依結果（全壘打 1 分、其餘 0）、打點依得分、
+                投手是目前在投的人。之後可在列表上調。
+              </p>
+
+              <p
+                v-for="warning in voice.warnings.value"
+                :key="warning"
+                class="text-xs text-warning"
               >
-                <span>{{ suggestionText(item) }}</span>
-                <UiBaseBadge v-if="suggestionProblem(item)" tone="danger" size="sm">
-                  {{ suggestionProblem(item) }}
-                </UiBaseBadge>
-                <!-- 把握度低的要講出來，不要讓它混在確定的那幾筆裡 -->
-                <UiBaseBadge
-                  v-else-if="item.confidence < LOW_CONFIDENCE_THRESHOLD"
-                  tone="warning"
+                {{ warning }}
+              </p>
+              <p v-if="acceptBlocker" class="text-xs text-danger">{{ acceptBlocker }}</p>
+
+              <div class="flex flex-wrap gap-2">
+                <UiBaseButton
                   size="sm"
+                  :disabled="Boolean(acceptBlocker)"
+                  @click="acceptSuggestions"
                 >
-                  請確認
-                </UiBaseBadge>
+                  全部採用
+                </UiBaseButton>
+                <UiBaseButton variant="ghost" size="sm" @click="voice.clear">丟棄</UiBaseButton>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="contents xl:col-start-2 xl:row-start-2 xl:flex xl:flex-col xl:gap-4">
+        <!--
+        這半局的影片。賽後對著它登錄就是整個「逐局維護」的用意 ——
+        暫停、重看、登錄都在同一個畫面上。
+      -->
+        <div v-if="selectedClip" class="order-1 overflow-hidden rounded-xl bg-ink">
+          <div class="relative aspect-video">
+            <iframe
+              v-if="playingClip === selectedClip.videoId"
+              :src="clipEmbedUrl(selectedClip.videoId)"
+              :title="halfInningLabel(selected.inning, selected.half)"
+              class="absolute inset-0 size-full"
+              allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            />
+            <button
+              v-else
+              type="button"
+              class="absolute inset-0 grid size-full place-items-center text-white"
+              @click="playingClip = selectedClip.videoId"
+            >
+              <span class="rounded-full bg-danger px-5 py-2 text-fluid-sm font-bold">
+                ▶ 播放這半局
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ── 已登錄的打席 ──────────────────────────────────── -->
+        <ol v-if="rows.length" class="order-3 space-y-1.5">
+          <li
+            v-for="(play, index) in rows"
+            :key="index"
+            class="space-y-1.5 rounded-lg px-3 py-2 text-fluid-sm transition"
+            :class="activeIndex === index ? 'bg-danger/10' : 'bg-surface-muted'"
+            @click="activeIndex = activeIndex === index ? null : index"
+          >
+            <!--
+            固定兩列：上面是這個打席是什麼（＋改落點、刪除），下面是得分與打點。
+            讓 ＋／－ 在每一筆都落在同一個位置 —— 一整列 flex-wrap 的話，有沒有
+            「改落點」那顆按鈕會讓它們在不同筆之間跳來跳去，連點時很容易點錯。
+          -->
+            <div class="flex items-center gap-2">
+              <span class="w-5 shrink-0 tabular-nums text-content-muted">{{ index + 1 }}.</span>
+              <p class="min-w-0 flex-1">
+                <!--
+                跑者出局記在當時打擊中的人身上（他還沒打完），但出局的不是他。
+                寫成「#9 李承翰 跑者出局」會被讀成 9 號出局了。
+              -->
+                <template v-if="PLAY_RESULTS[play.result].plateAppearance">
+                  <span class="font-bold">{{ describeBatter(play) }}</span>
+                  {{ PLAY_RESULTS[play.result].label }}
+                </template>
+                <template v-else>
+                  <span class="font-bold">{{ PLAY_RESULTS[play.result].label }}</span>
+                  <span class="text-content-muted">（{{ describeBatter(play) }} 打擊中）</span>
+                </template>
+                <span v-if="landingText(play)" class="ml-1 text-content-muted">
+                  {{ landingText(play) }}</span
+                >
+                <span v-if="PLAY_RESULTS[play.result].outs" class="text-content-muted">
+                  · {{ PLAY_RESULTS[play.result].outs }} 出局</span
+                >
+              </p>
+
+              <!--
+              補落點／改落點：按下去之後，下一次在球場上放開改的是這一筆。
+              沒有落點的結果（三振、保送）不給這顆按鈕 —— 它們本來就沒有落點。
+            -->
+              <button
+                v-if="
+                  !rowsLocked && !(NO_LANDING_RESULTS as readonly string[]).includes(play.result)
+                "
+                type="button"
+                class="min-h-8 shrink-0 rounded-lg px-1 text-xs text-content-muted underline underline-offset-4 hover:text-brand-600"
+                @click.stop="startRelocate(index)"
+              >
+                {{ play.location ? '改落點' : '補落點' }}
+              </button>
+              <button
+                v-if="!rowsLocked"
+                type="button"
+                class="min-h-8 shrink-0 rounded-lg px-2 text-content-muted hover:text-danger"
+                :aria-label="`移除第 ${index + 1} 個打席`"
+                @click.stop="removeAt(index)"
+              >
+                <AdminIcon name="x" class="size-4" />
+              </button>
+            </div>
+
+            <!--
+            得分與打點都在這一筆上調，登錄之後隨時回頭改（三出局後要先解鎖）。
+            得分＝這個打席有幾人跑回本壘（計分板用），打點＝其中算在打者身上的。
+            用 ＋／－ 而不是數字輸入框：手機上點一下比叫出鍵盤快，也不會打出 5。
+          -->
+            <div class="flex items-center gap-5 pl-7" @click.stop>
+              <div
+                v-for="field in (['runs', 'rbi'] as const).filter(
+                  (f) => f === 'runs' || PLAY_RESULTS[play.result].plateAppearance,
+                )"
+                :key="field"
+                class="flex items-center gap-1 text-xs"
+                role="group"
+                :aria-label="`第 ${index + 1} 個打席的${field === 'runs' ? '得分' : '打點'}`"
+              >
+                <span class="text-content-muted">{{ field === 'runs' ? '得分' : '打點' }}</span>
                 <button
+                  v-if="!rowsLocked"
                   type="button"
-                  class="ml-auto min-h-8 rounded-lg px-2 text-content-muted hover:text-danger"
-                  :aria-label="`不要這一筆：${item.sourceText || suggestionText(item)}`"
-                  @click="dropSuggestion(index)"
+                  class="size-8 rounded-lg border border-border bg-surface text-fluid-sm disabled:opacity-30"
+                  :disabled="!canStep(play, field, -1)"
+                  :aria-label="`${field === 'runs' ? '得分' : '打點'}減一`"
+                  @click="step(index, field, -1)"
                 >
-                  <AdminIcon name="x" class="size-4" />
+                  −
                 </button>
-              </li>
-            </ul>
+                <span
+                  class="w-5 text-center text-fluid-sm font-bold"
+                  :class="field === 'runs' && play.runs ? 'text-brand-600 dark:text-brand-300' : ''"
+                >
+                  {{ play[field] }}
+                </span>
+                <button
+                  v-if="!rowsLocked"
+                  type="button"
+                  class="size-8 rounded-lg border border-border bg-surface text-fluid-sm disabled:opacity-30"
+                  :disabled="!canStep(play, field, 1)"
+                  :aria-label="`${field === 'runs' ? '得分' : '打點'}加一`"
+                  @click="step(index, field, 1)"
+                >
+                  ＋
+                </button>
+              </div>
+            </div>
+          </li>
+        </ol>
 
-            <p class="text-xs text-content-muted">
-              沒講到的欄位採用時才補：得分依結果（全壘打 1 分、其餘 0）、打點依得分，
-              投手是現在在投的那一位。可以在列表上再調。
-            </p>
+        <p
+          v-else
+          class="order-3 rounded-lg bg-surface-muted px-3 py-4 text-center text-fluid-sm text-content-muted"
+        >
+          這個半局還沒有紀錄。
+        </p>
 
-            <p v-for="warning in voice.warnings.value" :key="warning" class="text-xs text-warning">
-              {{ warning }}
-            </p>
-            <p v-if="acceptBlocker" class="text-xs text-danger">{{ acceptBlocker }}</p>
+        <!--
+        ── 單局敘述（AI 產生的草稿）────────────────────────
+        產生出來**不存回資料庫**：它是從打席生出來的，打席一改就過時，
+        存起來等於多一份會和真相對不上的資料。要用的人自己複製。
+      -->
+        <div v-if="rows.length" class="order-4 space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <UiBaseButton
+              variant="secondary"
+              size="sm"
+              :loading="describing"
+              @click="generateNarrative"
+            >
+              <AdminIcon name="sparkles" />
+              產生這半局的敘述
+            </UiBaseButton>
+            <span v-if="narrative" class="text-xs text-content-muted">
+              AI 產生的草稿，貼出去之前請看過一遍
+            </span>
+          </div>
 
-            <div class="flex flex-wrap gap-2">
-              <UiBaseButton size="sm" :disabled="Boolean(acceptBlocker)" @click="acceptSuggestions">
-                全部採用
+          <p v-if="narrativeError" class="text-fluid-sm text-danger">{{ narrativeError }}</p>
+
+          <div v-if="narrative" class="space-y-2 rounded-lg bg-surface-muted p-3">
+            <p class="text-fluid-sm whitespace-pre-wrap">{{ narrative }}</p>
+            <div class="flex flex-wrap items-center gap-2">
+              <UiBaseButton variant="ghost" size="sm" @click="copyNarrative">
+                {{ copied ? '已複製' : '複製' }}
               </UiBaseButton>
-              <UiBaseButton variant="ghost" size="sm" @click="voice.clear">丟棄</UiBaseButton>
+              <UiBaseButton
+                variant="ghost"
+                size="sm"
+                :loading="describing"
+                @click="generateNarrative"
+              >
+                重新產生
+              </UiBaseButton>
             </div>
           </div>
-        </section>
+        </div>
       </div>
     </section>
   </div>

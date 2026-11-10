@@ -541,8 +541,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         <fieldset class="space-y-3">
           <legend class="text-fluid-lg font-bold">賽事狀態</legend>
           <p class="text-fluid-sm text-content-muted">
-            按下去就會立刻反映在官網上：「比賽中」會在賽程與首頁顯示紅色的 LIVE
-            與即時比數，「比賽結束」會顯示 FINAL 與勝敗。
+            按下就生效：「比賽中」前台顯示 LIVE 與即時比數，「比賽結束」顯示 FINAL 與勝敗。
           </p>
 
           <!--
@@ -605,14 +604,14 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
           label="場地所在縣市"
           placeholder="— 不顯示天氣 —"
           :options="TAIWAN_CITIES.map((city) => ({ value: city, label: city }))"
-          hint="用來查比賽當天的天氣預報（中央氣象署只提供一週內的預報）。留空就不顯示天氣。"
+          hint="用來查天氣預報（只有一週內的）。留空就不顯示天氣。"
         />
 
         <UiBaseInput
           v-model="basic.mapUrl"
           label="Google 地圖連結"
           placeholder="https://maps.app.goo.gl/..."
-          hint="留空的話，前台會用上面的場地名稱自動組一個 Google 地圖搜尋連結。手機版 Google 地圖按「分享」複製到的網址可以直接貼。"
+          hint="留空會用場地名稱自動搜尋。手機版 Google 地圖按「分享」取得的網址可以直接貼。"
           :error="mapUrlError"
         />
 
@@ -624,7 +623,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             { value: 'home', label: '主場（後攻）' },
             { value: 'away', label: '客場（先攻）' },
           ]"
-          :hint="`影響計分板上下半局的排列方式。${dugoutLabel(basic.homeAway)}（大會規定：先攻三壘側、後攻一壘側）`"
+          :hint="`決定計分板上下半局的順序。${dugoutLabel(basic.homeAway)}（先攻三壘側、後攻一壘側）`"
         />
 
         <UiBaseTextarea v-model="basic.note" label="備註" :rows="3" :maxlength="500" />
@@ -687,8 +686,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
         <div>
           <h2 class="text-fluid-lg font-bold">先發陣容</h2>
           <p class="text-fluid-sm text-content-muted">
-            比賽前排好的陣容就是賽後的出賽紀錄，只需要維護這一份。
-            前台在比賽尚未開打時會標示「預計」，結束後顯示為當天打線。
+            賽前排好的陣容就是賽後紀錄，只要維護這一份。開打前前台會標示「預計」。
           </p>
         </div>
 
@@ -853,8 +851,8 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             那個寫入本身也可能失敗。沒有影片的那幾格自然就是待補的。
           -->
           <p v-if="missingClipCount" class="text-fluid-sm text-content-muted">
-            還有 {{ missingClipCount }} 個半局沒有影片。相機拍的檔案可以在「上傳影片檔」
-            一次挑多個傳上去；已經自己傳上 YouTube 的，把網址貼到對應的那一格。
+            還有 {{ missingClipCount }} 個半局沒有影片。相機的檔案用「上傳影片檔」一次挑多個；
+            已經在 YouTube 上的，把網址貼到對應那一格。
           </p>
 
           <ul class="space-y-2">

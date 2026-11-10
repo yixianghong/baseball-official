@@ -144,7 +144,7 @@ useHead({ title: '網站設定' })
           v-model="form.logoUrl"
           label="隊徽"
           folder="site"
-          hint="建議用「去背」的 PNG（背景透明），高度 200px 以上。方形徽章與橫式字標都可以，網站會依比例縮放。"
+          hint="建議用去背 PNG，高度 200px 以上。方形或橫式都可以。"
         />
 
         <label class="flex min-h-11 items-center gap-2 text-fluid-sm font-medium">
@@ -152,8 +152,8 @@ useHead({ title: '網站設定' })
           隊徽加上白色底板
         </label>
         <p class="-mt-2 text-xs text-content-muted">
-          隊徽若是白底或淺底的圖，直接放在深色標題列上會出現一塊突兀的方塊。
-          打開這個選項會把它放進白色圓角底板，看起來就像刻意的徽章牌。 去背的隊徽請保持關閉。
+          白底或淺底的隊徽放在深色標題列上會像一塊方塊，打開後會放進白色圓角底板。
+          去背的隊徽不用開。
         </p>
         <AdminImageField
           v-model="form.heroImageUrl"
