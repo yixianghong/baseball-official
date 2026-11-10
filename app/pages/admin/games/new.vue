@@ -181,12 +181,12 @@ useHead({ title: '新增比賽' })
     <div class="mb-6 flex gap-2" role="group" aria-label="新增方式">
       <button
         v-for="option in [
-          { value: 'ai', label: '📷 用賽程圖辨識' },
-          { value: 'manual', label: '✏️ 手動填寫' },
+          { value: 'ai', label: '用賽程圖辨識', icon: 'camera' as const },
+          { value: 'manual', label: '手動填寫', icon: 'pencil' as const },
         ]"
         :key="option.value"
         type="button"
-        class="min-h-11 rounded-lg border px-5 font-medium transition"
+        class="inline-flex min-h-11 items-center gap-2 rounded-lg border px-5 font-medium transition"
         :class="
           mode === option.value
             ? 'border-brand-600 bg-brand-600 text-white'
@@ -195,6 +195,7 @@ useHead({ title: '新增比賽' })
         :aria-pressed="mode === option.value"
         @click="mode = option.value as typeof mode"
       >
+        <AdminIcon :name="option.icon" />
         {{ option.label }}
       </button>
     </div>

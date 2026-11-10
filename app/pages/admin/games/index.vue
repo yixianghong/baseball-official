@@ -69,7 +69,10 @@ useHead({ title: '賽事管理' })
         <UiBaseButton variant="secondary" @click="navigateTo('/admin/games/new?mode=manual')">
           手動新增
         </UiBaseButton>
-        <UiBaseButton @click="navigateTo('/admin/games/new')">📷 用賽程圖新增</UiBaseButton>
+        <UiBaseButton @click="navigateTo('/admin/games/new')">
+          <AdminIcon name="camera" />
+          用賽程圖新增
+        </UiBaseButton>
       </template>
     </AdminHeader>
 
@@ -193,8 +196,8 @@ useHead({ title: '賽事管理' })
       v-else
       title="還沒有比賽資料"
       description="可以上傳官方賽程公告圖自動建立，或手動新增一場。"
-      icon="⚾"
     >
+      <template #icon><AdminIcon name="baseball" class="size-8" /></template>
       <UiBaseButton @click="navigateTo('/admin/games/new')">用賽程圖新增</UiBaseButton>
     </UiBaseEmpty>
   </div>

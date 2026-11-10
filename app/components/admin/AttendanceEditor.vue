@@ -120,8 +120,9 @@ function applyRecognized(entries: Array<{ playerId: string; status: AttendanceSt
       v-if="!model.length"
       title="名單裡還沒有現役球員"
       description="到「球員名單」新增隊員之後，這裡會自動帶入，再逐一登記回覆狀況。"
-      icon="🙋"
-    />
+    >
+      <template #icon><AdminIcon name="user-check" class="size-8" /></template>
+    </UiBaseEmpty>
 
     <ul v-else class="space-y-2">
       <li

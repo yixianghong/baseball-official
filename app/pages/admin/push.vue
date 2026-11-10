@@ -124,8 +124,9 @@ useHead({ title: '推播通知' })
       v-else-if="!status?.configured"
       title="推播功能尚未啟用"
       description="需要先設定 VAPID 金鑰：執行 npx web-push generate-vapid-keys，把公鑰放進 NUXT_PUBLIC_VAPID_PUBLIC_KEY、私鑰放進 NUXT_VAPID_PRIVATE_KEY，並設定 NUXT_VAPID_SUBJECT 為聯絡信箱。"
-      icon="🔕"
-    />
+    >
+      <template #icon><AdminIcon name="bell-off" class="size-8" /></template>
+    </UiBaseEmpty>
 
     <div v-else class="max-w-2xl space-y-6">
       <!-- 訂閱數要放在最上面：送給 0 台裝置是最容易發生也最難察覺的狀況 -->
@@ -261,7 +262,8 @@ useHead({ title: '推播通知' })
       </div>
 
       <p v-if="result" class="rounded-lg bg-success/10 px-4 py-3 text-fluid-sm text-success">
-        ✓ 已送出 {{ result.sent }} 台
+        <AdminIcon name="check" class="mr-1 inline size-4 align-[-0.15em]" />已送出
+        {{ result.sent }} 台
         <template v-if="result.failed">，{{ result.failed }} 台失敗</template>
         <template v-if="result.pruned">（其中 {{ result.pruned }} 筆失效的訂閱已清除）</template>
       </p>

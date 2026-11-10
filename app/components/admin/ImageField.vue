@@ -73,7 +73,7 @@ async function handleFile(event: Event) {
           class="size-full"
           :class="props.fit === 'contain' ? 'object-contain' : 'object-cover'"
         />
-        <span v-else class="text-2xl text-content-muted" aria-hidden="true">🖼️</span>
+        <AdminIcon v-else name="image" class="size-7 text-content-muted" />
       </div>
 
       <div class="flex min-w-0 flex-1 flex-col gap-2">

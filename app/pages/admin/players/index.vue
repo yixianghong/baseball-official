@@ -117,15 +117,26 @@ useHead({ title: '球員管理' })
     <AdminHeader title="球員名單" description="管理隊員資料。前台名單只顯示狀態為「現役」的球員。">
       <template #actions>
         <UiBaseButton variant="secondary" @click="navigateTo('/admin/players/import')">
-          📷 從名冊匯入
+          <AdminIcon name="camera" />
+          從名冊匯入
         </UiBaseButton>
-        <UiBaseButton @click="startCreate">＋ 新增球員</UiBaseButton>
+        <UiBaseButton @click="startCreate">
+          <AdminIcon name="plus" />
+          新增球員
+        </UiBaseButton>
       </template>
     </AdminHeader>
 
-    <div class="grid gap-6" :class="editingId ? 'lg:grid-cols-[1fr_24rem]' : ''">
-      <!-- ── 列表 ─────────────────────────────────────────────── -->
-      <div>
+    <div class="grid gap-6" :class="editingId ? 'lg:grid-cols-[minmax(0,1fr)_24rem]' : ''">
+      <!--
+        ── 列表 ───────────────────────────────────────────────
+
+        ⚠️ `min-w-0` 不能省（grid item 的 `min-width: auto`）。少了它，
+        `min-w-max` 的表格會把這一格撐到和表格一樣寬，`overflow-x-auto`
+        就永遠不會捲 —— 手機上整張表直接超出畫面，黏在右邊的操作選單
+        跟著跑到畫面外，看起來像「這一列沒有操作」。
+      -->
+      <div class="min-w-0">
         <UiBaseSpinner v-if="pending" />
 
         <div
@@ -140,7 +151,19 @@ useHead({ title: '球員管理' })
                 <th scope="col" class="px-4 py-3 font-semibold">守備</th>
                 <th scope="col" class="px-4 py-3 font-semibold">投打</th>
                 <th scope="col" class="px-4 py-3 font-semibold">狀態</th>
-                <th scope="col" class="px-4 py-3 text-right font-semibold">操作</th>
+                <!--
+                  列的操作和賽事列表一樣收進 ⋮ 選單、並且黏在右邊：手機上表格是
+                  橫向捲動的，不黏住就得先把整張表拖到底才按得到「編輯」。
+                  原本這裡是兩顆並排的文字按鈕，和賽事列表長得不一樣 ——
+                  同一個後台裡「這一列可以做什麼」只該有一種樣子。
+                  背景與分隔線的寫法（不透明、inset 陰影）理由見 `games/index.vue`。
+                -->
+                <th
+                  scope="col"
+                  class="sticky right-0 z-10 w-px bg-surface-muted px-2 py-3 font-semibold shadow-[inset_1px_0_0_0_var(--color-border)]"
+                >
+                  <span class="sr-only">操作</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -165,25 +188,35 @@ useHead({ title: '球員管理' })
                     {{ player.status === 'active' ? '現役' : '非現役' }}
                   </UiBaseBadge>
                 </td>
-                <td class="px-4 py-3">
-                  <div class="flex justify-end gap-1">
-                    <UiBaseButton variant="ghost" size="sm" @click="startEdit(player)"
-                      >編輯</UiBaseButton
-                    >
-                    <AdminDeleteButton :loading="saving" @confirm="handleDelete(player.id)" />
-                  </div>
+                <td
+                  class="sticky right-0 z-10 w-px px-2 py-3 shadow-[inset_1px_0_0_0_var(--color-border)]"
+                  :class="
+                    editingId === player.id
+                      ? 'bg-[color-mix(in_srgb,var(--color-brand-600)_5%,var(--color-surface))]'
+                      : 'bg-surface'
+                  "
+                >
+                  <AdminRowMenu
+                    :label="`${player.name} 的操作`"
+                    :items="[
+                      { label: '編輯', onSelect: () => startEdit(player) },
+                      {
+                        label: '刪除',
+                        confirmLabel: '確定刪除？',
+                        danger: true,
+                        disabled: saving,
+                        onSelect: () => handleDelete(player.id),
+                      },
+                    ]"
+                  />
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        <UiBaseEmpty
-          v-else
-          title="還沒有球員資料"
-          description="新增第一位隊員開始建立名單。"
-          icon="🧢"
-        >
+        <UiBaseEmpty v-else title="還沒有球員資料" description="新增第一位隊員開始建立名單。">
+          <template #icon><AdminIcon name="users" class="size-8" /></template>
           <UiBaseButton @click="startCreate">新增球員</UiBaseButton>
         </UiBaseEmpty>
       </div>

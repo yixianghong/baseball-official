@@ -40,7 +40,8 @@ const onDarkClasses: Record<string, string> = {
 }
 
 const sizeClasses: Record<string, string> = {
-  sm: 'px-2 py-0.5 text-[0.7rem]',
+  // 字級走變數：後台（`.admin-shell`）把它調大，前台維持原樣
+  sm: 'px-2 py-0.5 text-[length:var(--badge-sm-text,0.7rem)]',
   md: 'px-2.5 py-1 text-xs',
 }
 </script>

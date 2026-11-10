@@ -90,11 +90,11 @@ const roster = computed(() => players.value ?? [])
  * 「錄影管理」。
  */
 const tabs = [
-  { key: 'basic', label: '基本資料', icon: '📋' },
-  { key: 'attendance', label: '出席統計', icon: '🙋' },
-  { key: 'lineup', label: '打線', icon: '🧢' },
-  { key: 'innings', label: '逐局紀錄', icon: '⚾' },
-  { key: 'video', label: '錄影管理', icon: '🎬' },
+  { key: 'basic', label: '基本資料', icon: 'clipboard' },
+  { key: 'attendance', label: '出席統計', icon: 'user-check' },
+  { key: 'lineup', label: '打線', icon: 'list-ordered' },
+  { key: 'innings', label: '逐局紀錄', icon: 'baseball' },
+  { key: 'video', label: '錄影管理', icon: 'clapperboard' },
 ] as const
 type TabKey = (typeof tabs)[number]['key']
 
@@ -481,7 +481,8 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
 
 <template>
   <div>
-    <UiBaseEmpty v-if="error" title="找不到這場比賽" icon="🔍">
+    <UiBaseEmpty v-if="error" title="找不到這場比賽">
+      <template #icon><AdminIcon name="search" class="size-8" /></template>
       <UiBaseButton variant="secondary" @click="navigateTo('/admin/games')">回到列表</UiBaseButton>
     </UiBaseEmpty>
 
@@ -761,7 +762,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             :to="`/admin/record/${game.id}`"
             class="surface-card flex items-center gap-3 p-4 transition hover:border-brand-600"
           >
-            <span class="text-2xl" aria-hidden="true">📹</span>
+            <AdminIcon name="video" class="size-7 text-brand-600 dark:text-brand-300" />
             <span class="min-w-0">
               <span class="block font-bold">現場錄影</span>
               <span class="block text-fluid-sm text-content-muted">
@@ -774,7 +775,7 @@ useHead({ title: () => (game.value ? `編輯：vs ${game.value.opponent}` : '編
             :to="`/admin/upload/${game.id}`"
             class="surface-card flex items-center gap-3 p-4 transition hover:border-brand-600"
           >
-            <span class="text-2xl" aria-hidden="true">⬆️</span>
+            <AdminIcon name="upload" class="size-7 text-brand-600 dark:text-brand-300" />
             <span class="min-w-0">
               <span class="block font-bold">上傳影片檔</span>
               <span class="block text-fluid-sm text-content-muted">

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AdminIconName } from '~/components/admin/AdminIcon.vue'
+
 /**
  * 後台版面。
  *
@@ -7,6 +9,16 @@
  *
  * ⚠️ 這裡的登入判斷（以及 `middleware/auth`）都只是**體驗**。
  * 真正的權限檢查在 BFF 的 `requireUser()`，每一支 `/api/admin/**` 都有。
+ *
+ * ## 字體與 `admin-shell`（根節點上的兩個 class）
+ * `font-sans`：後台不用全站預設的窄黑體 Oswald（`--font-display`）。
+ * 窄黑體適合被掃過的標籤與比數，後台卻是一整頁要逐字確認的表格與表單；
+ * 而且 Oswald **沒有等寬數字**（見 CLAUDE.md「字體」），表格裡的日期、背號、
+ * 比數排成一欄時對不齊。系統黑體有 tabular figures，`tabular-nums` 才有作用。
+ * 寫在後台版面的根節點上，所以前台完全不受影響。
+ *
+ * `admin-shell` 給共用元件一個「現在在後台」的鉤子（目前只有 badge 的字級），
+ * 同一個理由：調後台的密度不能連帶改到前台。
  */
 const { displayName, logout } = useAuth()
 const { isDark, toggle: toggleTheme } = useTheme()
@@ -20,15 +32,15 @@ watch(
   () => (mobileMenuOpen.value = false),
 )
 
-const links = [
-  { to: '/admin', label: '總覽', icon: '📊', exact: true },
-  { to: '/admin/games', label: '賽事管理', icon: '⚾' },
-  { to: '/admin/players', label: '球員名單', icon: '🧢' },
-  { to: '/admin/announcements', label: '公告', icon: '📣' },
-  { to: '/admin/push', label: '推播通知', icon: '🔔' },
+const links: { to: string; label: string; icon: AdminIconName; exact?: boolean }[] = [
+  { to: '/admin', label: '總覽', icon: 'dashboard', exact: true },
+  { to: '/admin/games', label: '賽事管理', icon: 'baseball' },
+  { to: '/admin/players', label: '球員名單', icon: 'users' },
+  { to: '/admin/announcements', label: '公告', icon: 'megaphone' },
+  { to: '/admin/push', label: '推播通知', icon: 'bell' },
   // 限期活動「預測世界大賽冠軍」。拆掉時刪這一行就好（見 docs/ws-bracket.md）
-  { to: '/admin/ws-bracket', label: '冠軍預測', icon: '🏆' },
-  { to: '/admin/settings', label: '網站設定', icon: '⚙️' },
+  { to: '/admin/ws-bracket', label: '冠軍預測', icon: 'trophy' },
+  { to: '/admin/settings', label: '網站設定', icon: 'settings' },
 ]
 
 /**
@@ -43,7 +55,7 @@ function isActive(link: (typeof links)[number]): boolean {
 </script>
 
 <template>
-  <div class="min-h-screen bg-surface-muted text-content">
+  <div class="admin-shell min-h-screen bg-surface-muted font-sans text-content">
     <div class="mx-auto flex max-w-[100rem] flex-col md:flex-row">
       <!--
         ── 側邊導覽 ───────────────────────────────────────────
@@ -78,7 +90,7 @@ function isActive(link: (typeof links)[number]): boolean {
               class="flex size-8 items-center justify-center rounded-lg bg-brand-600 text-white"
               aria-hidden="true"
             >
-              ⚾
+              <AdminIcon name="baseball" class="size-5" />
             </span>
             <span class="min-w-0">
               <span class="block truncate text-fluid-sm font-bold">
@@ -142,7 +154,7 @@ function isActive(link: (typeof links)[number]): boolean {
                   : 'text-content-muted hover:bg-surface-muted hover:text-content'
               "
             >
-              <span aria-hidden="true">{{ link.icon }}</span>
+              <AdminIcon :name="link.icon" class="size-5" />
               {{ link.label }}
             </NuxtLink>
 
@@ -152,7 +164,7 @@ function isActive(link: (typeof links)[number]): boolean {
               to="/"
               class="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-fluid-sm text-content-muted transition hover:bg-surface-muted"
             >
-              <span aria-hidden="true">🏠</span>
+              <AdminIcon name="home" class="size-5" />
               回到前台
             </NuxtLink>
 
@@ -161,7 +173,7 @@ function isActive(link: (typeof links)[number]): boolean {
               class="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-left text-fluid-sm text-content-muted transition hover:bg-surface-muted"
               @click="toggleTheme"
             >
-              <span aria-hidden="true">{{ isDark ? '🌙' : '☀️' }}</span>
+              <AdminIcon :name="isDark ? 'moon' : 'sun'" class="size-5" />
               {{ isDark ? '深色模式' : '亮色模式' }}
             </button>
 
@@ -172,7 +184,7 @@ function isActive(link: (typeof links)[number]): boolean {
                 class="mt-1 flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-left text-fluid-sm text-content-muted transition hover:bg-surface-muted"
                 @click="logout()"
               >
-                <span aria-hidden="true">🚪</span>
+                <AdminIcon name="logout" class="size-5" />
                 登出
               </button>
             </div>

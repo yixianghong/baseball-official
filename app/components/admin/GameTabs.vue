@@ -1,4 +1,6 @@
 <script setup lang="ts" generic="T extends string">
+import type { AdminIconName } from '~/components/admin/AdminIcon.vue'
+
 /**
  * 單場比賽後台的分頁列，**固定在畫面底部**。
  *
@@ -27,7 +29,7 @@
  * toast 的內距自己加上去（見 `UiToastHost`）。
  */
 defineProps<{
-  tabs: ReadonlyArray<{ key: T; label: string; icon: string }>
+  tabs: ReadonlyArray<{ key: T; label: string; icon: AdminIconName }>
 }>()
 
 const model = defineModel<T>({ required: true })
@@ -65,7 +67,7 @@ onBeforeUnmount(() => document.documentElement.style.removeProperty('--bottom-ba
             role="tab"
             :aria-selected="model === tab.key"
             :aria-label="tab.label"
-            class="flex flex-1 flex-col items-center justify-center gap-0.5 border-t-2 transition"
+            class="flex flex-1 flex-col items-center justify-center gap-1 border-t-2 transition"
             :class="
               model === tab.key
                 ? 'border-brand-600 text-brand-600 dark:text-brand-300'
@@ -73,8 +75,8 @@ onBeforeUnmount(() => document.documentElement.style.removeProperty('--bottom-ba
             "
             @click="model = tab.key"
           >
-            <span class="text-xl leading-none" aria-hidden="true">{{ tab.icon }}</span>
-            <span class="text-[0.625rem] leading-none font-medium">{{ tab.label }}</span>
+            <AdminIcon :name="tab.icon" class="size-5" />
+            <span class="text-xs leading-none font-medium">{{ tab.label }}</span>
           </button>
         </div>
       </nav>

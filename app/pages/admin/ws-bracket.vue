@@ -111,8 +111,11 @@ useHead({ title: '冠軍預測鎖盤' })
           <p class="text-fluid-sm text-content-muted">目前狀態</p>
           <p class="mt-1 text-fluid-lg font-bold">
             <template v-if="!ready">連線中…</template>
-            <template v-else-if="locked">🔒 已鎖盤</template>
-            <template v-else-if="lockAt">⏳ 尚未鎖盤</template>
+            <span v-else-if="locked" class="inline-flex items-center gap-1.5">
+              <AdminIcon name="lock" />
+              已鎖盤
+            </span>
+            <template v-else-if="lockAt">尚未鎖盤</template>
             <template v-else>開放下注</template>
           </p>
           <p v-if="lockAt" class="mt-1 text-fluid-sm text-content-muted">{{ lockLabel }}</p>

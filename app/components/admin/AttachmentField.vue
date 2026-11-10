@@ -85,11 +85,11 @@ function remove(index: number) {
           v-if="isImageAttachment(attachment.contentType)"
           :src="attachment.url"
           alt=""
-          class="size-9 shrink-0 rounded bg-surface-muted object-contain"
+          class="size-9 shrink-0 rounded-lg bg-surface-muted object-contain"
         />
         <span
           v-else
-          class="flex size-9 shrink-0 items-center justify-center rounded bg-surface text-fluid-base"
+          class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface text-fluid-base"
           aria-hidden="true"
         >
           {{ attachmentType(attachment.contentType).icon }}
@@ -109,7 +109,7 @@ function remove(index: number) {
           :aria-label="`移除 ${attachment.name}`"
           @click="remove(index)"
         >
-          ✕
+          <AdminIcon name="x" class="size-4" />
         </UiBaseButton>
       </li>
     </ul>

@@ -12,7 +12,14 @@ defineProps<{ title: string; description?: string; icon?: string }>()
   <div
     class="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-12 text-center"
   >
-    <span v-if="icon" class="text-3xl" aria-hidden="true">{{ icon }}</span>
+    <!--
+      `#icon` 插槽給後台放 `AdminIcon`（線條圖示）。前台照舊傳 `icon` 字串，
+      兩條路並存，所以後台換掉 emoji 不會動到前台的任何一個空狀態。
+    -->
+    <span v-if="$slots.icon" class="text-content-muted" aria-hidden="true">
+      <slot name="icon" />
+    </span>
+    <span v-else-if="icon" class="text-3xl" aria-hidden="true">{{ icon }}</span>
     <p class="font-medium">{{ title }}</p>
     <p v-if="description" class="max-w-md text-fluid-sm text-content-muted">{{ description }}</p>
     <div class="mt-2">

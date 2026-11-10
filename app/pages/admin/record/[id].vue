@@ -375,7 +375,8 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
       padding-right: env(safe-area-inset-right);
     "
   >
-    <UiBaseEmpty v-if="loadError" title="找不到這場比賽" icon="🔍" class="px-4 py-10">
+    <UiBaseEmpty v-if="loadError" title="找不到這場比賽" class="px-4 py-10">
+      <template #icon><AdminIcon name="search" class="size-8" /></template>
       <UiBaseButton variant="secondary" @click="navigateTo('/admin/games')">
         回到賽事列表
       </UiBaseButton>
@@ -443,7 +444,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
             -->
             <p
               v-if="recorder.resolution.value"
-              class="absolute right-3 bottom-3 rounded bg-black/60 px-2 py-0.5 text-xs tabular-nums"
+              class="absolute right-3 bottom-3 rounded-lg bg-black/60 px-2 py-0.5 text-xs tabular-nums"
             >
               {{ recorder.resolution.value }}
             </p>
@@ -491,7 +492,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                 id="camera"
                 :value="recorder.selectedCameraId.value"
                 :disabled="recorder.recording.value"
-                class="min-h-12 w-full rounded-xl border border-white/20 bg-white/10 px-3 text-white disabled:opacity-50"
+                class="min-h-12 w-full rounded-lg border border-white/20 bg-white/10 px-3 text-white disabled:opacity-50"
                 @change="onCameraChange(($event.target as HTMLSelectElement).value)"
               >
                 <option
@@ -521,7 +522,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                     :key="n"
                     type="button"
                     :disabled="recorder.recording.value"
-                    class="min-h-11 min-w-11 flex-1 rounded-xl border px-3 font-bold tabular-nums transition disabled:opacity-40"
+                    class="min-h-11 min-w-11 flex-1 rounded-lg border px-3 font-bold tabular-nums transition disabled:opacity-40"
                     :class="
                       inning === n
                         ? 'border-accent-400 bg-accent-500 text-ink-deep'
@@ -549,7 +550,7 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
                     :key="option"
                     type="button"
                     :disabled="recorder.recording.value"
-                    class="min-h-12 rounded-xl border font-bold transition disabled:opacity-40"
+                    class="min-h-12 rounded-lg border font-bold transition disabled:opacity-40"
                     :class="
                       half === option
                         ? 'border-accent-400 bg-accent-500 text-ink-deep'
@@ -653,7 +654,9 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
 
                   <!-- 之前就傳上去的：前台看不看得到取決於可見度 -->
                   <p v-if="row.kind === 'uploaded'" class="mt-1 text-xs">
-                    <span class="text-success">✓ 已上傳</span>
+                    <span class="inline-flex items-center gap-1 text-success">
+                      <AdminIcon name="check" class="size-3.5" />已上傳
+                    </span>
                     <span class="text-white/50">
                       ・{{
                         row.privacy === 'private'
@@ -667,7 +670,12 @@ useHead({ title: () => (game.value ? `錄影：vs ${game.value.opponent}` : '錄
 
                   <template v-else>
                     <div class="mt-1 flex items-center justify-between gap-3 text-xs">
-                      <span v-if="row.item.state === 'done'" class="text-success">✓ 已上傳</span>
+                      <span
+                        v-if="row.item.state === 'done'"
+                        class="inline-flex items-center gap-1 text-success"
+                      >
+                        <AdminIcon name="check" class="size-3.5" />已上傳
+                      </span>
                       <span v-else-if="row.item.state === 'uploading'" class="text-white/70">
                         上傳中 {{ row.item.progress }}%
                       </span>

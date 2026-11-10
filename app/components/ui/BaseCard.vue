@@ -6,9 +6,11 @@ withDefaults(defineProps<{ title?: string; padded?: boolean }>(), { padded: true
 </script>
 
 <template>
-  <article
-    class="rounded-xl border border-border bg-surface-raised transition hover:border-brand-300"
-  >
+  <!--
+    不加 hover 效果：這是一個容器，本身不能點。邊框一變色就是在說「點我」，
+    而點下去什麼都不會發生。要做成可以點的卡片，hover 寫在那個連結上。
+  -->
+  <article class="rounded-xl border border-border bg-surface-raised">
     <header v-if="title || $slots.header" class="border-b border-border px-5 py-4">
       <slot name="header">
         <h2 class="text-fluid-lg font-semibold">{{ title }}</h2>

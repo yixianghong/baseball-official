@@ -117,7 +117,7 @@ function onKeydown(event: KeyboardEvent) {
           v-for="tool in tools"
           :key="tool.label"
           type="button"
-          class="min-h-8 rounded px-2 text-xs font-medium transition hover:bg-surface-raised disabled:opacity-40"
+          class="min-h-8 rounded-lg px-2 text-xs font-medium transition hover:bg-surface-raised disabled:opacity-40"
           :class="tool.label === '粗體' ? 'font-bold' : ''"
           :title="tool.title"
           :aria-label="tool.title"
@@ -136,7 +136,7 @@ function onKeydown(event: KeyboardEvent) {
             ]"
             :key="tab.value"
             type="button"
-            class="min-h-8 rounded px-2.5 text-xs font-medium transition"
+            class="min-h-8 rounded-lg px-2.5 text-xs font-medium transition"
             :class="
               mode === tab.value
                 ? 'bg-brand-600 text-white'

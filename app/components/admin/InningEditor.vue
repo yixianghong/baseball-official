@@ -868,7 +868,7 @@ function suggestionText(item: Suggestion): string {
             type="button"
             role="tab"
             :aria-selected="cell.key === selectedKey"
-            class="min-h-14 shrink-0 rounded-xl border px-3 text-center transition"
+            class="min-h-14 shrink-0 rounded-lg border px-3 text-center transition"
             :class="cellClass(cell)"
             @click="selectedKey = cell.key"
           >
@@ -878,7 +878,14 @@ function suggestionText(item: Suggestion): string {
             <span class="block text-fluid-sm font-bold whitespace-nowrap">
               <!-- 還沒登錄的半局顯示 — 而不是 0：那兩者意思完全不同 -->
               {{ cell.status === 'empty' ? '—' : cell.runs }}
-              <span v-if="cell.hasClip" aria-label="有影片">🎬</span>
+              <span
+                v-if="cell.hasClip"
+                role="img"
+                aria-label="有影片"
+                class="inline-flex align-[-0.15em]"
+              >
+                <AdminIcon name="clapperboard" class="size-3.5" />
+              </span>
             </span>
           </button>
         </div>
@@ -891,7 +898,7 @@ function suggestionText(item: Suggestion): string {
     </div>
 
     <!-- ══ 選到的半局 ══════════════════════════════════════════ -->
-    <section class="space-y-4 rounded-2xl border border-border bg-surface p-4">
+    <section class="space-y-4 rounded-xl border border-border bg-surface p-4">
       <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h3 class="text-fluid-lg font-bold">
           {{ halfInningLabel(selected.inning, selected.half) }}
@@ -901,7 +908,11 @@ function suggestionText(item: Suggestion): string {
         </h3>
         <p class="text-fluid-sm tabular-nums text-content-muted">
           {{ selected.runs }} 分 · {{ selected.outs }}／3 出局
-          <span v-if="selected.status === 'complete'" class="ml-1 text-brand-600">✓</span>
+          <AdminIcon
+            v-if="selected.status === 'complete'"
+            name="check"
+            class="ml-1 inline size-4 align-[-0.2em] text-brand-600"
+          />
         </p>
       </div>
 
@@ -991,7 +1002,7 @@ function suggestionText(item: Suggestion): string {
             <button
               v-if="!rowsLocked && !(NO_LANDING_RESULTS as readonly string[]).includes(play.result)"
               type="button"
-              class="min-h-8 shrink-0 rounded px-1 text-xs text-content-muted underline underline-offset-4 hover:text-brand-600"
+              class="min-h-8 shrink-0 rounded-lg px-1 text-xs text-content-muted underline underline-offset-4 hover:text-brand-600"
               @click.stop="startRelocate(index)"
             >
               {{ play.location ? '改落點' : '補落點' }}
@@ -999,11 +1010,11 @@ function suggestionText(item: Suggestion): string {
             <button
               v-if="!rowsLocked"
               type="button"
-              class="min-h-8 shrink-0 rounded px-2 text-content-muted hover:text-danger"
+              class="min-h-8 shrink-0 rounded-lg px-2 text-content-muted hover:text-danger"
               :aria-label="`移除第 ${index + 1} 個打席`"
               @click.stop="removeAt(index)"
             >
-              ✕
+              <AdminIcon name="x" class="size-4" />
             </button>
           </div>
 
@@ -1026,7 +1037,7 @@ function suggestionText(item: Suggestion): string {
               <button
                 v-if="!rowsLocked"
                 type="button"
-                class="size-8 rounded border border-border bg-surface text-fluid-sm disabled:opacity-30"
+                class="size-8 rounded-lg border border-border bg-surface text-fluid-sm disabled:opacity-30"
                 :disabled="!canStep(play, field, -1)"
                 :aria-label="`${field === 'runs' ? '得分' : '打點'}減一`"
                 @click="step(index, field, -1)"
@@ -1042,7 +1053,7 @@ function suggestionText(item: Suggestion): string {
               <button
                 v-if="!rowsLocked"
                 type="button"
-                class="size-8 rounded border border-border bg-surface text-fluid-sm disabled:opacity-30"
+                class="size-8 rounded-lg border border-border bg-surface text-fluid-sm disabled:opacity-30"
                 :disabled="!canStep(play, field, 1)"
                 :aria-label="`${field === 'runs' ? '得分' : '打點'}加一`"
                 @click="step(index, field, 1)"
@@ -1074,7 +1085,8 @@ function suggestionText(item: Suggestion): string {
             :loading="describing"
             @click="generateNarrative"
           >
-            ✨ 產生這半局的敘述
+            <AdminIcon name="sparkles" />
+            產生這半局的敘述
           </UiBaseButton>
           <span v-if="narrative" class="text-xs text-content-muted">
             AI 產生的草稿，貼出去之前請看過一遍
@@ -1112,7 +1124,10 @@ function suggestionText(item: Suggestion): string {
         role="status"
       >
         <p v-if="!editUnlocked" class="min-w-0 flex-1 text-brand-700 dark:text-brand-300">
-          ✓ 這個半局已經三出局，登錄已鎖住。
+          <AdminIcon
+            name="lock"
+            class="mr-1 inline size-4 align-[-0.15em]"
+          />這個半局已經三出局，登錄已鎖住。
         </p>
         <p v-else class="min-w-0 flex-1 text-warning">
           解鎖中：可以修改或刪除這個半局的打席，但不能再新增（已經三出局）。
@@ -1241,7 +1256,9 @@ function suggestionText(item: Suggestion): string {
             role="status"
             aria-live="polite"
           >
-            <template v-if="justAdded">✓ {{ justAdded }}</template>
+            <template v-if="justAdded">
+              <AdminIcon name="check" class="mr-1 inline size-4 align-[-0.15em]" />{{ justAdded }}
+            </template>
           </p>
 
           <!--
@@ -1320,7 +1337,7 @@ function suggestionText(item: Suggestion): string {
           <div class="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              class="min-h-12 rounded-full border px-5 text-fluid-sm font-bold transition select-none"
+              class="inline-flex min-h-12 items-center gap-2 rounded-full border px-5 text-fluid-sm font-bold transition select-none"
               :class="
                 voice.status.value === 'recording'
                   ? 'border-danger bg-danger text-white'
@@ -1329,12 +1346,13 @@ function suggestionText(item: Suggestion): string {
               :disabled="voice.status.value === 'parsing'"
               @click="toggleVoice"
             >
+              <AdminIcon v-if="voice.status.value === 'idle'" name="mic" />
               {{
                 voice.status.value === 'recording'
-                  ? `⏹ 停止並辨識 ${elapsedLabel}`
+                  ? `停止並辨識 ${elapsedLabel}`
                   : voice.status.value === 'parsing'
                     ? '辨識中…'
-                    : '🎤 開始錄音'
+                    : '開始錄音'
               }}
             </button>
             <!--
@@ -1356,7 +1374,8 @@ function suggestionText(item: Suggestion): string {
               :disabled="voice.status.value !== 'idle'"
               @click="audioInput?.click()"
             >
-              📁 上傳錄音檔
+              <AdminIcon name="folder" />
+              上傳錄音檔
             </UiBaseButton>
 
             <span class="text-xs text-content-muted">
@@ -1409,11 +1428,11 @@ function suggestionText(item: Suggestion): string {
                 </UiBaseBadge>
                 <button
                   type="button"
-                  class="ml-auto min-h-8 rounded px-2 text-content-muted hover:text-danger"
+                  class="ml-auto min-h-8 rounded-lg px-2 text-content-muted hover:text-danger"
                   :aria-label="`不要這一筆：${item.sourceText || suggestionText(item)}`"
                   @click="dropSuggestion(index)"
                 >
-                  ✕
+                  <AdminIcon name="x" class="size-4" />
                 </button>
               </li>
             </ul>

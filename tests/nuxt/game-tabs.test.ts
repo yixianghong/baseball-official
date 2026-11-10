@@ -12,8 +12,8 @@ import GameTabs from '../../app/components/admin/GameTabs.vue'
  */
 
 const tabs = [
-  { key: 'basic', label: '基本資料', icon: '📋' },
-  { key: 'video', label: '錄影管理', icon: '🎬' },
+  { key: 'basic', label: '基本資料', icon: 'clipboard' },
+  { key: 'video', label: '錄影管理', icon: 'clapperboard' },
 ] as const
 
 describe('AdminGameTabs', () => {
@@ -25,7 +25,8 @@ describe('AdminGameTabs', () => {
     const buttons = component.findAll('[role="tab"]')
     expect(buttons).toHaveLength(2)
     expect(buttons[0]!.text()).toContain('基本資料')
-    expect(buttons[0]!.text()).toContain('📋')
+    // 圖示是 SVG（`AdminIcon`），不是 emoji —— 選中時要跟著 currentColor 變色
+    expect(buttons[0]!.find('svg').exists()).toBe(true)
     expect(buttons[0]!.attributes('aria-selected')).toBe('false')
     expect(buttons[1]!.attributes('aria-selected')).toBe('true')
   })

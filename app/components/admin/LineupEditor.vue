@@ -304,8 +304,9 @@ function fillFromRoster() {
       v-if="!model.length"
       title="尚未安排打線"
       description="按「新增棒次」逐棒安排，或直接用名單前九人帶入後再調整。"
-      icon="📋"
-    />
+    >
+      <template #icon><AdminIcon name="list-ordered" class="size-8" /></template>
+    </UiBaseEmpty>
 
     <ul v-else class="space-y-2">
       <li
@@ -376,7 +377,7 @@ function fillFromRoster() {
             ↓
           </UiBaseButton>
           <UiBaseButton variant="ghost" size="sm" aria-label="移除" @click="removeEntry(index)">
-            ✕
+            <AdminIcon name="x" class="size-4" />
           </UiBaseButton>
         </div>
       </li>

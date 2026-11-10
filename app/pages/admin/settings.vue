@@ -80,7 +80,7 @@ useHead({ title: '網站設定' })
       class="mb-4 rounded-lg bg-success/10 px-4 py-2 text-fluid-sm text-success"
       role="status"
     >
-      ✓ {{ savedMessage }}
+      <AdminIcon name="check" class="mr-1 inline size-4 align-[-0.15em]" />{{ savedMessage }}
     </p>
 
     <form class="max-w-2xl space-y-8" @submit.prevent="submit">
@@ -195,7 +195,7 @@ useHead({ title: '網站設定' })
               aria-label="移除連結"
               @click="form.socialLinks = form.socialLinks.filter((_, i) => i !== index)"
             >
-              ✕
+              <AdminIcon name="x" class="size-4" />
             </UiBaseButton>
           </div>
         </div>

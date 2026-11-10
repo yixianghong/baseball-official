@@ -104,7 +104,7 @@ function chooseTemporary(): void {
               <span class="truncate font-bold">{{ label(slot.current) }}</span>
               <span
                 v-if="slot.substituted"
-                class="shrink-0 rounded px-1 text-xs"
+                class="shrink-0 rounded-lg px-1 text-xs"
                 :class="slot.slot === selectedSlot ? 'bg-white/20' : 'bg-warning/15 text-warning'"
               >
                 代
@@ -120,7 +120,7 @@ function chooseTemporary(): void {
             <button
               v-if="pinch"
               type="button"
-              class="min-h-9 shrink-0 rounded-md bg-white/20 px-2 text-xs font-bold"
+              class="min-h-9 shrink-0 rounded-lg bg-white/20 px-2 text-xs font-bold"
               @click="pinch = null"
             >
               取消代打
@@ -128,7 +128,7 @@ function chooseTemporary(): void {
             <button
               v-else
               type="button"
-              class="min-h-9 shrink-0 rounded-md bg-white/20 px-2 text-xs font-bold"
+              class="min-h-9 shrink-0 rounded-lg bg-white/20 px-2 text-xs font-bold"
               :aria-expanded="picking"
               @click="picking = !picking"
             >

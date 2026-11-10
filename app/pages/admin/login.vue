@@ -45,21 +45,21 @@ useHead({ title: '後台登入' })
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center px-4 py-12">
+  <div class="admin-shell flex min-h-screen items-center justify-center px-4 py-12 font-sans">
     <div class="w-full max-w-sm">
       <div class="mb-8 text-center">
         <span
-          class="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-ink text-2xl font-black text-accent-400"
+          class="mx-auto mb-4 flex size-14 items-center justify-center rounded-xl bg-ink text-accent-400"
           aria-hidden="true"
         >
-          ⚾
+          <AdminIcon name="baseball" class="size-7" />
         </span>
         <h1 class="text-fluid-xl font-bold">{{ settings?.teamName || config.public.appName }}</h1>
         <p class="mt-1 text-fluid-sm text-content-muted">後台管理登入</p>
       </div>
 
       <form
-        class="space-y-4 rounded-2xl border border-border bg-surface-raised p-6"
+        class="space-y-4 rounded-xl border border-border bg-surface-raised p-6"
         @submit.prevent="submit"
       >
         <UiBaseInput

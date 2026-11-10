@@ -108,7 +108,10 @@ useHead({ title: '後台總覽' })
           to="/admin/games/new"
           class="rounded-xl border border-border bg-surface p-5 transition hover:border-brand-400"
         >
-          <p class="font-medium">📷 用賽程圖新增比賽</p>
+          <p class="flex items-center gap-2 font-medium">
+            <AdminIcon name="camera" class="size-5 text-brand-600 dark:text-brand-300" />
+            用賽程圖新增比賽
+          </p>
           <p class="mt-1 text-fluid-sm text-content-muted">
             上傳官方賽程公告圖，自動辨識出我隊的場次。
           </p>
@@ -118,7 +121,10 @@ useHead({ title: '後台總覽' })
           to="/admin/players"
           class="rounded-xl border border-border bg-surface p-5 transition hover:border-brand-400"
         >
-          <p class="font-medium">🧢 管理球員名單</p>
+          <p class="flex items-center gap-2 font-medium">
+            <AdminIcon name="users" class="size-5 text-brand-600 dark:text-brand-300" />
+            管理球員名單
+          </p>
           <p class="mt-1 text-fluid-sm text-content-muted">新增隊員、更新背號與守備位置。</p>
         </NuxtLink>
 
@@ -126,7 +132,10 @@ useHead({ title: '後台總覽' })
           to="/admin/announcements"
           class="rounded-xl border border-border bg-surface p-5 transition hover:border-brand-400"
         >
-          <p class="font-medium">📣 發布公告</p>
+          <p class="flex items-center gap-2 font-medium">
+            <AdminIcon name="megaphone" class="size-5 text-brand-600 dark:text-brand-300" />
+            發布公告
+          </p>
           <p class="mt-1 text-fluid-sm text-content-muted">
             {{ draftCount ? `有 ${draftCount} 則草稿尚未發布。` : '通知隊員練習與賽事異動。' }}
           </p>

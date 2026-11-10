@@ -17,7 +17,7 @@ const { count, progress, gameId } = useClipUploadStatus()
     :to="gameId ? `/admin/upload/${gameId}` : '/admin/games'"
     class="flex min-h-11 w-full items-center gap-2.5 rounded-lg bg-brand-600/10 px-3 text-fluid-sm text-brand-700 transition hover:bg-brand-600/20 md:w-auto dark:text-brand-300"
   >
-    <span aria-hidden="true">⬆️</span>
+    <AdminIcon name="upload" class="size-5" />
     <span class="min-w-0 flex-1">
       上傳中 {{ count }} 個
       <span class="tabular-nums">（{{ progress }}%）</span>

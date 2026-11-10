@@ -152,12 +152,8 @@ useHead({ title: '公告管理' })
           </li>
         </ul>
 
-        <UiBaseEmpty
-          v-else
-          title="還沒有公告"
-          description="發布第一則公告，讓隊員知道最新消息。"
-          icon="📣"
-        >
+        <UiBaseEmpty v-else title="還沒有公告" description="發布第一則公告，讓隊員知道最新消息。">
+          <template #icon><AdminIcon name="megaphone" class="size-8" /></template>
           <UiBaseButton @click="startCreate">新增公告</UiBaseButton>
         </UiBaseEmpty>
       </div>
